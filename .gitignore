@@ -1,0 +1,12 @@
+.gradle/
+.idea/
+build/
+*.apk
+*.aab
+*.iml
+local.properties
+*.jks
+.env
+*.zip
+apk_contents/
+apk_contents_new/

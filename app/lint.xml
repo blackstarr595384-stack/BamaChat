@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Toolchain-bound: newer versions require AGP 8.9.1+ / compileSdk 36. -->
+    <issue id="GradleDependency" severity="ignore" />
+
+    <!-- Emitted by external lint checks compiled against a newer lint API. -->
+    <issue id="ObsoleteLintCustomCheck" severity="ignore" />
+
+    <!-- Adaptive icons are intentionally kept in -v26 resources. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>
