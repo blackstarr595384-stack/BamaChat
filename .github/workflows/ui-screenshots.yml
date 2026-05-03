@@ -43,6 +43,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -skip-adb-auth -no-metrics
           script: |
+            chmod +x ./gradlew
             ./gradlew app:assembleDebug app:assembleDebugAndroidTest
             adb shell rm -rf /sdcard/Download/bamachat-screenshots || true
             ./gradlew app:connectedDebugAndroidTest \
