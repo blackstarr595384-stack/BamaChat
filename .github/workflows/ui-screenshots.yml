@@ -1,0 +1,52 @@
+name: UI Screenshots
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app/src/**"
+      - ".github/workflows/ui-screenshots.yml"
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run screenshot instrumentation test
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            ./gradlew app:assembleDebug app:assembleDebugAndroidTest
+            adb shell rm -rf /sdcard/Download/bamachat-screenshots || true
+            ./gradlew app:connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class=com.example.bamachat.AppScreenshotCaptureTest
+            mkdir -p artifacts
+            adb pull /sdcard/Download/bamachat-screenshots artifacts/screenshots
+
+      - name: Upload screenshots artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: artifacts/screenshots
+          if-no-files-found: warn
+
