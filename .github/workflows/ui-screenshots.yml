@@ -28,12 +28,13 @@ jobs:
       - name: Run screenshot instrumentation test
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           arch: x86_64
           target: google_apis
-          profile: pixel_6
+          profile: pixel_5
+          emulator-boot-timeout: 900
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             ./gradlew app:assembleDebug app:assembleDebugAndroidTest
             adb shell rm -rf /sdcard/Download/bamachat-screenshots || true
@@ -49,4 +50,3 @@ jobs:
           name: ui-screenshots
           path: artifacts/screenshots
           if-no-files-found: warn
-
