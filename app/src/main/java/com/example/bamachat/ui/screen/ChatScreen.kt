@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -918,6 +919,8 @@ private fun ChatContent(
                     onMicClick = onMicClick,
                     themeColor = themeColor,
                     surfaceColor = personaMood.cardSurface,
+                    providerLabel = aiProvider,
+                    personaLabel = selectedPersona.displayName,
                     isLoading = isLoading,
                     designTokens = designTokens
                 )
@@ -974,16 +977,24 @@ private fun ChatInputBar(
     onMicClick: () -> Unit,
     themeColor: Color,
     surfaceColor: Color,
+    providerLabel: String,
+    personaLabel: String,
     isLoading: Boolean,
     designTokens: ChatDesignTokens
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = surfaceColor.copy(alpha = designTokens.bubbleSurfaceAlpha),
-        shadowElevation = 24.dp,
+        color = surfaceColor.copy(alpha = 0.55f),
+        shadowElevation = 16.dp,
         shape = RoundedCornerShape(topStart = designTokens.inputCornerRadius, topEnd = designTokens.inputCornerRadius)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp)
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
             // Image Preview
             if (selectedImageUri != null) {
                 Row(
@@ -1013,114 +1024,136 @@ private fun ChatInputBar(
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-                    .navigationBarsPadding()
-                    .imePadding(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF1D212A),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
             ) {
-            // Mic Button
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(if (isListening) themeColor.copy(alpha = 0.25f) else surfaceColor.copy(alpha = 0.92f))
-                    .clickable { onMicClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                if (isListening) VoiceVisualizer(themeColor)
-                else Icon(Icons.Default.Mic, "Diktieren", tint = Color.White.copy(alpha = 0.7f))
-            }
-
-            // Upload Button
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(surfaceColor.copy(alpha = 0.92f))
-                    .clickable { onUpload() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.AttachFile, "Hochladen", tint = Color.White.copy(alpha = 0.7f))
-            }
-
-            // Image Gen Button
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(CircleShape)
-                    .background(surfaceColor.copy(alpha = 0.92f))
-                    .clickable { onImageGen() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.AutoFixHigh, "Bild generieren", tint = themeColor.copy(alpha = 0.85f))
-            }
-
-            // Text Field
-            TextField(
-                value = inputText,
-                onValueChange = onInputChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Schreib was...", color = Color.White.copy(alpha = 0.4f)) },
-                shape = RoundedCornerShape((designTokens.inputCornerRadius - 6.dp).coerceAtLeast(10.dp)),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = surfaceColor.copy(alpha = 0.95f),
-                    unfocusedContainerColor = surfaceColor.copy(alpha = 0.9f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = themeColor
-                ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
-                maxLines = 5
-            )
-
-            // Send Button (Animated)
-            val canSend = inputText.isNotBlank() && !isLoading
-            val sendScale by animateFloatAsState(
-                targetValue = if (canSend) 1f else 0.85f,
-                animationSpec = spring(dampingRatio = 0.5f), label = "sendScale"
-            )
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .shadow(
-                        elevation = if (canSend) 12.dp else 0.dp,
-                        shape = CircleShape,
-                        spotColor = themeColor
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                ) {
+                    TextField(
+                        value = inputText,
+                        onValueChange = onInputChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = {
+                            Text(
+                                "Type a message... (@ for files)",
+                                color = Color.White.copy(alpha = 0.38f)
+                            )
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = themeColor
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { onSend() }),
+                        maxLines = 6
                     )
-                    .clip(CircleShape)
-                    .background(
-                        if (canSend) Brush.horizontalGradient(listOf(themeColor, themeColor.copy(alpha = 0.7f)))
-                        else Brush.horizontalGradient(listOf(Color(0xFF35383D), Color(0xFF35383D)))
-                    )
-                    .clickable(enabled = canSend) { onSend() },
-                contentAlignment = Alignment.Center
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = Color.White
-                    )
-                } else {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        "Senden",
-                        tint = Color.White,
-                        modifier = Modifier.size((22 * sendScale).dp)
-                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .clickable { onUpload() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Add, "Anhang", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .clickable { onImageGen() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.AutoFixHigh, "Bild generieren", tint = themeColor.copy(alpha = 0.9f), modifier = Modifier.size(15.dp))
+                            }
+                            Text(
+                                text = providerLabel,
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text("·", color = Color.White.copy(alpha = 0.35f), fontSize = 12.sp)
+                            Text(
+                                text = personaLabel,
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(if (isListening) themeColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.08f))
+                                .clickable { onMicClick() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isListening) VoiceVisualizer(themeColor)
+                            else Icon(Icons.Default.Mic, "Diktieren", tint = Color.White.copy(alpha = 0.72f), modifier = Modifier.size(17.dp))
+                        }
+
+                        val canSend = inputText.isNotBlank() && !isLoading
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 8.dp)
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (canSend) Brush.horizontalGradient(listOf(themeColor, themeColor.copy(alpha = 0.72f)))
+                                    else Brush.horizontalGradient(listOf(Color(0xFF4A4F59), Color(0xFF4A4F59)))
+                                )
+                                .clickable(enabled = canSend) { onSend() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    strokeWidth = 1.8.dp,
+                                    color = Color.White
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.ArrowUpward,
+                                    "Senden",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
-    }
 }
-
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
