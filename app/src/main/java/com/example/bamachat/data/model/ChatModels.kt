@@ -8,7 +8,16 @@ data class ChatMessage(
     val translatedText: String? = null,
     val linkPreview: LinkPreview? = null,
     val role: String? = null,
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val sources: List<ChatSource> = emptyList(),
+    val webFetchedAtIso: String? = null
+)
+
+data class ChatSource(
+    val title: String,
+    val url: String,
+    val snippet: String = "",
+    val publishedAt: String? = null
 )
 
 data class LinkPreview(

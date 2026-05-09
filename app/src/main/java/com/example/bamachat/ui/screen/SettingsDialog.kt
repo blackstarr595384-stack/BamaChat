@@ -29,7 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PlayBillingManager
 import java.util.Locale
 
@@ -37,7 +39,8 @@ import java.util.Locale
 @Composable
 fun SettingsDialog(
     viewModel: SettingsViewModel,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    initialSection: String? = null
 ) {
     val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
     val primaryColor by viewModel.primaryColorInt.collectAsState()
@@ -49,6 +52,11 @@ fun SettingsDialog(
     val togetherApiKey by viewModel.togetherApiKey.collectAsState()
     val geminiApiKey by viewModel.geminiApiKey.collectAsState()
     val ollamaUrl by viewModel.ollamaUrl.collectAsState()
+    val liveWebEnabled by viewModel.liveWebEnabled.collectAsState()
+    val liveWebEndpoint by viewModel.liveWebEndpoint.collectAsState()
+    val liveWebApiToken by viewModel.liveWebApiToken.collectAsState()
+    val liveWebAllowedDomains by viewModel.liveWebAllowedDomains.collectAsState()
+    val liveWebPreferGithub by viewModel.liveWebPreferGithub.collectAsState()
     val selectedOpenRouterModel by viewModel.selectedOpenRouterModel.collectAsState()
     val openRouterVisionOnlyModels by viewModel.openRouterVisionOnlyModels.collectAsState()
     val agentStudioEnabled by viewModel.agentStudioEnabled.collectAsState()
@@ -59,8 +67,10 @@ fun SettingsDialog(
     val agentOutputStyle by viewModel.agentOutputStyle.collectAsState()
     val agentTools by viewModel.agentTools.collectAsState()
     val isPremiumActive by viewModel.isPremiumActive.collectAsState()
+    val subscriptionTier by viewModel.subscriptionTier.collectAsState()
     val billingReady by viewModel.billingReady.collectAsState()
     val purchaseInProgress by viewModel.purchaseInProgress.collectAsState()
+    val creditsBalance by viewModel.creditsBalance.collectAsState()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsState()
     val soundEnabled by viewModel.soundEnabled.collectAsState()
     val vibrationEnabled by viewModel.vibrationEnabled.collectAsState()
@@ -68,16 +78,33 @@ fun SettingsDialog(
     val voiceChatMode by viewModel.voiceChatMode.collectAsState()
     val ttsEnabled by viewModel.ttsEnabled.collectAsState()
     val ttsSpeed by viewModel.ttsSpeed.collectAsState()
+    val ttsPitch by viewModel.ttsPitch.collectAsState()
+    val ttsProVoiceEnabled by viewModel.ttsProVoiceEnabled.collectAsState()
+    val cloudVoiceEnabled by viewModel.cloudVoiceEnabled.collectAsState()
+    val elevenLabsApiKey by viewModel.elevenLabsApiKey.collectAsState()
+    val elevenLabsVoiceId by viewModel.elevenLabsVoiceId.collectAsState()
+    val elevenLabsModelId by viewModel.elevenLabsModelId.collectAsState()
     val streamingEnabled by viewModel.streamingEnabled.collectAsState()
     val showTimestamps by viewModel.showTimestamps.collectAsState()
     val bubbleAnimations by viewModel.bubbleAnimations.collectAsState()
     val language by viewModel.language.collectAsState()
+    val autoLanguageDetectionEnabled by viewModel.autoLanguageDetectionEnabled.collectAsState()
+    val localOcrEnabled by viewModel.localOcrEnabled.collectAsState()
     val uiDesignPreset by viewModel.uiDesignPreset.collectAsState()
+    val guestAutoClearOnAccountSignIn by viewModel.guestAutoClearOnAccountSignIn.collectAsState()
+    val guestAutoClearOnSignOut by viewModel.guestAutoClearOnSignOut.collectAsState()
+    val cloudPersonaLastSyncAt by viewModel.cloudPersonaLastSyncAt.collectAsState()
+    val cloudPersonaLastSyncStatus by viewModel.cloudPersonaLastSyncStatus.collectAsState()
 
     val _uriHandler = LocalUriHandler.current
     val context = LocalContext.current
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(initialSection) {
+        if (!initialSection.isNullOrBlank()) {
+            expandedSection = initialSection
+        }
+    }
 
     val colors = listOf(
         0xFF6A11CB, 0xFF2575FC, 0xFF00B894,
@@ -96,7 +123,7 @@ fun SettingsDialog(
     )
     val agentPresets = listOf("Generalist", "Recherche", "Entwickler", "Marketing", "Lager & Logistik")
     val outputStyles = listOf("Klar und präzise", "Analytisch", "Schritt-für-Schritt", "Kreativ", "Kurz mit Bulletpoints")
-    val designPresets = listOf("Aktuell", "Glassmorphism Pro", "Editorial Bold", "Neo Dashboard")
+    val designPresets = AppDesignPreset.labels
     val agentPreview = remember(
         agentStudioEnabled,
         agentPreset,
@@ -107,6 +134,13 @@ fun SettingsDialog(
         agentTools
     ) {
         viewModel.getAgentPromptPreview()
+    }
+    val cloudSyncStatusText = remember(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus) {
+        viewModel.formatCloudSyncStatus(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus)
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshCloudSyncStatus()
     }
 
     AlertDialog(
@@ -148,7 +182,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Chat & Darstellung", expandedSection == "chat", onClick = { expandedSection = if (expandedSection == "chat") null else "chat" }) {
+                SettingsSection("Darstellung", expandedSection == "chat", onClick = { expandedSection = if (expandedSection == "chat") null else "chat" }) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -199,7 +233,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Sprach-Chat", expandedSection == "voice", onClick = { expandedSection = if (expandedSection == "voice") null else "voice" }) {
+                SettingsSection("Sprache & Stimme", expandedSection == "voice", onClick = { expandedSection = if (expandedSection == "voice") null else "voice" }) {
                     SettingRow("Sprachmodus", "Durchgehend per Sprache chatten") {
                         Switch(checked = voiceChatMode, onCheckedChange = { viewModel.setVoiceChatMode(it) })
                     }
@@ -210,6 +244,56 @@ fun SettingsDialog(
                         Switch(checked = ttsEnabled, onCheckedChange = { viewModel.setTtsEnabled(it) })
                     }
                     if (ttsEnabled) {
+                        SettingRow("Pro Voice", "Bessere Stimme + natürlichere Sprechweise") {
+                            Switch(
+                                checked = ttsProVoiceEnabled,
+                                onCheckedChange = { viewModel.setTtsProVoiceEnabled(it) }
+                            )
+                        }
+                        SettingRow("Cloud Voice (ElevenLabs)", "Menschlichere Premium-Stimme") {
+                            Switch(
+                                checked = cloudVoiceEnabled,
+                                onCheckedChange = { viewModel.setCloudVoiceEnabled(it) }
+                            )
+                        }
+                        if (cloudVoiceEnabled) {
+                            OutlinedTextField(
+                                value = elevenLabsApiKey,
+                                onValueChange = { viewModel.setElevenLabsApiKey(it) },
+                                label = { Text("ElevenLabs API-Key", fontSize = 12.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                placeholder = { Text("sk_...", fontSize = 11.sp) },
+                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                            )
+                            OutlinedTextField(
+                                value = elevenLabsVoiceId,
+                                onValueChange = { viewModel.setElevenLabsVoiceId(it) },
+                                label = { Text("Voice ID", fontSize = 12.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                            )
+                            OutlinedTextField(
+                                value = elevenLabsModelId,
+                                onValueChange = { viewModel.setElevenLabsModelId(it) },
+                                label = { Text("Model ID", fontSize = 12.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                placeholder = { Text("eleven_multilingual_v2", fontSize = 11.sp) },
+                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = {
+                                    _uriHandler.openUri("https://elevenlabs.io/docs/api-reference/text-to-speech/convert")
+                                }) {
+                                    Text("Voice-Docs öffnen", fontSize = 11.sp)
+                                }
+                            }
+                        }
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("TTS-Geschwindigkeit (${String.format(Locale.getDefault(), "%.1fx", ttsSpeed)})", fontWeight = FontWeight.Medium, fontSize = 13.sp)
                             Slider(
@@ -219,10 +303,19 @@ fun SettingsDialog(
                                 steps = 6
                             )
                         }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("TTS-Stimmhöhe (${String.format(Locale.getDefault(), "%.2f", ttsPitch)})", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                            Slider(
+                                value = ttsPitch,
+                                onValueChange = { viewModel.setTtsPitch(it) },
+                                valueRange = 0.8f..1.2f,
+                                steps = 7
+                            )
+                        }
                     }
                 }
 
-                SettingsSection("KI-Anbieter", expandedSection == "ai", onClick = { expandedSection = if (expandedSection == "ai") null else "ai" }) {
+                SettingsSection("KI & Modelle", expandedSection == "ai", onClick = { expandedSection = if (expandedSection == "ai") null else "ai" }) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
@@ -235,13 +328,19 @@ fun SettingsDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Premium", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = if (isPremiumActive) Color(0xFFB4F2D8) else LocalContentColor.current)
+                                    val tierLabel = MonetizationConfig.PlanTier.fromKey(subscriptionTier).label
+                                    Text("Plan: $tierLabel", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = if (isPremiumActive) Color(0xFFB4F2D8) else LocalContentColor.current)
                                     Text(
-                                        if (isPremiumActive) "Aktiv: Unbegrenzte Nutzung freigeschaltet"
+                                        if (isPremiumActive) "Aktiv: Erweiterte Limits freigeschaltet"
                                         else "Free-Plan mit Tageslimits aktiv",
                                         style = MaterialTheme.typography.bodySmall,
                                         fontSize = 11.sp,
                                         color = if (isPremiumActive) Color(0xFFB4F2D8) else LocalContentColor.current
+                                    )
+                                    Text(
+                                        "Credits: $creditsBalance",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontSize = 11.sp
                                     )
                                 }
                                 if (isPremiumActive) {
@@ -257,17 +356,9 @@ fun SettingsDialog(
                                 AssistChip(
                                     onClick = {
                                         val activity = context as? android.app.Activity ?: return@AssistChip
-                                        viewModel.startSubscriptionCheckout(activity, PlayBillingManager.PLAN_BASIC)
-                                    },
-                                    label = { Text("Basic") },
-                                    enabled = billingReady && !purchaseInProgress
-                                )
-                                AssistChip(
-                                    onClick = {
-                                        val activity = context as? android.app.Activity ?: return@AssistChip
                                         viewModel.startSubscriptionCheckout(activity, PlayBillingManager.PLAN_PRO)
                                     },
-                                    label = { Text("Pro") },
+                                    label = { Text("Pro 7,99€") },
                                     enabled = billingReady && !purchaseInProgress
                                 )
                                 AssistChip(
@@ -275,7 +366,33 @@ fun SettingsDialog(
                                         val activity = context as? android.app.Activity ?: return@AssistChip
                                         viewModel.startSubscriptionCheckout(activity, PlayBillingManager.PLAN_EXPERT)
                                     },
-                                    label = { Text("Expert") },
+                                    label = { Text("Expert 19,99€") },
+                                    enabled = billingReady && !purchaseInProgress
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                AssistChip(
+                                    onClick = {
+                                        val activity = context as? android.app.Activity ?: return@AssistChip
+                                        viewModel.startCreditsCheckout(activity, PlayBillingManager.CREDIT_100)
+                                    },
+                                    label = { Text("100 Credits") },
+                                    enabled = billingReady && !purchaseInProgress
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        val activity = context as? android.app.Activity ?: return@AssistChip
+                                        viewModel.startCreditsCheckout(activity, PlayBillingManager.CREDIT_300)
+                                    },
+                                    label = { Text("300 Credits") },
+                                    enabled = billingReady && !purchaseInProgress
+                                )
+                                AssistChip(
+                                    onClick = {
+                                        val activity = context as? android.app.Activity ?: return@AssistChip
+                                        viewModel.startCreditsCheckout(activity, PlayBillingManager.CREDIT_1000)
+                                    },
+                                    label = { Text("1000 Credits") },
                                     enabled = billingReady && !purchaseInProgress
                                 )
                             }
@@ -362,9 +479,88 @@ fun SettingsDialog(
                         singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
                     )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                    SettingRow(
+                        "Live-Web-Recherche",
+                        "Agenten holen bei Bedarf aktuelle Quellen aus dem Internet"
+                    ) {
+                        Switch(
+                            checked = liveWebEnabled,
+                            onCheckedChange = { viewModel.setLiveWebEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+                    SettingRow(
+                        "Auto-Spracherkennung",
+                        "Erkennt die Eingabesprache und nutzt sie als Antwort-Kontext"
+                    ) {
+                        Switch(
+                            checked = autoLanguageDetectionEnabled,
+                            onCheckedChange = { viewModel.setAutoLanguageDetectionEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+                    SettingRow(
+                        "Lokale OCR für Bilder",
+                        "Liest Text aus Bildern lokal aus und nutzt ihn bei der Bildanalyse"
+                    ) {
+                        Switch(
+                            checked = localOcrEnabled,
+                            onCheckedChange = { viewModel.setLocalOcrEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+
+                    if (liveWebEnabled) {
+                        OutlinedTextField(
+                            value = liveWebEndpoint,
+                            onValueChange = { viewModel.setLiveWebEndpoint(it) },
+                            label = { Text("Web-Search Function URL", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = {
+                                Text(
+                                    "https://websearch-<hash>-ew.a.run.app",
+                                    fontSize = 10.sp
+                                )
+                            },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        OutlinedTextField(
+                            value = liveWebApiToken,
+                            onValueChange = { viewModel.setLiveWebApiToken(it) },
+                            label = { Text("Function Access Token (optional)", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Bearer Token", fontSize = 10.sp) },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        OutlinedTextField(
+                            value = liveWebAllowedDomains,
+                            onValueChange = { viewModel.setLiveWebAllowedDomains(it) },
+                            label = { Text("Domain-Allowlist (CSV)", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 2,
+                            maxLines = 4,
+                            placeholder = { Text("wikipedia.org,reuters.com,tagesschau.de", fontSize = 10.sp) },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        SettingRow(
+                            "GitHub bevorzugen",
+                            "Bei Coding-Fragen zuerst Repos/Issues/Release-Infos nutzen"
+                        ) {
+                            Switch(
+                                checked = liveWebPreferGithub,
+                                onCheckedChange = { viewModel.setLiveWebPreferGithub(it) },
+                                modifier = Modifier.scale(0.85f)
+                            )
+                        }
+                    }
                 }
 
-                SettingsSection("Agent Studio", expandedSection == "agents", onClick = { expandedSection = if (expandedSection == "agents") null else "agents" }) {
+                SettingsSection("Agenten", expandedSection == "agents", onClick = { expandedSection = if (expandedSection == "agents") null else "agents" }) {
                     SettingRow(
                         "Agent-Studio aktiv",
                         "Erweitert den System-Prompt mit Agent-Profil"
@@ -445,7 +641,29 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Daten & Info", expandedSection == "data", onClick = { expandedSection = if (expandedSection == "data") null else "data" }) {
+                SettingsSection("Datenschutz & Daten", expandedSection == "data", onClick = { expandedSection = if (expandedSection == "data") null else "data" }) {
+                    SettingRow("Persona-Cloud-Sync", cloudSyncStatusText) {
+                        TextButton(onClick = { viewModel.refreshCloudSyncStatus() }) {
+                            Text("Aktualisieren")
+                        }
+                    }
+                    SettingRow("Gastdaten bei Konto-Login löschen", "Schützt private Testdaten beim Wechsel auf echtes Konto") {
+                        Switch(
+                            checked = guestAutoClearOnAccountSignIn,
+                            onCheckedChange = { viewModel.setGuestAutoClearOnAccountSignIn(it) }
+                        )
+                    }
+                    SettingRow("Gastdaten beim Abmelden löschen", "Löscht lokale Gast-Chats und Persona-Lernstände") {
+                        Switch(
+                            checked = guestAutoClearOnSignOut,
+                            onCheckedChange = { viewModel.setGuestAutoClearOnSignOut(it) }
+                        )
+                    }
+                    SettingRow("Gast-/Prompt-Daten jetzt löschen", "Löscht nur lokale Session-, Prompt- und Lern-Daten") {
+                        TextButton(onClick = {
+                            viewModel.clearGuestPrivateData()
+                        }) { Text("Bereinigen", color = Color(0xFFE17055)) }
+                    }
                     SettingRow("Alle Daten löschen", "Einstellungen und Chats zurücksetzen") {
                         TextButton(onClick = {
                             viewModel.clearAllData()

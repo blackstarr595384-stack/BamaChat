@@ -1,0 +1,110 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isParticipantListValid() {
+      return request.resource.data.participants is list &&
+        request.resource.data.participants.size() <= 20;
+    }
+
+    function canWriteMessages(sessionData) {
+      return request.auth.uid == sessionData.ownerId ||
+        sessionData.participantRoles[request.auth.uid] == "OWNER" ||
+        sessionData.participantRoles[request.auth.uid] == "EDITOR";
+    }
+
+    // User profile documents (used by Auth/Profile feature)
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // Per-user persona identity profiles (character + autonomy)
+      match /persona_profiles/{personaName} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Per-user prompt overrides / custom persona prompts
+      match /persona_prompts/{personaName} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Per-user training examples for fine-tuned persona behavior
+      match /persona_training_examples/{exampleId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // Per-user memory and RAG docs (for future feature expansions)
+    match /user_memory/{uid}/entries/{entryId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    match /user_knowledge/{uid}/chunks/{chunkId} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Real-time collaboration sessions
+    match /collab_sessions/{sessionId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        isParticipantListValid() &&
+        request.resource.data.participants.hasAny([request.auth.uid]) &&
+        request.resource.data.participantRoles[request.auth.uid] == "OWNER";
+      allow read: if isSignedIn() &&
+        request.auth.uid in resource.data.participants;
+
+      // Update-Fälle:
+      // 1) Owner kann Session verwalten (Titel, ownerId-Transfer, Teilnehmer)
+      // 2) Join-Self: bisher nicht teilnehmender User fügt sich selbst hinzu
+      // 3) Leave-Self: teilnehmender User entfernt nur sich selbst
+      allow update: if isSignedIn() && (
+        request.auth.uid == resource.data.ownerId ||
+        (
+          isParticipantListValid() &&
+          !(request.auth.uid in resource.data.participants) &&
+          request.resource.data.participants.hasAny([request.auth.uid]) &&
+          request.resource.data.participants.size() <= resource.data.participants.size() + 1 &&
+          request.resource.data.ownerId == resource.data.ownerId
+        ) ||
+        (
+          isParticipantListValid() &&
+          request.auth.uid in resource.data.participants &&
+          !request.resource.data.participants.hasAny([request.auth.uid]) &&
+          request.resource.data.participants.size() == resource.data.participants.size() - 1 &&
+          request.resource.data.ownerId == resource.data.ownerId
+        )
+      );
+      allow delete: if isSignedIn() &&
+        request.auth.uid == resource.data.ownerId;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
+        allow create: if isSignedIn() &&
+          request.resource.data.authorId == request.auth.uid &&
+          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants &&
+          canWriteMessages(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data);
+        allow update, delete: if false;
+      }
+
+      match /presence/{uid} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
+        allow create, update, delete: if isSignedIn() &&
+          request.auth.uid == uid &&
+          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
+      }
+    }
+
+    // Deny all unspecified access by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

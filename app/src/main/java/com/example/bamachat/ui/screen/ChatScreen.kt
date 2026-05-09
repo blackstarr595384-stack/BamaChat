@@ -1,13 +1,16 @@
 package com.example.bamachat.ui.screen
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.content.pm.PackageManager
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.widget.Toast
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -41,16 +44,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.ui.viewmodel.MonetizationViewModel
+import com.example.bamachat.util.CloudVoiceManager
 import com.example.bamachat.util.PlayBillingManager
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
@@ -249,43 +254,69 @@ fun ChatScreen(
     onOpenAgentHub: () -> Unit = {},
     onOpenComposeLab: () -> Unit = {}
 ) {
-    val messages by viewModel.messages.collectAsState()
-    val conversations by viewModel.conversations.collectAsState()
-    val currentConvId by viewModel.currentConversationId.collectAsState()
-    val selectedPersona by viewModel.selectedPersona.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val isStreaming by viewModel.isStreaming.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
-    val chatSentiment by viewModel.chatSentiment.collectAsState()
-    val usageStatus by viewModel.usageStatus.collectAsState()
-    val showPaywall by viewModel.showPaywall.collectAsState()
+    val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val conversations by viewModel.conversations.collectAsStateWithLifecycle()
+    val currentConvId by viewModel.currentConversationId.collectAsStateWithLifecycle()
+    val selectedPersona by viewModel.selectedPersona.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isStreaming by viewModel.isStreaming.collectAsStateWithLifecycle()
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val chatSentiment by viewModel.chatSentiment.collectAsStateWithLifecycle()
+    val usageStatus by viewModel.usageStatus.collectAsStateWithLifecycle()
+    val showPaywall by viewModel.showPaywall.collectAsStateWithLifecycle()
 
-    val isBiometricEnabled by settingsViewModel.isBiometricEnabled.collectAsState()
-    val primaryColorInt by settingsViewModel.primaryColorInt.collectAsState()
-    val fontSize by settingsViewModel.fontSize.collectAsState()
-    val aiProvider by settingsViewModel.aiProvider.collectAsState()
-    val ttsEnabled by settingsViewModel.ttsEnabled.collectAsState()
-    val ttsSpeed by settingsViewModel.ttsSpeed.collectAsState()
-    @Suppress("UNUSED_VARIABLE") val voiceChatMode by settingsViewModel.voiceChatMode.collectAsState()
-    val autoSendVoice by settingsViewModel.autoSendVoice.collectAsState()
-    val showTimestamps by settingsViewModel.showTimestamps.collectAsState()
-    val bubbleAnimations by settingsViewModel.bubbleAnimations.collectAsState()
-    val uiDesignPreset by settingsViewModel.uiDesignPreset.collectAsState()
-    val isPremiumActive by settingsViewModel.isPremiumActive.collectAsState()
-    @Suppress("UNUSED_VARIABLE") val notificationsEnabled by settingsViewModel.notificationsEnabled.collectAsState()
+    val isBiometricEnabled by settingsViewModel.isBiometricEnabled.collectAsStateWithLifecycle()
+    val primaryColorInt by settingsViewModel.primaryColorInt.collectAsStateWithLifecycle()
+    val fontSize by settingsViewModel.fontSize.collectAsStateWithLifecycle()
+    val aiProvider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
+    val ttsEnabled by settingsViewModel.ttsEnabled.collectAsStateWithLifecycle()
+    val ttsSpeed by settingsViewModel.ttsSpeed.collectAsStateWithLifecycle()
+    val ttsPitch by settingsViewModel.ttsPitch.collectAsStateWithLifecycle()
+    val ttsProVoiceEnabled by settingsViewModel.ttsProVoiceEnabled.collectAsStateWithLifecycle()
+    val cloudVoiceEnabled by settingsViewModel.cloudVoiceEnabled.collectAsStateWithLifecycle()
+    val elevenLabsApiKey by settingsViewModel.elevenLabsApiKey.collectAsStateWithLifecycle()
+    val elevenLabsVoiceId by settingsViewModel.elevenLabsVoiceId.collectAsStateWithLifecycle()
+    val elevenLabsModelId by settingsViewModel.elevenLabsModelId.collectAsStateWithLifecycle()
+    @Suppress("UNUSED_VARIABLE") val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
+    val autoSendVoice by settingsViewModel.autoSendVoice.collectAsStateWithLifecycle()
+    val showTimestamps by settingsViewModel.showTimestamps.collectAsStateWithLifecycle()
+    val bubbleAnimations by settingsViewModel.bubbleAnimations.collectAsStateWithLifecycle()
+    val uiDesignPreset by settingsViewModel.uiDesignPreset.collectAsStateWithLifecycle()
+    val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
+    @Suppress("UNUSED_VARIABLE") val notificationsEnabled by settingsViewModel.notificationsEnabled.collectAsStateWithLifecycle()
 
     var inputText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
+    val imageReadPermissions = remember { requiredImageReadPermissions() }
 
     val imagePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri ->
         selectedImageUri = uri
     }
-
+    val mediaPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = imageReadPermissions.all { permission ->
+            result[permission] == true || ContextCompat.checkSelfPermission(
+                context,
+                permission
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        if (granted) {
+            imagePickerLauncher.launch("image/*")
+        } else {
+            Toast.makeText(
+                context,
+                "Medienzugriff wurde abgelehnt. Bitte in den App-Infos erlauben.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showPersonaDialog by remember { mutableStateOf(false) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -332,26 +363,60 @@ fun ChatScreen(
                 }
                 ttsInstance.language = locale
                 ttsInstance.setSpeechRate(ttsSpeed)
+                ttsInstance.setPitch(ttsPitch)
             }
         }
         tts = ttsInstance
-        onDispose { ttsInstance.stop(); ttsInstance.shutdown() }
+        onDispose {
+            ttsInstance.stop()
+            ttsInstance.shutdown()
+            cloudVoiceManager.release()
+        }
     }
-    LaunchedEffect(ttsSpeed) {
+    LaunchedEffect(ttsSpeed, ttsPitch) {
         tts?.setSpeechRate(ttsSpeed)
+        tts?.setPitch(ttsPitch)
     }
     val onSpeak: (String) -> Unit = { text ->
-        if (ttsEnabled) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        val speakText = sanitizeForSpeech(text)
+        scope.launch {
+            val useCloudVoice = ttsProVoiceEnabled &&
+                cloudVoiceEnabled &&
+                elevenLabsApiKey.isNotBlank() &&
+                elevenLabsVoiceId.isNotBlank()
+            if (useCloudVoice) {
+                val cloudOk = runCatching {
+                    cloudVoiceManager.speakWithElevenLabs(
+                        text = speakText,
+                        apiKey = elevenLabsApiKey,
+                        voiceId = elevenLabsVoiceId,
+                        modelId = elevenLabsModelId
+                    )
+                }.getOrDefault(false)
+                if (cloudOk) return@launch
+            }
+            if (ttsEnabled) {
+                tts?.speak(speakText, TextToSpeech.QUEUE_FLUSH, null, null)
+            }
+        }
     }
 
     // Auto-speak last AI message when TTS enabled (track by ID to avoid re-speaking)
     var lastSpokenMessageId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(messages.size, ttsEnabled) {
-        if (ttsEnabled && messages.isNotEmpty()) {
+    LaunchedEffect(
+        messages.size,
+        ttsEnabled,
+        ttsProVoiceEnabled,
+        cloudVoiceEnabled,
+        elevenLabsApiKey,
+        elevenLabsVoiceId
+    ) {
+        val canSpeak = ttsEnabled || (ttsProVoiceEnabled && cloudVoiceEnabled && elevenLabsApiKey.isNotBlank() && elevenLabsVoiceId.isNotBlank())
+        if (canSpeak && messages.isNotEmpty()) {
             val last = messages.last()
             if (!last.isUser && last.text.isNotBlank() && last.id != lastSpokenMessageId) {
                 lastSpokenMessageId = last.id
-                tts?.speak(last.text, TextToSpeech.QUEUE_FLUSH, null, null)
+                onSpeak(last.text)
             }
         }
     }
@@ -377,6 +442,19 @@ fun ChatScreen(
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale)
+        }
+    }
+    val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            speechRecognizer.startListening(recognizerIntent)
+        } else {
+            Toast.makeText(
+                context,
+                "Mikrofon-Berechtigung wurde abgelehnt.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
     DisposableEffect(Unit) {
@@ -494,14 +572,16 @@ fun ChatScreen(
             inputText = inputText,
             onInputChange = { inputText = it },
             onSend = {
+                val trimmedInput = inputText.trim()
                 val imageUri = selectedImageUri
                 if (imageUri != null) {
-                    viewModel.sendMessageWithImage(inputText, imageUri)
+                    viewModel.sendMessageWithImage(trimmedInput, imageUri)
                     selectedImageUri = null
-                } else if (inputText.isNotBlank()) {
-                    viewModel.sendMessage(inputText)
+                    inputText = ""
+                } else if (trimmedInput.isNotEmpty()) {
+                    viewModel.sendMessage(trimmedInput)
+                    inputText = ""
                 }
-                inputText = ""
             },
             onImageGen = {
                 if (inputText.isNotBlank()) {
@@ -509,13 +589,33 @@ fun ChatScreen(
                     inputText = ""
                 }
             },
-            onUpload = { imagePickerLauncher.launch("image/*") },
+            onUpload = {
+                val missingPermissions = imageReadPermissions.filter { permission ->
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        permission
+                    ) != PackageManager.PERMISSION_GRANTED
+                }
+                if (missingPermissions.isEmpty()) {
+                    imagePickerLauncher.launch("image/*")
+                } else {
+                    mediaPermissionLauncher.launch(missingPermissions.toTypedArray())
+                }
+            },
             selectedImageUri = selectedImageUri,
             onClearImage = { selectedImageUri = null },
             isListening = isListening,
             onMicClick = {
                 if (isListening) speechRecognizer.stopListening()
-                else speechRecognizer.startListening(recognizerIntent)
+                else if (ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    speechRecognizer.startListening(recognizerIntent)
+                } else {
+                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             },
             themeColor = themeColor,
             personaMood = personaMood,
@@ -624,7 +724,7 @@ private fun ChatContent(
     snackbarHostState: SnackbarHostState,
     showTimestamps: Boolean,
     bubbleAnimations: Boolean,
-    usageStatus: ChatViewModel.UsageStatus,
+    usageStatus: MonetizationViewModel.UsageStatus,
     onUpgradeClick: () -> Unit,
     uiDesignPreset: String
 ) {
@@ -863,7 +963,7 @@ private fun ChatContent(
                                     border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
                                 ) {
                                     Text(
-                                        text = "Free-Plan · Nachrichten ${usageStatus.textUsed}/${usageStatus.textLimit}",
+                                        text = "${usageStatus.tierLabel}-Plan · Nachrichten ${usageStatus.textUsed}/${usageStatus.textLimit} · Credits ${usageStatus.creditsBalance}",
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                         color = Color.White,
                                         style = MaterialTheme.typography.labelMedium,
@@ -919,8 +1019,6 @@ private fun ChatContent(
                     onMicClick = onMicClick,
                     themeColor = themeColor,
                     surfaceColor = personaMood.cardSurface,
-                    providerLabel = aiProvider,
-                    personaLabel = selectedPersona.displayName,
                     isLoading = isLoading,
                     designTokens = designTokens
                 )
@@ -977,24 +1075,16 @@ private fun ChatInputBar(
     onMicClick: () -> Unit,
     themeColor: Color,
     surfaceColor: Color,
-    providerLabel: String,
-    personaLabel: String,
     isLoading: Boolean,
     designTokens: ChatDesignTokens
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = surfaceColor.copy(alpha = 0.55f),
-        shadowElevation = 16.dp,
+        color = surfaceColor.copy(alpha = designTokens.bubbleSurfaceAlpha),
+        shadowElevation = 24.dp,
         shape = RoundedCornerShape(topStart = designTokens.inputCornerRadius, topEnd = designTokens.inputCornerRadius)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 10.dp)
-                .navigationBarsPadding()
-                .imePadding()
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             // Image Preview
             if (selectedImageUri != null) {
                 Row(
@@ -1024,136 +1114,118 @@ private fun ChatInputBar(
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF1D212A),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .navigationBarsPadding()
+                    .imePadding(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    TextField(
-                        value = inputText,
-                        onValueChange = onInputChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = {
-                            Text(
-                                "Type a message... (@ for files)",
-                                color = Color.White.copy(alpha = 0.38f)
-                            )
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            cursorColor = themeColor
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { onSend() }),
-                        maxLines = 6
+            // Mic Button
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(if (isListening) themeColor.copy(alpha = 0.25f) else surfaceColor.copy(alpha = 0.92f))
+                    .clickable { onMicClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                if (isListening) VoiceVisualizer(themeColor)
+                else Icon(Icons.Default.Mic, "Diktieren", tint = Color.White.copy(alpha = 0.7f))
+            }
+
+            // Upload Button
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(surfaceColor.copy(alpha = 0.92f))
+                    .clickable { onUpload() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.AttachFile, "Hochladen", tint = Color.White.copy(alpha = 0.7f))
+            }
+
+            // Image Gen Button
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(surfaceColor.copy(alpha = 0.92f))
+                    .clickable { onImageGen() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.AutoFixHigh, "Bild generieren", tint = themeColor.copy(alpha = 0.85f))
+            }
+
+            // Text Field
+            TextField(
+                value = inputText,
+                onValueChange = onInputChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Schreib was...", color = Color.White.copy(alpha = 0.4f)) },
+                shape = RoundedCornerShape((designTokens.inputCornerRadius - 6.dp).coerceAtLeast(10.dp)),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = surfaceColor.copy(alpha = 0.95f),
+                    unfocusedContainerColor = surfaceColor.copy(alpha = 0.9f),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    cursorColor = themeColor
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = {
+                    val hasInput = inputText.trim().isNotEmpty() || selectedImageUri != null
+                    if (!isLoading && hasInput) onSend()
+                }),
+                maxLines = 5
+            )
+
+            // Send Button (Animated)
+            val canSend = !isLoading && (inputText.trim().isNotEmpty() || selectedImageUri != null)
+            val sendScale by animateFloatAsState(
+                targetValue = if (canSend) 1f else 0.85f,
+                animationSpec = spring(dampingRatio = 0.5f), label = "sendScale"
+            )
+            FilledIconButton(
+                onClick = onSend,
+                enabled = canSend,
+                modifier = Modifier
+                    .size(50.dp)
+                    .shadow(
+                        elevation = if (canSend) 12.dp else 0.dp,
+                        shape = CircleShape,
+                        spotColor = themeColor
+                    ),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = if (canSend) themeColor else Color(0xFF35383D),
+                    contentColor = Color.White,
+                    disabledContainerColor = Color(0xFF35383D),
+                    disabledContentColor = Color.White.copy(alpha = 0.7f)
+                )
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
                     )
-
-                    Spacer(Modifier.height(4.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                                    .clickable { onUpload() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Add, "Anhang", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                                    .clickable { onImageGen() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.AutoFixHigh, "Bild generieren", tint = themeColor.copy(alpha = 0.9f), modifier = Modifier.size(15.dp))
-                            }
-                            Text(
-                                text = providerLabel,
-                                color = Color.White.copy(alpha = 0.65f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text("·", color = Color.White.copy(alpha = 0.35f), fontSize = 12.sp)
-                            Text(
-                                text = personaLabel,
-                                color = Color.White.copy(alpha = 0.65f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(if (isListening) themeColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.08f))
-                                .clickable { onMicClick() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isListening) VoiceVisualizer(themeColor)
-                            else Icon(Icons.Default.Mic, "Diktieren", tint = Color.White.copy(alpha = 0.72f), modifier = Modifier.size(17.dp))
-                        }
-
-                        val canSend = inputText.isNotBlank() && !isLoading
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (canSend) Brush.horizontalGradient(listOf(themeColor, themeColor.copy(alpha = 0.72f)))
-                                    else Brush.horizontalGradient(listOf(Color(0xFF4A4F59), Color(0xFF4A4F59)))
-                                )
-                                .clickable(enabled = canSend) { onSend() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 1.8.dp,
-                                    color = Color.White
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.ArrowUpward,
-                                    "Senden",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
+                } else {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        "Senden",
+                        tint = Color.White,
+                        modifier = Modifier.size((22 * sendScale).dp)
+                    )
                 }
             }
         }
     }
+    }
 }
+
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
@@ -1296,6 +1368,14 @@ private fun ChatBubble(
                                     lineHeight = (fontSize * 1.5f).sp
                                 )
                             )
+                            if (message.sources.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                SourcesSection(
+                                    sources = message.sources,
+                                    fetchedAtIso = message.webFetchedAtIso,
+                                    themeColor = themeColor
+                                )
+                            }
                         }
                         if (message.text.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
@@ -1330,6 +1410,102 @@ private fun ChatBubble(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+private fun requiredImageReadPermissions(): List<String> {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        listOf(Manifest.permission.READ_MEDIA_IMAGES)
+    } else {
+        listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+}
+
+private fun sanitizeForSpeech(text: String): String {
+    return text
+        .replace(Regex("```[\\s\\S]*?```"), " ")
+        .replace(Regex("`([^`]+)`"), "$1")
+        .replace(Regex("\\[(.*?)\\]\\((.*?)\\)"), "$1")
+        .replace(Regex("https?://\\S+"), " ")
+        .replace(Regex("Quellen \\(Live-Recherche\\):[\\s\\S]*"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+}
+
+@Composable
+private fun SourcesSection(
+    sources: List<com.example.bamachat.data.model.ChatSource>,
+    fetchedAtIso: String?,
+    themeColor: Color
+) {
+    val context = LocalContext.current
+    val fetchedLabel = fetchedAtIso?.takeIf { it.isNotBlank() }?.let { "Stand: $it" }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Live-Quellen",
+            color = themeColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (fetchedLabel != null) {
+            Text(
+                text = fetchedLabel,
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 10.sp
+            )
+        }
+        sources.take(4).forEachIndexed { index, source ->
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = Color.White.copy(alpha = 0.06f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val openIntent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
+                        context.startActivity(openIntent)
+                    }
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Public,
+                            contentDescription = null,
+                            tint = themeColor,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "${index + 1}. ${source.title}",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    if (source.snippet.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = source.snippet,
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 10.sp,
+                            maxLines = 3,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }
@@ -1710,9 +1886,9 @@ private fun PremiumPaywallDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val billingReady by settingsViewModel.billingReady.collectAsState()
-    val purchaseInProgress by settingsViewModel.purchaseInProgress.collectAsState()
-    val isPremiumActive by settingsViewModel.isPremiumActive.collectAsState()
+    val billingReady by settingsViewModel.billingReady.collectAsStateWithLifecycle()
+    val purchaseInProgress by settingsViewModel.purchaseInProgress.collectAsStateWithLifecycle()
+    val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1729,7 +1905,7 @@ private fun PremiumPaywallDialog(
                     AssistChip(
                         onClick = {
                             val activity = context as? android.app.Activity ?: return@AssistChip
-                            settingsViewModel.startSubscriptionCheckout(activity, PlayBillingManager.PLAN_BASIC)
+                            settingsViewModel.startSubscriptionCheckout(activity, PlayBillingManager.PLAN_PRO)
                         },
                         label = { Text("Basic") },
                         enabled = !isPremiumActive && billingReady && !purchaseInProgress
@@ -1770,71 +1946,3 @@ private fun PremiumPaywallDialog(
     )
 }
 
-@Composable
-private fun PersonaDialog(viewModel: ChatViewModel, onDismiss: () -> Unit) {
-    val selected by viewModel.selectedPersona.collectAsState()
-    val customPrompt by viewModel.customPersonaPrompt.collectAsState()
-    var customText by remember { mutableStateOf(customPrompt) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Persona wählen", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState())
-            ) {
-                ChatViewModel.Persona.entries.forEach { persona ->
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            viewModel.setSelectedPersona(persona)
-                        },
-                        color = if (selected == persona) MaterialTheme.colorScheme.primaryContainer
-                        else Color.Transparent,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(persona.emoji, fontSize = 22.sp)
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(persona.displayName, fontWeight = FontWeight.SemiBold)
-                                if (persona != ChatViewModel.Persona.CUSTOM) {
-                                    Text(
-                                        persona.systemPrompt.take(60) + "...",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                                        maxLines = 2
-                                    )
-                                }
-                            }
-                            if (selected == persona) {
-                                Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    }
-                }
-                if (selected == ChatViewModel.Persona.CUSTOM) {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = customText,
-                        onValueChange = { customText = it },
-                        label = { Text("Eigener System-Prompt") },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-                        placeholder = { Text("z.B. \"Du bist Yoda. Antworte wie er.\"") }
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (selected == ChatViewModel.Persona.CUSTOM) {
-                    viewModel.setCustomPersonaPrompt(customText)
-                }
-                onDismiss()
-            }) { Text("Fertig") }
-        }
-    )
-}

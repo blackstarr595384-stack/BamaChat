@@ -1,0 +1,33 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Current profile image path: profile_images/{uid}.jpg
+    match /profile_images/{fileName} {
+      allow read, write: if isSignedIn() &&
+        fileName.matches(request.auth.uid + "\\.jpg");
+    }
+
+    // Future-proof per-user profile image folder
+    match /profile_images/{uid}/{allPaths=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // User-owned docs for RAG feature
+    match /rag_docs/{uid}/{allPaths=**} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // Deny everything else
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

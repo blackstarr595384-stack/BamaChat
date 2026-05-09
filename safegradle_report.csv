@@ -1,0 +1,12 @@
+File,Line,Risk,Message
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",13,HIGH,"Potential credential leak detected: eystore.properties"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",15,HIGH,"Potential credential leak detected: eystorePropertiesFile.exists"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",18,HIGH,"Potential credential leak detected: eystorePropertiesFile.inputStream"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",37,HIGH,"Potential credential leak detected: eystoreProperties.getProperty"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",38,HIGH,"Potential credential leak detected: eystoreProperties.getProperty"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",39,HIGH,"Potential credential leak detected: eystoreProperties.getProperty"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",40,HIGH,"Potential credential leak detected: eystoreProperties.getProperty"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",45,HIGH,"Potential credential leak detected: eyAlias.isBlank"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",46,HIGH,"Potential credential leak detected: eyPassword.isBlank"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/app/build.gradle.kts",49,HIGH,"Potential credential leak detected: eystore.properties"
+"C:/Users/Black/AndroidStudioProjects/BamaChat/gradle/wrapper/gradle-wrapper.jar",1,HIGH,"Unverified Gradle Wrapper! Checksum cb0da6751c2b753a16ac168bb354870ebb1e162e9083f116729cec9c781156b8 does not match known official Gradle distributions. This could be a supply-chain attack."

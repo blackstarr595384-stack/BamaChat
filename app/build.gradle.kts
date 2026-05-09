@@ -1,8 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
+    id("io.gitlab.arturbosch.detekt") version "1.23.6"
+}
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
 android {
@@ -15,11 +28,41 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                val storeFilePath = keystoreProperties.getProperty("storeFile")?.trim().orEmpty()
+                val storePassword = keystoreProperties.getProperty("storePassword")?.trim().orEmpty()
+                val keyAlias = keystoreProperties.getProperty("keyAlias")?.trim().orEmpty()
+                val keyPassword = keystoreProperties.getProperty("keyPassword")?.trim().orEmpty()
+
+                val missing = buildList {
+                    if (storeFilePath.isBlank()) add("storeFile")
+                    if (storePassword.isBlank()) add("storePassword")
+                    if (keyAlias.isBlank()) add("keyAlias")
+                    if (keyPassword.isBlank()) add("keyPassword")
+                }
+                if (missing.isNotEmpty()) {
+                    error("keystore.properties ist unvollständig. Fehlende Keys: ${missing.joinToString()}")
+                }
+
+                storeFile = rootProject.file(storeFilePath)
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -66,6 +109,11 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.9.7")
+    
+    // Lottie Animations
+    implementation("com.airbnb.android:lottie-compose:6.4.1")
+    
+    // Material Design Icons (Icons für UI)
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     
@@ -95,6 +143,7 @@ dependencies {
     // ML Kit Translation & Language ID
     implementation("com.google.mlkit:translate:$mlKitTranslateVersion")
     implementation("com.google.mlkit:language-id:$mlKitLanguageIdVersion")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     // ML Kit Smart Reply
     implementation("com.google.mlkit:smart-reply:$mlKitSmartReplyVersion") {
         // Prevent duplicate classes with language-id-common from gms beta artifact.
@@ -103,14 +152,36 @@ dependencies {
 
     // Jsoup for Link Previews
     implementation("org.jsoup:jsoup:1.18.3")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     // Location Services
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
 
     // Google Play Billing (Abo/Paywall Vorbereitung)
     implementation("com.android.billingclient:billing-ktx:8.3.0")
 
+    // Firebase (Auth / Profile / Storage)
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage")
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-crashlytics")
+
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.04.01"))
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
 }
 
 tasks.register("stabilityCheck") {

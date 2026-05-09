@@ -8,91 +8,84 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
-import android.provider.MediaStore
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.bamachat.data.ApiClient
-import com.example.bamachat.data.OpenRouterChatRequest
-import com.example.bamachat.data.OpenRouterImageUrl
 import com.example.bamachat.data.OpenRouterMessage
-import com.example.bamachat.data.OpenRouterStreamChunk
-import com.example.bamachat.data.OpenRouterVisionChatRequest
-import com.example.bamachat.data.OpenRouterVisionContentPart
-import com.example.bamachat.data.OpenRouterVisionMessage
 import com.example.bamachat.data.local.ChatDatabase
-import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.data.model.ChatMessage
+import com.example.bamachat.data.model.ChatSource
 import com.example.bamachat.data.model.ModelInfo
-import com.example.bamachat.data.model.OllamaChatRequest
-import com.example.bamachat.data.model.OllamaMessage
 import com.example.bamachat.data.repository.ChatRepository
-import com.example.bamachat.util.SmartFeatureManager
-import com.google.ai.client.generativeai.type.content
-import com.google.gson.Gson
+import com.example.bamachat.util.AppTelemetry
+import com.example.bamachat.util.AudioTranscriptionManager
+import com.example.bamachat.util.DocumentIngestor
+import com.example.bamachat.util.EmotionAnalyzer
+import com.example.bamachat.util.EmotionSignal
+import com.example.bamachat.util.KnowledgeGraphExtractor
+import com.example.bamachat.util.MemoryFactExtractor
+import com.example.bamachat.util.MonetizationConfig
+import com.example.bamachat.util.MultimodalAsset
+import com.example.bamachat.util.MultimodalProcessor
+import com.example.bamachat.util.VideoKeyframeExtractor
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.ByteArrayOutputStream
-import java.text.SimpleDateFormat
+import java.net.URLEncoder
 import java.util.*
+import java.util.concurrent.TimeUnit
 
-@Suppress("UNUSED_PARAMETER")
+/**
+ * ChatViewModel: Zentraler View-State für Chat-Screen
+ * - Conversations & Messages
+ * - Image Generation & Analysis
+ * - Multimodal-Asset-Handling (Bilder, Dokumente, Audio, Video)
+ * - Emotion-Detection
+ * - Delegation zu:
+ *   - PersonaViewModel (Personas, Prompts, Training)
+ *   - MultiAgentViewModel (Multi-Agent-Collaboration)
+ *   - MonetizationViewModel (Quotas, Credits)
+ *   - ApiManager (API-Calls mit Retry-Logik)
+ */
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
-    data class UsageStatus(
-        val isPremium: Boolean = false,
-        val textUsed: Int = 0,
-        val textLimit: Int = 0,
-        val imageAnalysisUsed: Int = 0,
-        val imageAnalysisLimit: Int = 0,
-        val imageGenerationUsed: Int = 0,
-        val imageGenerationLimit: Int = 0
-    ) {
-        val textRemaining: Int get() = (textLimit - textUsed).coerceAtLeast(0)
-        val imageAnalysisRemaining: Int get() = (imageAnalysisLimit - imageAnalysisUsed).coerceAtLeast(0)
-        val imageGenerationRemaining: Int get() = (imageGenerationLimit - imageGenerationUsed).coerceAtLeast(0)
-    }
-
-    private enum class QuotaType {
-        TEXT_MESSAGE,
-        IMAGE_ANALYSIS,
-        IMAGE_GENERATION
-    }
-
-    companion object {
-        private const val KEY_PREMIUM_ACTIVE = "premium_active"
-        private const val KEY_USAGE_DAY = "usage_day"
-        private const val KEY_USAGE_TEXT = "usage_text_count"
-        private const val KEY_USAGE_IMAGE_ANALYSIS = "usage_image_analysis_count"
-        private const val KEY_USAGE_IMAGE_GENERATION = "usage_image_generation_count"
-
-        private const val FREE_DAILY_TEXT_LIMIT = 80
-        private const val FREE_DAILY_IMAGE_ANALYSIS_LIMIT = 8
-        private const val FREE_DAILY_IMAGE_GENERATION_LIMIT = 6
-    }
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val db = ChatDatabase.getDatabase(application)
     private val repo = ChatRepository(db.chatDao())
-    private val smartFeatures = SmartFeatureManager(application.applicationContext)
-    private val gson = Gson()
-    private var messagesJob: Job? = null
+    private val auth = FirebaseAuth.getInstance()
+    private val imageHttpClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(8, TimeUnit.SECONDS)
+        .build()
 
-    // ===== State =====
+    // ===== Delegated ViewModels =====
+    val personaViewModel = PersonaViewModel(application)
+    val multiAgentViewModel = MultiAgentViewModel(application, ApiManager(application), personaViewModel)
+    val monetizationViewModel = MonetizationViewModel(application)
+    private val apiManager = ApiManager(application)
+
+    // ===== Chat State =====
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
-    private val _conversations = MutableStateFlow<List<ConversationEntity>>(emptyList())
-    val conversations: StateFlow<List<ConversationEntity>> = _conversations
+    private val _conversations = MutableStateFlow<List<com.example.bamachat.data.local.ConversationEntity>>(emptyList())
+    val conversations: StateFlow<List<com.example.bamachat.data.local.ConversationEntity>> = _conversations
 
     private val _currentConversationId = MutableStateFlow<String?>(null)
     val currentConversationId: StateFlow<String?> = _currentConversationId
@@ -106,7 +99,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
 
-    private val _availableModels = MutableStateFlow<List<ModelInfo>>(getModelsForProvider())
+    private val _availableModels = MutableStateFlow<List<ModelInfo>>(emptyList())
     val availableModels: StateFlow<List<ModelInfo>> = _availableModels
 
     private val _selectedModel = MutableStateFlow(
@@ -114,24 +107,38 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     )
     val selectedModel: StateFlow<String> = _selectedModel
 
-    private val _selectedPersona = MutableStateFlow(loadPersonaFromPrefs())
-    val selectedPersona: StateFlow<Persona> = _selectedPersona
-
-    private val _customPersonaPrompt = MutableStateFlow(
-        prefs.getString("custom_persona_prompt", "") ?: ""
-    )
-    val customPersonaPrompt: StateFlow<String> = _customPersonaPrompt
-
     private val _chatSentiment = MutableStateFlow("neutral")
     val chatSentiment: StateFlow<String> = _chatSentiment
 
-    private val _usageStatus = MutableStateFlow(UsageStatus())
-    val usageStatus: StateFlow<UsageStatus> = _usageStatus
+    private val _emotionSignal = MutableStateFlow(
+        EmotionSignal(
+            label = "neutral",
+            sentiment = "neutral",
+            empathyHint = "Neutrale Stimmung. Antworte klar und hilfreich."
+        )
+    )
+    val emotionSignal: StateFlow<EmotionSignal> = _emotionSignal
 
-    private val _showPaywall = MutableStateFlow(false)
-    val showPaywall: StateFlow<Boolean> = _showPaywall
+    private val _messageFeedback = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val messageFeedback: StateFlow<Map<String, Boolean>> = _messageFeedback
 
-    // ===== Personas =====
+    private val _isBiometricAuthenticated = MutableStateFlow(false)
+    val isBiometricAuthenticated: StateFlow<Boolean> = _isBiometricAuthenticated
+
+    private val _userMemoryFacts = MutableStateFlow<List<String>>(emptyList())
+    val userMemoryFacts: StateFlow<List<String>> = _userMemoryFacts
+
+    private val _knowledgeGraphHints = MutableStateFlow<List<String>>(emptyList())
+    val knowledgeGraphHints: StateFlow<List<String>> = _knowledgeGraphHints
+
+    private var messagesJob: Job? = null
+
+    private data class LiveWebContext(
+        val promptContext: String,
+        val sources: List<ChatSource>,
+        val fetchedAtIso: String
+    )
+
     enum class Persona(val displayName: String, val emoji: String, val systemPrompt: String) {
         ASSISTANT(
             "Assistent", "🤖",
@@ -159,55 +166,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         ),
         THERAPIST(
             "Reflexions-Begleiter", "🧘",
-            "Du bist ein einfühlsamer Gesprächspartner. Höre zu, stelle hilfreiche Rückfragen und hilf beim Reflektieren. Du bist KEIN Ersatz für echte Therapie, weise bei ernsten Problemen freundlich darauf hin. Antworte auf Deutsch, warm und respektvoll."
+            "Du bist ein einfühlsamer Gesprächspartner. Höre zu, stelle hilfreiche Rückfragen und hilf beim Reflektieren. Du bist KEIN Ersatz für echte Therapie. Antworte auf Deutsch, warm und respektvoll."
         ),
         CUSTOM(
             "Eigene Persona", "✨",
-            "" // Wird zur Laufzeit aus customPersonaPrompt gefüllt
+            ""
         )
-    }
-
-    private fun loadPersonaFromPrefs(): Persona {
-        val name = prefs.getString("selected_persona", Persona.ASSISTANT.name) ?: Persona.ASSISTANT.name
-        return try { Persona.valueOf(name) } catch (_: Exception) { Persona.ASSISTANT }
-    }
-
-    private fun resolveSystemPrompt(): String {
-        val personaPrompt = if (_selectedPersona.value == Persona.CUSTOM) {
-            _customPersonaPrompt.value.ifBlank { Persona.ASSISTANT.systemPrompt }
-        } else {
-            _selectedPersona.value.systemPrompt
-        }
-        val agentStudioEnabled = prefs.getBoolean("agent_studio_enabled", false)
-        if (!agentStudioEnabled) return personaPrompt
-
-        val agentPreset = prefs.getString("agent_preset", "Generalist") ?: "Generalist"
-        val agentName = prefs.getString("agent_name", "Bama Agent") ?: "Bama Agent"
-        val agentGoal = prefs.getString("agent_goal", "") ?: ""
-        val agentRules = prefs.getString("agent_rules", "") ?: ""
-        val agentOutputStyle = prefs.getString("agent_output_style", "Klar und präzise") ?: "Klar und präzise"
-        val agentTools = prefs.getString("agent_tools", "Analyse, Problemlösung") ?: "Analyse, Problemlösung"
-
-        return """
-$personaPrompt
-
-[Agent-Studio aktiviert]
-Name: $agentName
-Rolle: $agentPreset
-Ziel: ${agentGoal.ifBlank { "Löse die Nutzeranfrage zuverlässig und handlungsorientiert." }}
-Regeln: ${agentRules.ifBlank { "Korrekt, transparent, fokussiert antworten." }}
-Ausgabestil: $agentOutputStyle
-Arbeitsweisen: $agentTools
-""".trim()
     }
 
     // ===== Init =====
     init {
         createNotificationChannel()
-        refreshMonetizationState()
+        monetizationViewModel.refreshMonetizationState()
+
         viewModelScope.launch {
             repo.getAllConversations().collectLatest { _conversations.value = it }
         }
+
         val lastConvId = prefs.getString("current_conversation_id", null)
         if (lastConvId != null) {
             switchConversation(lastConvId)
@@ -256,7 +231,7 @@ Arbeitsweisen: $agentTools
     fun newConversation() {
         viewModelScope.launch {
             val id = UUID.randomUUID().toString()
-            repo.createConversation(id, "Neuer Chat", _selectedPersona.value.name)
+            repo.createConversation(id, "Neuer Chat", personaViewModel.selectedPersona.value.name)
             switchConversation(id)
         }
     }
@@ -267,7 +242,10 @@ Arbeitsweisen: $agentTools
         _messages.value = emptyList()
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            repo.getMessages(id).collectLatest { _messages.value = it }
+            repo.getMessages(id).collectLatest { items ->
+                _messages.value = items
+                syncFeedbackForMessages(items)
+            }
         }
     }
 
@@ -286,43 +264,113 @@ Arbeitsweisen: $agentTools
         }
     }
 
-    // ===== Models =====
-    private fun getModelsForProvider(): List<ModelInfo> {
-        val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
-        return modelsFor(provider)
+    fun clearChat() {
+        val convId = _currentConversationId.value ?: return
+        viewModelScope.launch { repo.clearMessages(convId) }
     }
 
-    fun updateModelsForProvider(provider: String) {
-        _availableModels.value = modelsFor(provider)
-    }
+    // ===== Message Sending =====
+    fun sendMessage(text: String) {
+        if (text.isBlank()) return
 
-    private fun modelsFor(provider: String): List<ModelInfo> = when (provider) {
-        "OpenRouter" -> {
-            val visionOnly = prefs.getBoolean("openrouter_vision_only_models", true)
-            val modelList = if (visionOnly) ApiClient.OPENROUTER_VISION_MODELS else ApiClient.FREE_MODELS
-            modelList.map { id ->
-                ModelInfo(name = ApiClient.FREE_MODEL_DISPLAY_NAMES[id] ?: id, model = id)
-            }
+        val emotion = EmotionAnalyzer.analyze(text)
+        _emotionSignal.value = emotion
+        _chatSentiment.value = emotion.sentiment
+
+        AppTelemetry.logEvent("chat_user_message", mapOf("length_bucket" to text.length.coerceAtMost(400).toString()))
+
+        // Image Generation Query Detection
+        if (isImageQuery(text)) {
+            generateImage(text, skipUserMessage = true)
+            return
         }
-        "Gemini" -> listOf(ModelInfo("Gemini 1.5 Flash", "gemini-1.5-flash-latest"))
-        "Ollama" -> listOf(ModelInfo("Ollama (Lokal)", "default"))
-        else -> emptyList()
-    }
 
-    // ===== Send Message with Image =====
-    fun sendMessageWithImage(text: String, imageUri: Uri) {
-        if (text.isBlank() && imageUri == Uri.EMPTY) return
+        // Check Quota
+        val explicitWebQuery = isExplicitWebQuery(text)
+        if (explicitWebQuery) {
+            if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.WEB_RESEARCH)) {
+                _errorMessage.value = "Live-Web-Limit erreicht. Upgrade oder Credits nötig."
+                return
+            }
+        } else if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.TEXT_MESSAGE)) {
+            return
+        }
+
         val convId = _currentConversationId.value
         if (convId == null) {
             viewModelScope.launch {
                 val newId = UUID.randomUUID().toString()
-                repo.createConversation(newId, "Neuer Chat", _selectedPersona.value.name)
+                repo.createConversation(newId, "Neuer Chat", personaViewModel.selectedPersona.value.name)
+                switchConversation(newId)
+                sendMessage(text)
+            }
+            return
+        }
+
+        val userMessage = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            isUser = true,
+            timestamp = System.currentTimeMillis()
+        )
+
+        viewModelScope.launch {
+            repo.saveMessage(convId, userMessage)
+
+            // Auto-title first message
+            val current = _conversations.value.firstOrNull { it.id == convId }
+            if (current != null && current.title == "Neuer Chat") {
+                val newTitle = text.take(40).ifBlank { "Chat" }
+                repo.renameConversation(convId, newTitle)
+            }
+
+            // Extract memory facts & knowledge graph
+            val extractedFacts = MemoryFactExtractor.extractFacts(text)
+            extractedFacts.forEach { fact ->
+                repo.saveUserMemoryFact(
+                    personaName = "GLOBAL",
+                    factText = fact,
+                    confidence = 0.72f,
+                    sourceMessageId = userMessage.id
+                )
+            }
+
+            val extractedEdges = KnowledgeGraphExtractor.extractEdges(text)
+            extractedEdges.forEach { edge ->
+                repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = 0.7f)
+            }
+
+            // Send via API
+            _isLoading.value = true
+            try {
+                val runtimeContext = buildRuntimeContextForUserText(text)
+                sendChatViaApi(convId, text, runtimeContext)
+            } catch (e: Exception) {
+                handleError(e)
+            } finally {
+                _isLoading.value = false
+                _isStreaming.value = false
+            }
+        }
+    }
+
+    fun sendMessageWithImage(text: String, imageUri: Uri) {
+        if (text.isBlank() && imageUri == Uri.EMPTY) return
+
+        if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_ANALYSIS)) {
+            return
+        }
+
+        val convId = _currentConversationId.value
+        if (convId == null) {
+            viewModelScope.launch {
+                val newId = UUID.randomUUID().toString()
+                repo.createConversation(newId, "Neuer Chat", personaViewModel.selectedPersona.value.name)
                 switchConversation(newId)
                 sendMessageWithImage(text, imageUri)
             }
             return
         }
-        if (!consumeImageMessageQuota()) return
 
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
@@ -343,632 +391,65 @@ Arbeitsweisen: $agentTools
 
             _isLoading.value = true
             try {
-                val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
-                val geminiKey = prefs.getString("gemini_api_key", "") ?: ""
-                val canUseGeminiVision = geminiKey.isNotBlank()
-                val imageAnalysisText = "Der Benutzer hat ein Bild gesendet. Analysiere das Bild präzise und antworte auf Deutsch."
-                val combinedText = if (text.isNotBlank()) "$imageAnalysisText\n\nBenutzer-Nachricht: $text" else imageAnalysisText
-
-                when (provider) {
-                    "Gemini" -> sendViaGeminiWithImage(convId, combinedText, imageUri)
-                    "OpenRouter" -> {
-                        val openRouterVisionOk = sendViaOpenRouterWithImage(convId, combinedText, imageUri)
-                        if (!openRouterVisionOk && canUseGeminiVision) {
-                            sendViaGeminiWithImage(convId, combinedText, imageUri)
-                        } else {
-                            if (!openRouterVisionOk) {
-                                val enhancedText = "$combinedText\n\n[System: Hinweis - Für echte Bildanalyse in BamaChat bitte Gemini API-Key hinterlegen.]"
-                                sendViaOpenRouterStream(convId, enhancedText)
-                            }
-                        }
-                    }
-                    "Ollama" -> {
-                        if (canUseGeminiVision) {
-                            sendViaGeminiWithImage(convId, combinedText, imageUri)
-                        } else {
-                            val enhancedText = "$combinedText\n\n[System: Hinweis - Lokaler text-only Modus aktiv. Für Bildanalyse bitte Gemini API-Key setzen.]"
-                            sendViaOllama(convId, enhancedText)
-                        }
-                    }
-                    else -> _errorMessage.value = "Unbekannter KI-Anbieter: $provider"
-                }
-            } catch (e: retrofit2.HttpException) {
-                handleHttpError(e)
-            } catch (e: Exception) {
-                handleGenericError(e)
-            } finally {
-                _isLoading.value = false
-                _isStreaming.value = false
-            }
-        }
-    }
-
-    private suspend fun sendViaGeminiWithImage(convId: String, text: String, imageUri: Uri) {
-        val apiKey = prefs.getString("gemini_api_key", "") ?: ""
-        if (apiKey.isBlank()) {
-            _errorMessage.value = "Kein Gemini API-Key gesetzt! Für Bild-Analyse ist Gemini erforderlich."
-            return
-        }
-        try {
-            val bitmap = withContext(Dispatchers.IO) { decodeBitmapFromUri(imageUri) }
-            if (bitmap == null) {
-                _errorMessage.value = "Bild konnte nicht geladen werden. Bitte anderes Bild wählen."
-                return
-            }
-
-            val model = ApiClient.createGeminiModel(apiKey)
-            val prompt = content {
-                text("Systemanweisung: ${resolveSystemPrompt()}\n\n$text")
-                image(bitmap)
-            }
-            val response = model.generateContent(prompt)
-            val reply = response.text?.takeIf { it.isNotBlank() }
-                ?: "Keine auswertbare Bildantwort erhalten."
-            val msg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = reply,
-                isUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            repo.saveMessage(convId, msg)
-            showNotification("BamaChat (Bildanalyse)", reply)
-        } catch (e: Exception) {
-            _errorMessage.value = "Bild-Analyse fehlgeschlagen: ${e.localizedMessage ?: "Unbekannter Fehler"}"
-        }
-    }
-
-    private suspend fun sendViaOpenRouterWithImage(convId: String, text: String, imageUri: Uri): Boolean {
-        val apiKey = prefs.getString("openrouter_api_key", "") ?: ""
-        if (apiKey.isBlank()) return false
-
-        return try {
-            val imageDataUrl = withContext(Dispatchers.IO) { encodeImageAsDataUrl(imageUri) } ?: return false
-            val selectedModel = prefs.getString("openrouter_model", "google/gemma-3-27b-it:free")
-                ?: "google/gemma-3-27b-it:free"
-            val modelId = if (ApiClient.isVisionCapableOpenRouterModel(selectedModel)) {
-                selectedModel
-            } else {
-                ApiClient.OPENROUTER_DEFAULT_VISION_MODEL
-            }
-            val request = OpenRouterVisionChatRequest(
-                model = modelId,
-                messages = listOf(
-                    OpenRouterVisionMessage(
-                        role = "system",
-                        content = listOf(
-                            OpenRouterVisionContentPart(
-                                type = "text",
-                                text = resolveSystemPrompt()
-                            )
-                        )
-                    ),
-                    OpenRouterVisionMessage(
-                        role = "user",
-                        content = listOf(
-                            OpenRouterVisionContentPart(type = "text", text = text),
-                            OpenRouterVisionContentPart(
-                                type = "image_url",
-                                imageUrl = OpenRouterImageUrl(url = imageDataUrl)
-                            )
-                        )
-                    )
-                ),
-                maxTokens = 1024,
-                temperature = 0.4f,
-                stream = false
-            )
-
-            val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
-            val response = service.chatCompletionVision(request)
-            val reply = response.choices?.firstOrNull()?.message?.content?.trim().orEmpty()
-            if (reply.isBlank()) return false
-
-            val msg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = reply,
-                isUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            repo.saveMessage(convId, msg)
-            showNotification("BamaChat (OpenRouter Vision)", reply)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    // ===== Send Message =====
-    fun sendMessage(text: String) {
-        if (text.isBlank()) return
-
-        // Bild-Generierung: wenn der User nach einem Bild fragt
-        if (isImageQuery(text)) {
-            generateImage(text, skipUserMessage = true)
-            return
-        }
-
-        if (!consumeQuota(QuotaType.TEXT_MESSAGE)) return
-
-        val convId = _currentConversationId.value
-        if (convId == null) {
-            viewModelScope.launch {
-                val newId = UUID.randomUUID().toString()
-                repo.createConversation(newId, "Neuer Chat", _selectedPersona.value.name)
-                switchConversation(newId)
-                sendMessage(text)
-            }
-            return
-        }
-
-        val userMessage = ChatMessage(
-            id = UUID.randomUUID().toString(),
-            text = text,
-            isUser = true,
-            timestamp = System.currentTimeMillis()
-        )
-
-        viewModelScope.launch {
-            repo.saveMessage(convId, userMessage)
-
-            // Auto-Titel: erste User-Nachricht wird Titel
-            val current = _conversations.value.firstOrNull { it.id == convId }
-            if (current != null && current.title == "Neuer Chat") {
-                val newTitle = text.take(40).ifBlank { "Chat" }
-                repo.renameConversation(convId, newTitle)
-            }
-
-            _isLoading.value = true
-
-            // Wetter-Tool: wenn der User nach Wetter fragt, Standort holen + Antwort vorbereiten
-            val weatherContext = if (smartFeatures.isWeatherQuery(text)) {
-                try { smartFeatures.getWeatherData() } catch (_: Exception) { null }
-            } else null
-
-            try {
-                val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
-                val effectiveText = if (weatherContext != null) {
-                    "$text\n\n[System: Hier sind aktuelle Wetterdaten für den Nutzer-Standort: $weatherContext]"
-                } else text
-
-                when (provider) {
-                    "OpenRouter" -> sendViaOpenRouterStream(convId, effectiveText)
-                    "Gemini" -> sendViaGemini(convId, effectiveText)
-                    "Ollama" -> sendViaOllama(convId, effectiveText)
-                    else -> _errorMessage.value = "Unbekannter KI-Anbieter: $provider"
-                }
-            } catch (e: retrofit2.HttpException) {
-                handleHttpError(e)
-            } catch (e: Exception) {
-                handleGenericError(e)
-            } finally {
-                _isLoading.value = false
-                _isStreaming.value = false
-            }
-        }
-    }
-
-    /**
-     * Multi-Provider Auto-Fallback. Versucht alle konfigurierten Provider in Reihenfolge.
-     * Provider-Reihenfolge (von schnell/grosszügig zu sparsam):
-     *   Cerebras → Groq → OpenRouter → Together
-     */
-    private suspend fun sendViaOpenRouterStream(convId: String, text: String) {
-        val multiEnabled = prefs.getBoolean("multi_provider", true)
-
-        data class ProviderConfig(
-            val provider: ApiClient.Provider,
-            val apiKey: String,
-            val defaultModel: String
-        )
-
-        val cerebrasKey = prefs.getString("cerebras_api_key", "") ?: ""
-        val groqKey = prefs.getString("groq_api_key", "") ?: ""
-        val openRouterKey = prefs.getString("openrouter_api_key", "") ?: ""
-        val togetherKey = prefs.getString("together_api_key", "") ?: ""
-        val openRouterModel = prefs.getString("openrouter_model", "google/gemma-3-27b-it:free")
-            ?: "google/gemma-3-27b-it:free"
-
-        // Build try-list based on configured keys
-        val tryList = if (multiEnabled) {
-            listOfNotNull(
-                if (cerebrasKey.isNotBlank()) ProviderConfig(ApiClient.Provider.CEREBRAS, cerebrasKey, ApiClient.CEREBRAS_DEFAULT) else null,
-                if (groqKey.isNotBlank()) ProviderConfig(ApiClient.Provider.GROQ, groqKey, ApiClient.GROQ_DEFAULT) else null,
-                if (openRouterKey.isNotBlank()) ProviderConfig(ApiClient.Provider.OPENROUTER, openRouterKey, openRouterModel) else null,
-                if (togetherKey.isNotBlank()) ProviderConfig(ApiClient.Provider.TOGETHER, togetherKey, ApiClient.TOGETHER_DEFAULT) else null
-            )
-        } else {
-            // Nur den expliziten Provider nutzen
-            val explicit = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
-            listOfNotNull(
-                when (explicit) {
-                    "OpenRouter" -> if (openRouterKey.isNotBlank()) ProviderConfig(ApiClient.Provider.OPENROUTER, openRouterKey, openRouterModel) else null
-                    "Groq" -> if (groqKey.isNotBlank()) ProviderConfig(ApiClient.Provider.GROQ, groqKey, ApiClient.GROQ_DEFAULT) else null
-                    "Cerebras" -> if (cerebrasKey.isNotBlank()) ProviderConfig(ApiClient.Provider.CEREBRAS, cerebrasKey, ApiClient.CEREBRAS_DEFAULT) else null
-                    "Together" -> if (togetherKey.isNotBlank()) ProviderConfig(ApiClient.Provider.TOGETHER, togetherKey, ApiClient.TOGETHER_DEFAULT) else null
-                    else -> null
-                }
-            )
-        }
-
-        if (tryList.isEmpty()) {
-            _errorMessage.value = "Kein API-Key konfiguriert!\n\n" +
-                    "Geh zu Einstellungen → KI-Anbieter und trage mindestens einen Key ein:\n\n" +
-                    "🚀 Cerebras (cloud.cerebras.ai) — sehr schnell, kostenlos\n" +
-                    "⚡ Groq (console.groq.com) — schnell, kostenlos\n" +
-                    "🌐 OpenRouter (openrouter.ai) — viele freie Modelle"
-            return
-        }
-
-        val messages = buildOpenRouterHistory(text)
-        val errors = mutableListOf<String>()
-
-        for ((index, config) in tryList.withIndex()) {
-            try {
-                val request = OpenRouterChatRequest(
-                    model = config.defaultModel,
-                    messages = messages,
-                    maxTokens = 1024,
-                    temperature = 0.7f,
-                    stream = true
-                )
-                val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
-                val response = service.chatCompletionStream(request)
-
-                if (!response.isSuccessful) {
-                    val code = response.code()
-                    val body = response.errorBody()?.string()
-                    errors += "${config.provider.emoji} ${config.provider.id}: HTTP $code"
-                    // Fallback nur bei spezifischen Codes (Rate-Limit, Modell-Fehler, Auth-Fehler)
-                    if (code in listOf(401, 402, 403, 404, 429, 500, 502, 503)) {
-                        if (index < tryList.size - 1) continue
-                    }
-                    _errorMessage.value = formatHttpError(code, body) + "\n\n${errors.joinToString("\n")}"
-                    return
-                }
-
-                val body = response.body() ?: continue
-
-                val assistantMsg = ChatMessage(
-                    id = UUID.randomUUID().toString(),
-                    text = "",
-                    isUser = false,
-                    timestamp = System.currentTimeMillis()
-                )
-                repo.saveMessage(convId, assistantMsg, touchConversation = false)
-                _isStreaming.value = true
-
-                val persistIntervalMs = 90L
-                val minCharsPerPersist = 24
-                val builder = StringBuilder()
-                var lastPersistAt = 0L
-                var lastPersistedLength = 0
-                withContext(Dispatchers.IO) {
-                    body.byteStream().bufferedReader().use { reader ->
-                        var line: String?
-                        while (reader.readLine().also { line = it } != null) {
-                            val l = line ?: continue
-                            if (!l.startsWith("data:")) continue
-                            val payload = l.removePrefix("data:").trim()
-                            if (payload.isBlank() || payload == "[DONE]") continue
-                            try {
-                                val chunk = gson.fromJson(payload, OpenRouterStreamChunk::class.java)
-                                val delta = chunk.choices?.firstOrNull()?.delta?.content
-                                if (!delta.isNullOrEmpty()) {
-                                    builder.append(delta)
-                                    val now = System.currentTimeMillis()
-                                    val enoughTime = (now - lastPersistAt) >= persistIntervalMs
-                                    val enoughChars = (builder.length - lastPersistedLength) >= minCharsPerPersist
-                                    if (enoughTime || enoughChars) {
-                                        repo.saveMessage(
-                                            convId,
-                                            assistantMsg.copy(text = builder.toString()),
-                                            touchConversation = false
-                                        )
-                                        lastPersistAt = now
-                                        lastPersistedLength = builder.length
-                                    }
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-
-                if (builder.isNotEmpty() && lastPersistedLength != builder.length) {
-                    repo.saveMessage(
-                        convId,
-                        assistantMsg.copy(text = builder.toString()),
-                        touchConversation = false
-                    )
-                }
-                if (builder.isNotEmpty()) {
-                    repo.touchConversation(convId)
-                }
-
-                if (builder.isNotEmpty()) {
-                    showNotification("BamaChat", builder.toString())
-                    return
+                val systemPrompt = personaViewModel.getSystemPromptCached(personaViewModel.selectedPersona.value)
+                val userInstruction = text.ifBlank { "Beschreibe den Bildinhalt präzise und strukturiert." }
+                val ocrContext = if (prefs.getBoolean("local_ocr_enabled", true)) {
+                    MultimodalProcessor.extractImageText(getApplication(), imageUri)
+                        .takeIf { it.isNotBlank() }
                 } else {
-                    // Leere Antwort, nächster Provider
-                    errors += "${config.provider.emoji} ${config.provider.id}: leere Antwort"
-                    if (index < tryList.size - 1) continue
+                    null
+                }
+                val analysisText = buildString {
+                    append("Analysiere dieses Bild präzise und antworte auf Deutsch.")
+                    append("\n\nNutzerhinweis:\n")
+                    append(userInstruction)
+                    if (!ocrContext.isNullOrBlank()) {
+                        append("\n\nZusätzlicher OCR-Text aus dem Bild (kann Fehler enthalten):\n")
+                        append(ocrContext.take(3_500))
+                    }
+                }
+                
+                val imageDataUrl = withContext(Dispatchers.IO) { encodeImageAsDataUrl(imageUri) }
+                if (imageDataUrl != null) {
+                    val result = apiManager.analyzeImage(systemPrompt, analysisText, imageDataUrl)
+                    if (result.success) {
+                        repo.saveMessage(
+                            convId,
+                            ChatMessage(
+                                id = UUID.randomUUID().toString(),
+                                text = result.content,
+                                isUser = false,
+                                timestamp = System.currentTimeMillis()
+                            )
+                        )
+                        showNotification("BamaChat (Bildanalyse)", result.content)
+                    } else {
+                        _errorMessage.value = "Bildanalyse fehlgeschlagen: ${result.error}"
+                    }
+                } else {
+                    _errorMessage.value = "Bild konnte nicht kodiert werden."
                 }
             } catch (e: Exception) {
-                errors += "${config.provider.emoji} ${config.provider.id}: ${e.message?.take(50) ?: "Fehler"}"
-                if (index < tryList.size - 1) continue
-                // Letzter Provider failed
-                handleGenericError(e)
-                _errorMessage.value = (_errorMessage.value ?: "") + "\n\nVersuchte Provider:\n${errors.joinToString("\n")}"
-                return
+                handleError(e)
+            } finally {
+                _isLoading.value = false
             }
-        }
-
-        // Alle Provider haben versagt
-        _errorMessage.value = "Alle Provider haben versagt:\n${errors.joinToString("\n")}\n\nGeh ggf. zu Mini-Apps für Beschäftigung."
-    }
-
-    private suspend fun sendViaGemini(convId: String, text: String) {
-        val apiKey = prefs.getString("gemini_api_key", "") ?: ""
-        if (apiKey.isBlank()) {
-            _errorMessage.value = "Kein Gemini API-Key gesetzt!"
-            return
-        }
-        try {
-            val model = ApiClient.createGeminiModel(apiKey)
-            val response = model.generateContent(text)
-            val reply = response.text ?: "Keine Antwort von Gemini erhalten."
-            val msg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = reply,
-                isUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            repo.saveMessage(convId, msg)
-            showNotification("BamaChat (Gemini)", reply)
-        } catch (e: Exception) {
-            handleGenericError(e)
-        }
-    }
-
-    private suspend fun sendViaOllama(convId: String, text: String) {
-        try {
-            val baseUrl = prefs.getString("ollama_url", "http://192.168.178.162:11434/")
-                ?: "http://192.168.178.162:11434/"
-            val ollamaMessages = buildOllamaHistory(text)
-            val request = OllamaChatRequest(
-                model = _selectedModel.value.ifBlank { "llama3" },
-                messages = ollamaMessages,
-                stream = false
-            )
-            val service = ApiClient.createOllamaService(baseUrl)
-            val response = service.chat("${baseUrl}api/chat", request)
-            val reply = response.message.content
-            if (reply.isBlank()) {
-                _errorMessage.value = "Keine Antwort von Ollama. Server erreichbar?"
-                return
-            }
-            val msg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = reply,
-                isUser = false,
-                timestamp = System.currentTimeMillis()
-            )
-            repo.saveMessage(convId, msg)
-            showNotification("BamaChat (Ollama)", reply)
-        } catch (e: Exception) {
-            handleGenericError(e)
-        }
-    }
-
-    // ===== Helpers =====
-    private fun buildOpenRouterHistory(latestUserText: String? = null): List<OpenRouterMessage> {
-        val list = mutableListOf<OpenRouterMessage>()
-        list.add(OpenRouterMessage(role = "system", content = resolveSystemPrompt()))
-        val recentMessages = _messages.value.takeLast(10).toMutableList()
-        if (!latestUserText.isNullOrBlank()) {
-            val last = recentMessages.lastOrNull()
-            if (last == null || !last.isUser || last.text != latestUserText) {
-                recentMessages.add(
-                    ChatMessage(
-                        id = "pending-user",
-                        text = latestUserText,
-                        isUser = true
-                    )
-                )
-            }
-        }
-        recentMessages.forEach { msg ->
-            list.add(OpenRouterMessage(
-                role = if (msg.isUser) "user" else "assistant",
-                content = msg.text
-            ))
-        }
-        return list
-    }
-
-    private fun buildOllamaHistory(latestUserText: String? = null): List<OllamaMessage> {
-        val list = mutableListOf<OllamaMessage>()
-        list.add(OllamaMessage(role = "system", content = resolveSystemPrompt()))
-        val recentMessages = _messages.value.takeLast(10).toMutableList()
-        if (!latestUserText.isNullOrBlank()) {
-            val last = recentMessages.lastOrNull()
-            if (last == null || !last.isUser || last.text != latestUserText) {
-                recentMessages.add(
-                    ChatMessage(
-                        id = "pending-user",
-                        text = latestUserText,
-                        isUser = true
-                    )
-                )
-            }
-        }
-        recentMessages.forEach { msg ->
-            list.add(OllamaMessage(
-                role = if (msg.isUser) "user" else "assistant",
-                content = msg.text
-            ))
-        }
-        return list
-    }
-
-    private fun decodeBitmapFromUri(uri: Uri): Bitmap? {
-        return try {
-            val app = getApplication<Application>()
-            val contentResolver = app.contentResolver
-            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(contentResolver, uri)
-                ImageDecoder.decodeBitmap(source)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaStore.Images.Media.getBitmap(contentResolver, uri)
-            }
-
-            val maxSide = 1600
-            val width = bitmap.width
-            val height = bitmap.height
-            val largestSide = maxOf(width, height)
-            if (largestSide <= maxSide) return bitmap
-
-            val scale = maxSide.toFloat() / largestSide.toFloat()
-            val scaledWidth = (width * scale).toInt().coerceAtLeast(1)
-            val scaledHeight = (height * scale).toInt().coerceAtLeast(1)
-            Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun encodeImageAsDataUrl(uri: Uri): String? {
-        val bitmap = decodeBitmapFromUri(uri) ?: return null
-        val output = ByteArrayOutputStream()
-        val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
-        if (!compressed) return null
-        val base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
-        return "data:image/jpeg;base64,$base64"
-    }
-
-    fun refreshMonetizationState() {
-        ensureUsageDayIsCurrent()
-        val isPremium = prefs.getBoolean(KEY_PREMIUM_ACTIVE, false)
-        if (isPremium) _showPaywall.value = false
-        _usageStatus.value = UsageStatus(
-            isPremium = isPremium,
-            textUsed = prefs.getInt(KEY_USAGE_TEXT, 0),
-            textLimit = FREE_DAILY_TEXT_LIMIT,
-            imageAnalysisUsed = prefs.getInt(KEY_USAGE_IMAGE_ANALYSIS, 0),
-            imageAnalysisLimit = FREE_DAILY_IMAGE_ANALYSIS_LIMIT,
-            imageGenerationUsed = prefs.getInt(KEY_USAGE_IMAGE_GENERATION, 0),
-            imageGenerationLimit = FREE_DAILY_IMAGE_GENERATION_LIMIT
-        )
-    }
-
-    fun dismissPaywall() {
-        _showPaywall.value = false
-    }
-
-    fun openPaywall() {
-        _showPaywall.value = true
-    }
-
-    private fun consumeImageMessageQuota(): Boolean {
-        val isPremium = prefs.getBoolean(KEY_PREMIUM_ACTIVE, false)
-        if (isPremium) return true
-        ensureUsageDayIsCurrent()
-        val textUsed = prefs.getInt(KEY_USAGE_TEXT, 0)
-        val imageUsed = prefs.getInt(KEY_USAGE_IMAGE_ANALYSIS, 0)
-        if (textUsed >= FREE_DAILY_TEXT_LIMIT || imageUsed >= FREE_DAILY_IMAGE_ANALYSIS_LIMIT) {
-            if (textUsed >= FREE_DAILY_TEXT_LIMIT) {
-                _errorMessage.value = "Tageslimit erreicht: $FREE_DAILY_TEXT_LIMIT Nachrichten. Upgrade auf Premium für unbegrenzt."
-            } else {
-                _errorMessage.value = "Tageslimit erreicht: $FREE_DAILY_IMAGE_ANALYSIS_LIMIT Bildanalysen. Upgrade auf Premium für unbegrenzt."
-            }
-            refreshMonetizationState()
-            _showPaywall.value = true
-            return false
-        }
-        prefs.edit()
-            .putInt(KEY_USAGE_TEXT, textUsed + 1)
-            .putInt(KEY_USAGE_IMAGE_ANALYSIS, imageUsed + 1)
-            .apply()
-        refreshMonetizationState()
-        return true
-    }
-
-    private fun consumeQuota(type: QuotaType): Boolean {
-        val isPremium = prefs.getBoolean(KEY_PREMIUM_ACTIVE, false)
-        if (isPremium) return true
-        ensureUsageDayIsCurrent()
-
-        val (prefKey, limit, label) = when (type) {
-            QuotaType.TEXT_MESSAGE -> Triple(KEY_USAGE_TEXT, FREE_DAILY_TEXT_LIMIT, "Nachrichten")
-            QuotaType.IMAGE_ANALYSIS -> Triple(KEY_USAGE_IMAGE_ANALYSIS, FREE_DAILY_IMAGE_ANALYSIS_LIMIT, "Bildanalysen")
-            QuotaType.IMAGE_GENERATION -> Triple(KEY_USAGE_IMAGE_GENERATION, FREE_DAILY_IMAGE_GENERATION_LIMIT, "Bildgenerierungen")
-        }
-
-        val current = prefs.getInt(prefKey, 0)
-        if (current >= limit) {
-            _errorMessage.value = "Tageslimit erreicht: $limit $label. Upgrade auf Premium für unbegrenzt."
-            refreshMonetizationState()
-            _showPaywall.value = true
-            return false
-        }
-
-        prefs.edit().putInt(prefKey, current + 1).apply()
-        refreshMonetizationState()
-        return true
-    }
-
-    private fun ensureUsageDayIsCurrent() {
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val storedDay = prefs.getString(KEY_USAGE_DAY, null)
-        if (storedDay == today) return
-        prefs.edit()
-            .putString(KEY_USAGE_DAY, today)
-            .putInt(KEY_USAGE_TEXT, 0)
-            .putInt(KEY_USAGE_IMAGE_ANALYSIS, 0)
-            .putInt(KEY_USAGE_IMAGE_GENERATION, 0)
-            .apply()
-    }
-
-    private fun handleHttpError(e: retrofit2.HttpException) {
-        val code = e.code()
-        val body = try { e.response()?.errorBody()?.string() } catch (_: Exception) { null }
-        _errorMessage.value = formatHttpError(code, body)
-    }
-
-    private fun formatHttpError(code: Int, body: String?): String = when (code) {
-        401 -> "API-Key ungültig (401). Prüfe deinen Key in den Einstellungen."
-        402 -> "Guthaben aufgebraucht (402)."
-        403 -> "Zugriff verweigert (403). Modell evtl. nicht freigeschaltet."
-        404 -> "Modell nicht gefunden (404). Wähle ein anderes in den Einstellungen.\n\n${body?.take(200) ?: ""}"
-        429 -> "Rate-Limit erreicht (429). Warte 1 Min oder wechsle das Modell."
-        500, 502, 503 -> "OpenRouter-Server-Problem ($code). Gleich nochmal."
-        else -> "HTTP $code\n\n${body?.take(300) ?: ""}"
-    }
-
-    private fun handleGenericError(e: Exception) {
-        _errorMessage.value = when {
-            e.message?.contains("timeout", ignoreCase = true) == true ->
-                "Zeitüberschreitung. Prüfe Internetverbindung."
-            e.message?.contains("Unable to resolve host", ignoreCase = true) == true ->
-                "Keine Internetverbindung."
-            e.message?.contains("CLEARTEXT", ignoreCase = true) == true ->
-                "HTTPS-Fehler. App-Update nötig."
-            else ->
-                "Fehler: ${e.localizedMessage ?: e.message ?: "Unbekannt"}"
         }
     }
 
     // ===== Image Generation =====
     fun generateImage(prompt: String, skipUserMessage: Boolean = false) {
         if (prompt.isBlank()) return
-        if (!consumeQuota(QuotaType.IMAGE_GENERATION)) return
+
+        if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_GENERATION)) {
+            return
+        }
 
         viewModelScope.launch {
-            // Ensure we have a conversation ID
             var convId = _currentConversationId.value
             if (convId == null) {
                 val newId = UUID.randomUUID().toString()
-                repo.createConversation(newId, "Neuer Chat", _selectedPersona.value.name)
+                repo.createConversation(newId, "Neuer Chat", personaViewModel.selectedPersona.value.name)
                 switchConversation(newId)
                 convId = newId
             }
@@ -990,13 +471,13 @@ Arbeitsweisen: $agentTools
 
             _isLoading.value = true
             try {
-                val seed = (1000..9999).random()
-                val encodedPrompt = java.net.URLEncoder.encode(prompt, "UTF-8")
-                val imageUrl = "https://image.pollinations.ai/prompt/$encodedPrompt?width=1024&height=1024&seed=$seed&model=flux"
+                val generationRequest = buildImageGenerationRequest(prompt)
+                val imageUrl = resolveWorkingImageUrl(generationRequest.candidateUrls)
+                    ?: generationRequest.candidateUrls.first()
 
                 val imageMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
-                    text = "",
+                    text = generationRequest.displayPrompt,
                     isUser = false,
                     timestamp = System.currentTimeMillis(),
                     imageUrl = imageUrl
@@ -1004,7 +485,7 @@ Arbeitsweisen: $agentTools
                 repo.saveMessage(convId, imageMessage)
                 showNotification("BamaChat Bild", "Bild generiert: $prompt")
             } catch (e: Exception) {
-                handleGenericError(e)
+                handleError(e)
             } finally {
                 _isLoading.value = false
             }
@@ -1020,27 +501,430 @@ Arbeitsweisen: $agentTools
         return imageKeywords.any { lower.contains(it) }
     }
 
-    // ===== Setters =====
-    fun clearChat() {
-        val convId = _currentConversationId.value ?: return
-        viewModelScope.launch { repo.clearMessages(convId) }
+    private data class ImageGenerationRequest(
+        val displayPrompt: String,
+        val candidateUrls: List<String>
+    )
+
+    private fun buildImageGenerationRequest(userPrompt: String): ImageGenerationRequest {
+        val cleanPrompt = userPrompt.replace(Regex("\\s+"), " ").trim()
+        val enhancedPrompt = buildEnhancedImagePrompt(cleanPrompt)
+        val encodedPrompt = URLEncoder.encode(enhancedPrompt, "UTF-8")
+        val seed = (10_000..99_999).random()
+        val (width, height) = chooseImageResolution(cleanPrompt)
+        val models = listOf("flux", "flux-realism", "turbo")
+        val base = "https://image.pollinations.ai/prompt/$encodedPrompt"
+        val urls = models.map { model ->
+            "$base?width=$width&height=$height&seed=$seed&model=$model&nologo=true&enhance=true"
+        }
+        return ImageGenerationRequest(
+            displayPrompt = cleanPrompt,
+            candidateUrls = urls
+        )
     }
 
-    fun dismissError() { _errorMessage.value = null }
+    private fun buildEnhancedImagePrompt(prompt: String): String {
+        val lower = prompt.lowercase(Locale.getDefault())
+        val baseStyle = when {
+            lower.contains("logo") -> "clean vector logo, minimal, sharp edges, white background"
+            lower.contains("portrait") || lower.contains("gesicht") -> "portrait photography, natural skin texture, cinematic rim light, 85mm lens"
+            lower.contains("anime") || lower.contains("manga") -> "high quality anime art, dynamic composition, crisp line art"
+            lower.contains("produkt") || lower.contains("product") -> "studio product photography, softbox lighting, high detail"
+            else -> "ultra detailed, professional composition, realistic lighting, high contrast, sharp focus"
+        }
+        return "$prompt. Style: $baseStyle. Avoid: blurry, low quality, distorted anatomy, artifacts, extra fingers, unreadable text."
+    }
 
+    private fun chooseImageResolution(prompt: String): Pair<Int, Int> {
+        val lower = prompt.lowercase(Locale.getDefault())
+        return when {
+            lower.contains("banner") -> 1536 to 896
+            lower.contains("wallpaper") -> 1344 to 768
+            lower.contains("portrait") || lower.contains("hochformat") -> 896 to 1344
+            else -> 1024 to 1024
+        }
+    }
+
+    private suspend fun resolveWorkingImageUrl(candidates: List<String>): String? {
+        return withContext(Dispatchers.IO) {
+            candidates.firstOrNull { candidate ->
+                runCatching {
+                    val request = Request.Builder().url(candidate).get().build()
+                    imageHttpClient.newCall(request).execute().use { response ->
+                        response.isSuccessful
+                    }
+                }.getOrDefault(false)
+            }
+        }
+    }
+
+    // ===== Multimodal Assets =====
+    fun importAdvancedMultimodalAsset(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val app = getApplication<Application>()
+                val fileInfo = queryFileInfo(uri)
+                val fileSizeMb = fileInfo.second?.div(1024 * 1024) ?: 0L
+                val rawCategory = detectCategoryForLimit(uri, fileInfo.first)
+                val maxBytes = if (rawCategory == MultimodalAsset.Category.AUDIO || rawCategory == MultimodalAsset.Category.VIDEO) {
+                    100L * 1024L * 1024L
+                } else {
+                    40L * 1024L * 1024L
+                }
+
+                if (fileInfo.second != null && fileInfo.second!! > maxBytes) {
+                    val maxMb = maxBytes / (1024L * 1024L)
+                    _errorMessage.value = "Datei zu groß (${fileSizeMb} MB). Max: ${maxMb} MB."
+                    return@launch
+                }
+
+                val asset = MultimodalProcessor.parse(app, uri)
+                when (asset.category) {
+                    MultimodalAsset.Category.IMAGE -> {
+                        sendMessageWithImage("Analysiere dieses Bild.", uri)
+                    }
+                    MultimodalAsset.Category.AUDIO -> {
+                        transcribeAndIngestMedia(uri, asset.title, "audio")
+                    }
+                    MultimodalAsset.Category.VIDEO -> {
+                        transcribeAndIngestMedia(uri, asset.title, "video")
+                    }
+                    MultimodalAsset.Category.PDF,
+                    MultimodalAsset.Category.DOCX,
+                    MultimodalAsset.Category.XLSX,
+                    MultimodalAsset.Category.TEXT_DOC -> {
+                        importKnowledgeDocument(uri)
+                    }
+                    else -> {
+                        _errorMessage.value = "Dateityp nicht unterstützt."
+                    }
+                }
+            } catch (e: Exception) {
+                AppTelemetry.logError("multimodal_import", e)
+                _errorMessage.value = "Import fehlgeschlagen: ${e.message}"
+            }
+        }
+    }
+
+    fun importKnowledgeDocument(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val doc = DocumentIngestor.ingest(getApplication(), uri)
+                if (doc == null) {
+                    _errorMessage.value = "Dokument konnte nicht gelesen werden."
+                    return@launch
+                }
+
+                splitIntoChunks(doc.text, 700, 120)
+                    .take(40)
+                    .forEach { chunk ->
+                        val keywords = extractKeywords(chunk).joinToString(",")
+                        repo.saveKnowledgeChunk(
+                            sourceTitle = doc.title,
+                            content = chunk,
+                            keywords = keywords,
+                            sourceType = doc.sourceType
+                        )
+                        KnowledgeGraphExtractor.extractEdges(chunk).forEach { edge ->
+                            repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = 1.0f)
+                        }
+                    }
+
+                AppTelemetry.logEvent("knowledge_import_success", mapOf("source" to doc.sourceType))
+                _errorMessage.value = "Wissensdokument importiert: ${doc.title}"
+            } catch (e: Exception) {
+                AppTelemetry.logError("knowledge_import", e)
+                _errorMessage.value = "Dokument-Import fehlgeschlagen: ${e.message}"
+            }
+        }
+    }
+
+    private suspend fun transcribeAndIngestMedia(uri: Uri, title: String, sourceType: String) {
+        val groqKey = prefs.getString("groq_api_key", "") ?: ""
+
+        if (groqKey.isNotBlank()) {
+            val transcriptionManager = AudioTranscriptionManager(getApplication())
+            val transcript = transcriptionManager.transcribeWithGroq(uri, groqKey)
+
+            if (!transcript.isNullOrBlank()) {
+                ingestKnowledgeText(title, "${sourceType}_transcript", transcript)
+            }
+        }
+
+        if (sourceType == "video") {
+            val keyframeSummary = VideoKeyframeExtractor.summarize(getApplication(), uri)
+            if (keyframeSummary.isNotBlank()) {
+                ingestKnowledgeText(title, "video_keyframes", keyframeSummary)
+            }
+        }
+
+        _errorMessage.value = if (groqKey.isBlank()) {
+            "Für Transkription Groq API-Key setzen."
+        } else {
+            "Multimodal importiert: $title"
+        }
+    }
+
+    private suspend fun ingestKnowledgeText(title: String, sourceType: String, text: String): Boolean {
+        if (text.length < 20) return false
+
+        splitIntoChunks(text, 700, 120)
+            .take(50)
+            .forEach { chunk ->
+                val keywords = extractKeywords(chunk).joinToString(",")
+                repo.saveKnowledgeChunk(
+                    sourceTitle = title,
+                    content = chunk,
+                    keywords = keywords,
+                    sourceType = sourceType
+                )
+                KnowledgeGraphExtractor.extractEdges(chunk).forEach { edge ->
+                    repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = 0.9f)
+                }
+            }
+        return true
+    }
+
+    // ===== API Calls =====
+    private suspend fun sendChatViaApi(
+        convId: String,
+        text: String,
+        runtimeContext: String? = null
+    ) {
+        val systemPrompt = personaViewModel.getSystemPromptCached(personaViewModel.selectedPersona.value)
+        val webContext = resolveLiveWebContext(text)
+        val messages = buildOpenRouterHistory(
+            latestUserText = text,
+            liveWebContext = webContext?.promptContext,
+            runtimeContext = runtimeContext
+        )
+
+        _isStreaming.value = true
+
+        val assistantMsg = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            text = "",
+            isUser = false,
+            timestamp = System.currentTimeMillis()
+        )
+        repo.saveMessage(convId, assistantMsg, touchConversation = false)
+        val streamingBuffer = StringBuilder()
+
+        val result = apiManager.streamChatResponse(
+            systemPrompt = systemPrompt,
+            userMessages = messages,
+            onChunkReceived = { chunk ->
+                viewModelScope.launch {
+                    streamingBuffer.append(chunk)
+                    repo.saveMessage(
+                        convId,
+                        assistantMsg.copy(text = streamingBuffer.toString()),
+                        touchConversation = false
+                    )
+                }
+            },
+            onError = { error ->
+                _errorMessage.value = error
+            }
+        )
+
+        if (result.success && result.content.isNotBlank()) {
+            val finalized = assistantMsg.copy(
+                text = result.content,
+                sources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso
+            )
+            repo.saveMessage(convId, finalized, touchConversation = true)
+            showNotification("BamaChat", result.content)
+        }
+    }
+
+    private fun buildOpenRouterHistory(
+        latestUserText: String? = null,
+        liveWebContext: String? = null,
+        runtimeContext: String? = null
+    ): List<OpenRouterMessage> {
+        val list = mutableListOf<OpenRouterMessage>()
+        val recentMessages = _messages.value.takeLast(10).toMutableList()
+
+        if (!latestUserText.isNullOrBlank()) {
+            val last = recentMessages.lastOrNull()
+            if (last == null || !last.isUser || last.text != latestUserText) {
+                recentMessages.add(
+                    ChatMessage(
+                        id = "pending-user",
+                        text = latestUserText,
+                        isUser = true
+                    )
+                )
+            }
+        }
+
+        val lastUserMessageId = recentMessages.lastOrNull { it.isUser }?.id
+        recentMessages.forEach { msg ->
+            val isLatestUserTurn = msg.isUser && msg.id == lastUserMessageId
+            val content = if (isLatestUserTurn) {
+                buildString {
+                    append(msg.text)
+                    if (!runtimeContext.isNullOrBlank()) {
+                        append("\n\n")
+                        append(runtimeContext)
+                    }
+                    if (!liveWebContext.isNullOrBlank()) {
+                        append("\n\n")
+                        append(liveWebContext)
+                    }
+                }
+            } else {
+                msg.text
+            }
+            list.add(OpenRouterMessage(
+                role = if (msg.isUser) "user" else "assistant",
+                content = content
+            ))
+        }
+
+        return list
+    }
+
+    private suspend fun resolveLiveWebContext(text: String): LiveWebContext? {
+        if (!apiManager.shouldUseLiveWebResearch(text)) return null
+
+        val explicitWeb = isExplicitWebQuery(text)
+        if (!explicitWeb && !monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.WEB_RESEARCH)) {
+            return null
+        }
+
+        val cleanedQuery = text.replace("web:", "", ignoreCase = true).trim()
+        val research = apiManager.runLiveWebResearch(cleanedQuery)
+        if (!research.success || research.sources.isEmpty()) {
+            if (explicitWeb) {
+                _errorMessage.value = "Live-Recherche fehlgeschlagen: ${research.error.ifBlank { "Keine Quellen gefunden." }}"
+            }
+            return null
+        }
+
+        val sourceRows = research.sources.mapIndexed { index, source ->
+            val published = source.publishedAt?.takeIf { it.isNotBlank() }?.let { " (Stand: $it)" } ?: ""
+            "${index + 1}. ${source.title}$published\nURL: ${source.url}\nSnippet: ${source.snippet.take(280)}"
+        }
+        val weatherQuery = isWeatherIntent(text)
+        val contextBlock = buildString {
+            appendLine("Live-Web-Recherche (aktuell, verifizierbar):")
+            appendLine("Query: ${research.query}")
+            sourceRows.forEach { row ->
+                appendLine(row)
+                appendLine()
+            }
+            if (weatherQuery) {
+                appendLine("Wenn die Quellen Wetterdaten enthalten: antworte zuerst konkret mit Ort, Temperatur/Trend und kurzer Empfehlung.")
+            }
+            appendLine("Nutze diese Quellen nur wenn relevant. Erfinde keine URLs.")
+        }.trim()
+
+        return LiveWebContext(
+            promptContext = contextBlock,
+            sources = research.sources.map {
+                ChatSource(
+                    title = it.title,
+                    url = it.url,
+                    snippet = it.snippet,
+                    publishedAt = it.publishedAt
+                )
+            },
+            fetchedAtIso = research.fetchedAtIso
+        )
+    }
+
+    private fun isExplicitWebQuery(text: String): Boolean {
+        return text.trimStart().lowercase(Locale.getDefault()).startsWith("web:")
+    }
+
+    private fun isWeatherIntent(text: String): Boolean {
+        val lower = text.lowercase(Locale.getDefault())
+        val weatherKeywords = listOf(
+            "wetter", "temperatur", "regen", "wind", "vorhersage",
+            "forecast", "weather", "niederschlag", "gewitter"
+        )
+        return weatherKeywords.any { lower.contains(it) }
+    }
+
+    private suspend fun buildRuntimeContextForUserText(text: String): String? {
+        if (!prefs.getBoolean("auto_language_detection_enabled", true)) return null
+
+        val detectedLanguage = MultimodalProcessor.detectLanguageCode(text) ?: return null
+        val appLanguage = prefs.getString("language", "de")?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        if (appLanguage.isBlank() || detectedLanguage == appLanguage) return null
+
+        val appLanguageName = languageDisplayName(appLanguage)
+        return "Sprach-Kontext: Nutzertext vermutlich in '$detectedLanguage'. " +
+            "Verstehe die Anfrage in dieser Sprache; antworte standardmäßig in $appLanguageName " +
+            "(Code: $appLanguage), außer der Nutzer verlangt explizit eine andere Ausgabesprache."
+    }
+
+    private fun languageDisplayName(code: String): String = when (code.lowercase(Locale.ROOT)) {
+        "de" -> "Deutsch"
+        "en" -> "Englisch"
+        "fr" -> "Französisch"
+        "es" -> "Spanisch"
+        "pl" -> "Polnisch"
+        "tr" -> "Türkisch"
+        "ar" -> "Arabisch"
+        else -> "der App-Sprache"
+    }
+
+    // ===== Message Feedback =====
+    fun setMessageFeedback(messageId: String, helpful: Boolean) {
+        val persona = personaViewModel.selectedPersona.value
+        val assistantMsg = _messages.value.firstOrNull { it.id == messageId && !it.isUser } ?: return
+        val userContext = _messages.value
+            .takeWhile { it.id != messageId }
+            .lastOrNull { it.isUser }
+            ?.text
+            .orEmpty()
+
+        viewModelScope.launch {
+            repo.savePersonaFeedback(persona.name, messageId, helpful)
+            _messageFeedback.value = _messageFeedback.value.toMutableMap().apply {
+                put(messageId, helpful)
+            }
+
+            if (helpful && userContext.isNotBlank() && assistantMsg.text.isNotBlank()) {
+                personaViewModel.addManualTrainingExample(persona, userContext, assistantMsg.text)
+            }
+        }
+    }
+
+    fun getFeedbackForMessage(messageId: String): Boolean? = _messageFeedback.value[messageId]
+
+    // ===== State Management =====
     fun setSelectedModel(model: String) {
         _selectedModel.value = model
         prefs.edit().putString("openrouter_model", model).apply()
     }
 
-    fun setSelectedPersona(persona: Persona) {
-        _selectedPersona.value = persona
-        prefs.edit().putString("selected_persona", persona.name).apply()
+    fun setBiometricAuthenticated(authenticated: Boolean) {
+        _isBiometricAuthenticated.value = authenticated
     }
 
-    fun setCustomPersonaPrompt(prompt: String) {
-        _customPersonaPrompt.value = prompt
-        prefs.edit().putString("custom_persona_prompt", prompt).apply()
+    fun dismissError() {
+        _errorMessage.value = null
+    }
+
+    fun addManualTrainingExample(
+        persona: Persona,
+        userInput: String,
+        idealResponse: String
+    ) {
+        personaViewModel.addManualTrainingExample(persona, userInput, idealResponse)
+    }
+
+    fun rollbackPromptForPersona(persona: Persona, versionId: Long) {
+        personaViewModel.rollbackPromptForPersona(persona, versionId)
+    }
+
+    fun setSelectedPersona(persona: Persona) {
+        personaViewModel.setSelectedPersona(persona)
     }
 
     fun getChatExportText(): String {
@@ -1049,8 +933,208 @@ Arbeitsweisen: $agentTools
         }
     }
 
+    // ===== Privat: Hilfsfunktionen =====
+
+    private suspend fun syncFeedbackForMessages(items: List<ChatMessage>) {
+        val current = _messageFeedback.value.toMutableMap()
+        var changed = false
+        items.forEach { msg ->
+            if (!msg.isUser && msg.id.isNotBlank() && !current.containsKey(msg.id)) {
+                val feedback = repo.getFeedbackForMessage(msg.id)
+                if (feedback != null) {
+                    current[msg.id] = feedback
+                    changed = true
+                }
+            }
+        }
+        if (changed) _messageFeedback.value = current
+    }
+
+    private fun queryFileInfo(uri: Uri): Pair<String?, Long?> {
+        return runCatching {
+            getApplication<Application>().contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (!cursor.moveToFirst()) return@use null
+                val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+                val size = if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) cursor.getLong(sizeIdx) else null
+                name to size
+            }
+        }.getOrNull() ?: (null to null)
+    }
+
+    private fun detectCategoryForLimit(uri: Uri, fileName: String?): MultimodalAsset.Category {
+        val app = getApplication<Application>()
+        val mime = app.contentResolver.getType(uri).orEmpty().lowercase()
+        val ext = fileName?.substringAfterLast('.', "")?.lowercase().orEmpty()
+        return when {
+            mime.startsWith("audio/") || ext in setOf("mp3", "wav", "m4a", "ogg") -> MultimodalAsset.Category.AUDIO
+            mime.startsWith("video/") || ext in setOf("mp4", "mov", "mkv", "webm") -> MultimodalAsset.Category.VIDEO
+            else -> MultimodalAsset.Category.UNKNOWN
+        }
+    }
+
+    private fun decodeBitmapFromUri(uri: Uri): Bitmap? {
+        return try {
+            val contentResolver = getApplication<Application>().contentResolver
+            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val source = ImageDecoder.createSource(contentResolver, uri)
+                ImageDecoder.decodeBitmap(source)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaStore.Images.Media.getBitmap(contentResolver, uri)
+            }
+
+            val maxSide = 1600
+            if (maxOf(bitmap.width, bitmap.height) <= maxSide) return bitmap
+
+            val scale = maxSide.toFloat() / maxOf(bitmap.width, bitmap.height).toFloat()
+            val scaledWidth = (bitmap.width * scale).toInt().coerceAtLeast(1)
+            val scaledHeight = (bitmap.height * scale).toInt().coerceAtLeast(1)
+            Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun encodeImageAsDataUrl(uri: Uri): String? {
+        val bitmap = decodeBitmapFromUri(uri) ?: return null
+        val output = ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)) return null
+        val base64 = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+        return "data:image/jpeg;base64,$base64"
+    }
+
+    private fun splitIntoChunks(text: String, chunkSize: Int, overlap: Int): List<String> {
+        if (text.isBlank()) return emptyList()
+        val clean = text.replace(Regex("\\s+"), " ").trim()
+        if (clean.length <= chunkSize) return listOf(clean)
+
+        val chunks = mutableListOf<String>()
+        var start = 0
+        while (start < clean.length) {
+            val end = (start + chunkSize).coerceAtMost(clean.length)
+            chunks += clean.substring(start, end).trim()
+            if (end == clean.length) break
+            start = (end - overlap).coerceAtLeast(0)
+        }
+        return chunks
+    }
+
+    private fun extractKeywords(text: String): List<String> {
+        val stopWords = setOf(
+            "und", "oder", "aber", "nicht", "mit", "für", "der", "die", "das", "ein", "eine",
+            "ist", "sind", "war", "wie", "ich", "du", "wir", "sie", "man", "dass", "wenn"
+        )
+        return text.lowercase()
+            .replace(Regex("[^a-zA-ZäöüÄÖÜß0-9\\s]"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.length >= 4 && it !in stopWords }
+            .distinct()
+    }
+
+    private fun handleError(e: Exception) {
+        AppTelemetry.logError("chat_error", e)
+        _errorMessage.value = when {
+            e.message?.contains("timeout", ignoreCase = true) == true -> "Zeitüberschreitung. Internet prüfen."
+            e.message?.contains("Unable to resolve host", ignoreCase = true) == true -> "Keine Internetverbindung."
+            else -> "Fehler: ${e.message ?: "Unbekannt"}"
+        }
+    }
+
     override fun onCleared() {
         messagesJob?.cancel()
         super.onCleared()
     }
+
+    // ===== Persona Character & Autonomy Profile (für Screen-Dialog) =====
+    fun getPersonaCharacterProfile(persona: Persona): PersonaCharacterProfile {
+        val profile = personaViewModel.getPersonaProfile(persona)
+        return PersonaCharacterProfile(
+            empathy = profile.empathy,
+            creativity = profile.creativity,
+            directness = profile.directness
+        )
+    }
+
+    fun setPersonaCharacterProfile(persona: Persona, profile: PersonaCharacterProfile) {
+        val prefs = getApplication<Application>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt("persona_character_${persona.name.lowercase()}_empathy", profile.empathy)
+            .putInt("persona_character_${persona.name.lowercase()}_creativity", profile.creativity)
+            .putInt("persona_character_${persona.name.lowercase()}_directness", profile.directness)
+            .apply()
+        personaViewModel.systemPromptCache.clear()
+    }
+
+    fun getPersonaAutonomyProfile(persona: Persona): AutonomyProfile {
+        val prefs = getApplication<Application>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        return AutonomyProfile(
+            coreBelief = prefs.getString("autonomy_core_belief_${persona.name.lowercase()}", "") ?: "",
+            instinct = prefs.getString("autonomy_instinct_${persona.name.lowercase()}", "") ?: "",
+            signatureOpinionStyle = prefs.getString("autonomy_opinion_style_${persona.name.lowercase()}", "") ?: "",
+            selfCorrectionStrictness = prefs.getInt("autonomy_self_correction_${persona.name.lowercase()}", 50)
+        )
+    }
+
+    fun setPersonaAutonomyProfile(persona: Persona, profile: AutonomyProfile) {
+        val prefs = getApplication<Application>().getSharedPreferences("settings", Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("autonomy_core_belief_${persona.name.lowercase()}", profile.coreBelief)
+            .putString("autonomy_instinct_${persona.name.lowercase()}", profile.instinct)
+            .putString("autonomy_opinion_style_${persona.name.lowercase()}", profile.signatureOpinionStyle)
+            .putInt("autonomy_self_correction_${persona.name.lowercase()}", profile.selfCorrectionStrictness)
+            .apply()
+        personaViewModel.systemPromptCache.clear()
+    }
+
+    fun resetPromptForPersona(persona: Persona) {
+        personaViewModel.resetPromptForPersona(persona)
+    }
+
+    fun getPersonaProfile(persona: Persona): PersonaCharacterProfile {
+        val profile = personaViewModel.getPersonaProfile(persona)
+        return PersonaCharacterProfile(
+            empathy = profile.empathy,
+            creativity = profile.creativity,
+            directness = profile.directness
+        )
+    }
+
+    fun refreshMonetizationState() {
+        monetizationViewModel.refreshMonetizationState()
+    }
+
+    fun openPaywall() {
+        monetizationViewModel.openPaywall()
+    }
+
+    fun dismissPaywall() {
+        monetizationViewModel.dismissPaywall()
+    }
+
+    data class PersonaCharacterProfile(
+        val empathy: Int = 50,
+        val creativity: Int = 50,
+        val directness: Int = 50
+    )
+
+    data class AutonomyProfile(
+        val coreBelief: String = "",
+        val instinct: String = "",
+        val signatureOpinionStyle: String = "",
+        val selfCorrectionStrictness: Int = 50
+    )
+
+    val selectedPersona: StateFlow<Persona>
+        get() = personaViewModel.selectedPersona
+
+    val customPersonaPrompt: StateFlow<String>
+        get() = personaViewModel.customPersonaPrompt
+
+    val usageStatus: StateFlow<MonetizationViewModel.UsageStatus>
+        get() = monetizationViewModel.usageStatus
+
+    val showPaywall: StateFlow<Boolean>
+        get() = monetizationViewModel.showPaywall
 }

@@ -6,7 +6,12 @@ build/
 *.iml
 local.properties
 *.jks
+keystore.properties
 .env
 *.zip
 apk_contents/
 apk_contents_new/
+app/google-services.json
+hs_err_pid*.log
+replay_pid*.log
+functions/node_modules/

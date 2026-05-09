@@ -13,7 +13,10 @@ import androidx.compose.material3.Surface
 import androidx.lifecycle.ViewModelProvider
 import com.example.bamachat.ui.theme.BamaChatTheme
 import com.example.bamachat.ui.screen.BamaChatApp
+import com.example.bamachat.util.AppTelemetry
+import com.example.bamachat.ui.viewmodel.AuthViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
+import com.example.bamachat.ui.viewmodel.CollabViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import androidx.fragment.app.FragmentActivity
 
@@ -46,17 +49,25 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppTelemetry.logEvent("app_open")
 
         checkAndRequestPermissions()
         enableEdgeToEdge()
 
         val chatViewModel = ViewModelProvider(this)[ChatViewModel::class.java]
         val settingsViewModel = ViewModelProvider(this)[SettingsViewModel::class.java]
+        val authViewModel = ViewModelProvider(this)[AuthViewModel::class.java]
+        val collabViewModel = ViewModelProvider(this)[CollabViewModel::class.java]
 
         setContent {
             BamaChatTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    BamaChatApp(chatViewModel, settingsViewModel)
+                    BamaChatApp(
+                        chatViewModel = chatViewModel,
+                        settingsViewModel = settingsViewModel,
+                        authViewModel = authViewModel,
+                        collabViewModel = collabViewModel
+                    )
                 }
             }
         }

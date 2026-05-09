@@ -6,8 +6,18 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [ChatMessageEntity::class, ConversationEntity::class],
-    version = 3,
+    entities = [
+        ChatMessageEntity::class,
+        ConversationEntity::class,
+        PersonaMemoryEntity::class,
+        PersonaFeedbackEntity::class,
+        PersonaPromptVersionEntity::class,
+        UserMemoryFactEntity::class,
+        KnowledgeChunkEntity::class,
+        KnowledgeEdgeEntity::class,
+        PersonaTrainingExampleEntity::class
+    ],
+    version = 7,
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -24,7 +34,7 @@ abstract class ChatDatabase : RoomDatabase() {
                     ChatDatabase::class.java,
                     "chat_database"
                 )
-                    .fallbackToDestructiveMigration()
+                    .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                 INSTANCE = instance
                 instance

@@ -15,10 +15,12 @@ BamaChat ist eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-P
   - Trainingsbeispiele pro Persona (Fine-Tuning-MVP)
   - Merge-Logik bei Login/Persona-Wechsel (lokal + cloud)
 - Multi-Provider-Flow (OpenRouter, Gemini, Ollama + Fallback-Logik)
+- Optionale Live-Web-Recherche für Agenten (über Firebase Function Proxy + Quellenanhang)
 - Sprachfeatures:
   - STT (Diktieren)
   - TTS lokal
   - optionale Cloud-Voice (ElevenLabs)
+  - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
   - Bild hochladen und analysieren
   - Bildgenerierung
@@ -54,6 +56,7 @@ BamaChat ist eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-P
 - Hinweis: nur für angemeldete Nutzer (nicht Gastmodus)
 - Feature 8 (MVP): Multimodal Advanced
   - Bild/Screenshot-Analyse
+  - Optional lokale OCR für Bild-Chat-Kontext (ML Kit Text Recognition)
   - Dokumentimport inkl. TXT/MD/CSV/JSON
   - DOCX/XLSX-Extraktion (Basis)
   - PDF-Textlayer-Extraktion (PDFBox Android)
@@ -128,6 +131,36 @@ Damit du ohne Cloud-IaC-Plugin sauber arbeiten kannst, ist ein kleines IaC-Setup
 Hinweis:
 - `infra/firebase/environments.json` steuert die Projekt-IDs (`dev`/`prod`).
 - Vor `prod`-Deploy zuerst `dev` testen.
+
+## Live-Web-Recherche aktivieren (Agenten mit aktuellen Quellen)
+1. Firebase Functions Dependencies installieren:
+```powershell
+cd functions
+npm install
+cd ..
+```
+2. Optional Secrets setzen (empfohlen):
+```powershell
+firebase functions:secrets:set WEBSEARCH_TOKEN
+firebase functions:secrets:set BRAVE_SEARCH_API_KEY
+firebase functions:secrets:set GITHUB_TOKEN
+```
+3. Function deployen:
+```powershell
+npx firebase-tools deploy --only functions
+```
+4. In der App unter `Einstellungen -> KI & Modelle`:
+- `Live-Web-Recherche` aktivieren
+- `Web-Search Function URL` eintragen (z. B. `https://websearch-<hash>-ew.a.run.app` oder `https://europe-west1-<project>.cloudfunctions.net/webSearch`)
+- Optional `Function Access Token` und `Domain-Allowlist` setzen
+- Optional `GitHub bevorzugen` aktivieren (empfohlen für Coding/Repo/Issue-Fragen)
+- Optional `Auto-Spracherkennung` aktivieren
+- Optional `Lokale OCR für Bilder` aktivieren
+
+Hinweise:
+- Ohne `BRAVE_SEARCH_API_KEY` nutzt die Function DuckDuckGo als Fallback.
+- Mit `GITHUB_TOKEN` werden GitHub-Recherchetreffer (Repos/Issues) stabiler und mit höherem Rate-Limit geliefert.
+- Web-Recherche hat eigenes Tageslimit (`webSearchRequests`) + optionalen Credit-Fallback.
 
 Wichtiger Hinweis zu Persona-Cloud-Sync:
 - Firestore-Rules müssen die folgenden Subcollections unter `users/{uid}` erlauben:

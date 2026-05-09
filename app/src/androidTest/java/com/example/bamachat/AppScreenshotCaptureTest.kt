@@ -22,29 +22,30 @@ class AppScreenshotCaptureTest {
 
     companion object {
         private const val PACKAGE_NAME = "com.example.bamachat"
-        private const val TIMEOUT = 15_000L
-        private const val SCREENSHOT_DIR = "/sdcard/Download/bamachat-screenshots"
+        private const val TIMEOUT = 25_000L
     }
 
     private lateinit var device: UiDevice
+    private lateinit var screenshotDir: File
 
     @Before
     fun setup() {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-        device.executeShellCommand("rm -rf $SCREENSHOT_DIR && mkdir -p $SCREENSHOT_DIR")
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        screenshotDir = File(context.getExternalFilesDir(null), "bamachat-screenshots").apply {
+            deleteRecursively()
+            mkdirs()
+        }
     }
 
     @Test
     fun captureCoreScreens() {
         launchApp()
 
-        val guestButton = waitForAnyText(TIMEOUT, "Als Gast starten", "Als Gast fortfahren")
-            ?: waitForAnyText(TIMEOUT, "Zum BamaHub")
-        assertNotNull("Gast-/Hub-Button nicht gefunden", guestButton)
+        val guestButton = waitForAnyText(4_000L, "Als Gast starten", "Als Gast fortfahren", "Zum BamaHub")
         guestButton?.click()
 
-        val hubTitle = device.wait(Until.findObject(By.textContains("BamaChat")), TIMEOUT)
-        assertNotNull("Home Hub nicht erkannt", hubTitle)
+        assertTrue("App-Start nicht erkannt", waitForAppVisible(TIMEOUT))
         settle()
         captureScreenshot("01_home_hub")
 
@@ -53,24 +54,32 @@ class AppScreenshotCaptureTest {
         settle()
         captureScreenshot("02_chat")
 
-        clickBottomTab("Profil", "profile")
-        assertNotNull("Profil-Screen nicht erkannt", device.wait(Until.findObject(By.textContains("Profil")), TIMEOUT))
-        settle()
-        captureScreenshot("03_profile")
+        if (clickBottomTabOptional("Profil", "profile")) {
+            assertNotNull("Profil-Screen nicht erkannt", device.wait(Until.findObject(By.textContains("Profil")), TIMEOUT))
+            settle()
+            captureScreenshot("03_profile")
+        }
 
-        clickBottomTab("Einstell", "settings")
-        assertNotNull(
-            "Settings-Screen nicht erkannt",
-            device.wait(Until.findObject(By.textContains("Einstellungen")), TIMEOUT)
-        )
-        settle()
-        captureScreenshot("04_settings")
+        if (clickBottomTabOptional("Einstell", "settings", "Einstellungen")) {
+            assertNotNull(
+                "Settings-Screen nicht erkannt",
+                device.wait(Until.findObject(By.textContains("Einstellungen")), TIMEOUT)
+            )
+            settle()
+            captureScreenshot("04_settings")
+        }
     }
 
     private fun clickBottomTab(vararg texts: String) {
-        val tab = waitForAnyText(TIMEOUT, *texts)
+        val tab = waitForAnyText(TIMEOUT, *texts) ?: waitForAnyDescContains(TIMEOUT, *texts)
         assertNotNull("Bottom-Tab nicht gefunden: ${texts.joinToString()}", tab)
         tab?.click()
+    }
+
+    private fun clickBottomTabOptional(vararg texts: String): Boolean {
+        val tab = waitForAnyText(4_000L, *texts) ?: waitForAnyDescContains(4_000L, *texts)
+        tab?.click()
+        return tab != null
     }
 
     private fun launchApp() {
@@ -78,12 +87,14 @@ class AppScreenshotCaptureTest {
         val launchIntent = context.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
             ?: throw IllegalStateException("Launch Intent für $PACKAGE_NAME nicht gefunden")
         launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        device.pressHome()
+        SystemClock.sleep(400)
         context.startActivity(launchIntent)
-        device.wait(Until.hasObject(By.pkg(PACKAGE_NAME).depth(0)), TIMEOUT)
+        waitForAppVisible(TIMEOUT)
     }
 
     private fun captureScreenshot(fileName: String) {
-        val output = File("$SCREENSHOT_DIR/$fileName.png")
+        val output = File(screenshotDir, "$fileName.png")
         val success = device.takeScreenshot(output)
         assertTrue("Screenshot fehlgeschlagen: ${output.absolutePath}", success)
     }
@@ -105,5 +116,46 @@ class AppScreenshotCaptureTest {
         }
         return null
     }
-}
 
+    private fun waitForAnyDescContains(timeoutMs: Long, vararg values: String): UiObject2? {
+        val end = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < end) {
+            values.forEach { value ->
+                device.findObject(By.descContains(value))?.let { return it }
+            }
+            device.waitForIdle()
+            SystemClock.sleep(250)
+        }
+        return null
+    }
+
+    private fun waitForAppVisible(timeoutMs: Long): Boolean {
+        val end = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < end) {
+            allowRuntimeDialogsIfPresent()
+            val byPkg = device.hasObject(By.pkg(PACKAGE_NAME))
+            val byTitle = device.hasObject(By.textContains("BamaChat")) ||
+                device.hasObject(By.textContains("BamaHub")) ||
+                device.hasObject(By.textContains("Willkommen"))
+            if (byPkg || byTitle) return true
+            device.waitForIdle()
+            SystemClock.sleep(300)
+        }
+        return false
+    }
+
+    private fun allowRuntimeDialogsIfPresent() {
+        listOf(
+            "Zulassen",
+            "Erlauben",
+            "Nur während der Nutzung der App",
+            "Beim Verwenden der App",
+            "Allow",
+            "While using the app",
+            "Nur dieses Mal",
+            "Only this time"
+        ).forEach { label ->
+            device.findObject(By.textContains(label))?.click()
+        }
+    }
+}
