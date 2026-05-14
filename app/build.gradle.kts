@@ -5,9 +5,23 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
-    id("com.google.gms.google-services")
+    id("com.google.gms.google-services") apply false
     id("com.google.firebase.crashlytics")
     id("io.gitlab.arturbosch.detekt") version "1.23.6"
+}
+
+val googleServicesFiles = listOf(
+    "google-services.json",
+    "src/main/google-services.json",
+    "src/debug/google-services.json",
+    "src/release/google-services.json"
+).map { layout.projectDirectory.file(it).asFile }
+val hasGoogleServicesJson = googleServicesFiles.any { it.exists() }
+
+if (hasGoogleServicesJson) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.warn("google-services.json fehlt - Google Services Plugin wird fuer lokalen Build deaktiviert.")
 }
 
 val keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -24,7 +38,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.bamachat"
-        minSdk = 26
+        minSdk = 33
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -97,7 +111,10 @@ dependencies {
     val mlKitTranslateVersion = "17.0.3"
     val mlKitLanguageIdVersion = "17.0.6"
     val mlKitSmartReplyVersion = "17.0.4"
+    val bouncyCastleVersion = "1.84"
+    val credentialsVersion = "1.2.0-rc01"
 
+    implementation(project(":sharedCore"))
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
@@ -153,10 +170,16 @@ dependencies {
     // Jsoup for Link Previews
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.bouncycastle:bcprov-jdk15to18:$bouncyCastleVersion")
+    implementation("org.bouncycastle:bcpkix-jdk15to18:$bouncyCastleVersion")
+    implementation("org.bouncycastle:bcutil-jdk15to18:$bouncyCastleVersion")
 
     // Location Services
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation("androidx.credentials:credentials:$credentialsVersion")
+    implementation("androidx.credentials:credentials-play-services-auth:$credentialsVersion")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
 
     // Google Play Billing (Abo/Paywall Vorbereitung)
     implementation("com.android.billingclient:billing-ktx:8.3.0")

@@ -57,6 +57,8 @@ fun SettingsDialog(
     val liveWebApiToken by viewModel.liveWebApiToken.collectAsState()
     val liveWebAllowedDomains by viewModel.liveWebAllowedDomains.collectAsState()
     val liveWebPreferGithub by viewModel.liveWebPreferGithub.collectAsState()
+    val photoAiCloudEndpoint by viewModel.photoAiCloudEndpoint.collectAsState()
+    val photoAiCloudApiToken by viewModel.photoAiCloudApiToken.collectAsState()
     val selectedOpenRouterModel by viewModel.selectedOpenRouterModel.collectAsState()
     val openRouterVisionOnlyModels by viewModel.openRouterVisionOnlyModels.collectAsState()
     val agentStudioEnabled by viewModel.agentStudioEnabled.collectAsState()
@@ -87,10 +89,27 @@ fun SettingsDialog(
     val streamingEnabled by viewModel.streamingEnabled.collectAsState()
     val showTimestamps by viewModel.showTimestamps.collectAsState()
     val bubbleAnimations by viewModel.bubbleAnimations.collectAsState()
+    val developerModeEnabled by viewModel.developerModeEnabled.collectAsState()
+    val developerUnlimitedTraining by viewModel.developerUnlimitedTraining.collectAsState()
+    val developerRealtimeCollabTesting by viewModel.developerRealtimeCollabTesting.collectAsState()
+    val agentConfirmToolActions by viewModel.agentConfirmToolActions.collectAsState()
+    val automationQuickActionsEnabled by viewModel.automationQuickActionsEnabled.collectAsState()
+    val privacyStrictModeEnabled by viewModel.privacyStrictModeEnabled.collectAsState()
+    val voicePushToTalkEnabled by viewModel.voicePushToTalkEnabled.collectAsState()
+    val projectWorkspaces by viewModel.projectWorkspaces.collectAsState()
+    val activeWorkspaceId by viewModel.activeWorkspaceId.collectAsState()
+    val workspaceChatFilterEnabled by viewModel.workspaceChatFilterEnabled.collectAsState()
     val language by viewModel.language.collectAsState()
     val autoLanguageDetectionEnabled by viewModel.autoLanguageDetectionEnabled.collectAsState()
     val localOcrEnabled by viewModel.localOcrEnabled.collectAsState()
     val uiDesignPreset by viewModel.uiDesignPreset.collectAsState()
+    val displayPreset by viewModel.displayPreset.collectAsState()
+    val compactChatHeader by viewModel.compactChatHeader.collectAsState()
+    val connectChatBottomBars by viewModel.connectChatBottomBars.collectAsState()
+    val glassEffectsEnabled by viewModel.glassEffectsEnabled.collectAsState()
+    val uiCornerRoundnessScale by viewModel.uiCornerRoundnessScale.collectAsState()
+    val uiShadowIntensityScale by viewModel.uiShadowIntensityScale.collectAsState()
+    val uiSurfaceOpacity by viewModel.uiSurfaceOpacity.collectAsState()
     val guestAutoClearOnAccountSignIn by viewModel.guestAutoClearOnAccountSignIn.collectAsState()
     val guestAutoClearOnSignOut by viewModel.guestAutoClearOnSignOut.collectAsState()
     val cloudPersonaLastSyncAt by viewModel.cloudPersonaLastSyncAt.collectAsState()
@@ -100,6 +119,7 @@ fun SettingsDialog(
     val context = LocalContext.current
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
+    var newWorkspaceName by remember { mutableStateOf("") }
     LaunchedEffect(initialSection) {
         if (!initialSection.isNullOrBlank()) {
             expandedSection = initialSection
@@ -222,6 +242,13 @@ fun SettingsDialog(
                             onSelect = { viewModel.setUiDesignPreset(it) }
                         )
                     }
+                    SettingRow("Anzeige-Preset", "Kompakt, Standard oder Komfort") {
+                        DropdownSelector(
+                            value = displayPreset,
+                            items = SettingsViewModel.DISPLAY_PRESET_OPTIONS,
+                            onSelect = { viewModel.setDisplayPreset(it) }
+                        )
+                    }
                     SettingRow("Zeitstempel anzeigen", "Uhrzeit unter Nachrichten") {
                         Switch(checked = showTimestamps, onCheckedChange = { viewModel.setShowTimestamps(it) })
                     }
@@ -231,6 +258,63 @@ fun SettingsDialog(
                     SettingRow("Streaming aktivieren", "Antwort Wort für Wort anzeigen") {
                         Switch(checked = streamingEnabled, onCheckedChange = { viewModel.setStreamingEnabled(it) })
                     }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    SettingRow("Kompakter Chat-Header", "Weniger Höhe, mehr Platz für Nachrichten") {
+                        Switch(checked = compactChatHeader, onCheckedChange = { viewModel.setCompactChatHeader(it) })
+                    }
+                    SettingRow("Leisten unten verbinden", "Chat-Eingabe und Bottom-Navigation ohne Lücke") {
+                        Switch(checked = connectChatBottomBars, onCheckedChange = { viewModel.setConnectChatBottomBars(it) })
+                    }
+                    SettingRow("Glas-Effekt aktiv", "Frosted-Look für Drawer und Chat-Leisten") {
+                        Switch(checked = glassEffectsEnabled, onCheckedChange = { viewModel.setGlassEffectsEnabled(it) })
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Rundungen (${(uiCornerRoundnessScale * 100).toInt()}%)",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
+                        Slider(
+                            value = uiCornerRoundnessScale,
+                            onValueChange = { viewModel.setUiCornerRoundnessScale(it) },
+                            valueRange = 0.7f..1.4f,
+                            steps = 6
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Schattenstärke (${(uiShadowIntensityScale * 100).toInt()}%)",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
+                        Slider(
+                            value = uiShadowIntensityScale,
+                            onValueChange = { viewModel.setUiShadowIntensityScale(it) },
+                            valueRange = 0.6f..1.8f,
+                            steps = 11
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Flächen-Deckkraft (${(uiSurfaceOpacity * 100).toInt()}%)",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
+                        Slider(
+                            value = uiSurfaceOpacity,
+                            onValueChange = { viewModel.setUiSurfaceOpacity(it) },
+                            valueRange = 0.55f..1.0f,
+                            steps = 8
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { viewModel.resetDisplaySettings() }) {
+                            Text("Anzeige zurücksetzen")
+                        }
+                    }
                 }
 
                 SettingsSection("Sprache & Stimme", expandedSection == "voice", onClick = { expandedSection = if (expandedSection == "voice") null else "voice" }) {
@@ -239,6 +323,9 @@ fun SettingsDialog(
                     }
                     SettingRow("Auto-Senden", "Nach Spracheingabe sofort senden") {
                         Switch(checked = autoSendVoice, onCheckedChange = { viewModel.setAutoSendVoice(it) })
+                    }
+                    SettingRow("Push-to-Talk", "Mikrofon per Halten/Loslassen steuern") {
+                        Switch(checked = voicePushToTalkEnabled, onCheckedChange = { viewModel.setVoicePushToTalkEnabled(it) })
                     }
                     SettingRow("Auto-Vorlesen (TTS)", "KI-Antworten automatisch sprechen") {
                         Switch(checked = ttsEnabled, onCheckedChange = { viewModel.setTtsEnabled(it) })
@@ -312,6 +399,94 @@ fun SettingsDialog(
                                 steps = 7
                             )
                         }
+                    }
+                }
+
+                SettingsSection("Workspaces & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
+                    Text("Aktiver Projekt-Workspace", fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                    projectWorkspaces.forEach { workspace ->
+                        val isActive = workspace.id == activeWorkspaceId
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(workspace.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    if (workspace.description.isNotBlank()) {
+                                        Text(
+                                            workspace.description,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                                        )
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(onClick = { viewModel.setActiveWorkspace(workspace.id) }) {
+                                        Text(if (isActive) "Aktiv" else "Aktivieren", fontSize = 11.sp)
+                                    }
+                                    if (workspace.id != "ws-default") {
+                                        TextButton(onClick = { viewModel.deleteWorkspace(workspace.id) }) {
+                                            Text("Löschen", color = Color(0xFFD63031), fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = newWorkspaceName,
+                        onValueChange = { newWorkspaceName = it },
+                        label = { Text("Neuer Workspace", fontSize = 12.sp) },
+                        placeholder = { Text("z.B. Kundenprojekt Alpha", fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = newWorkspaceName.trim().isNotBlank(),
+                            onClick = {
+                                if (viewModel.createWorkspace(newWorkspaceName.trim())) {
+                                    newWorkspaceName = ""
+                                }
+                            }
+                        ) {
+                            Text("Workspace erstellen", fontSize = 11.sp)
+                        }
+                    }
+                    SettingRow("Nur aktive Workspace-Chats", "Chatliste auf aktiven Workspace filtern") {
+                        Switch(
+                            checked = workspaceChatFilterEnabled,
+                            onCheckedChange = { viewModel.setWorkspaceChatFilterEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    SettingRow("Automations-Schnellaktionen", "Templates für ToDos, Briefings, Releases") {
+                        Switch(
+                            checked = automationQuickActionsEnabled,
+                            onCheckedChange = { viewModel.setAutomationQuickActionsEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+                    SettingRow("Agent-Tool Aktionen bestätigen", "Vor Tool-Ausführung immer bestätigen") {
+                        Switch(
+                            checked = agentConfirmToolActions,
+                            onCheckedChange = { viewModel.setAgentConfirmToolActions(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
                     }
                 }
 
@@ -558,6 +733,70 @@ fun SettingsDialog(
                             )
                         }
                     }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        "Photo AI Cloud (Background Remove / Upscale)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    OutlinedTextField(
+                        value = photoAiCloudEndpoint,
+                        onValueChange = { viewModel.setPhotoAiCloudEndpoint(it) },
+                        label = { Text("Photo-Edit Function URL", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = {
+                            Text(
+                                "https://europe-west1-<project-id>.cloudfunctions.net/photoEdit",
+                                fontSize = 10.sp
+                            )
+                        },
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
+                    OutlinedTextField(
+                        value = photoAiCloudApiToken,
+                        onValueChange = { viewModel.setPhotoAiCloudApiToken(it) },
+                        label = { Text("Photo-Edit Token (optional)", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("Bearer Token", fontSize = 10.sp) },
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    SettingRow(
+                        "Entwickler-Modus",
+                        "Mehr Trainings- und Testfunktionen"
+                    ) {
+                        Switch(
+                            checked = developerModeEnabled,
+                            onCheckedChange = { viewModel.setDeveloperModeEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+                    if (developerModeEnabled) {
+                        SettingRow(
+                            "Unlimited Training",
+                            "Quotas für Developer-Training aussetzen"
+                        ) {
+                            Switch(
+                                checked = developerUnlimitedTraining,
+                                onCheckedChange = { viewModel.setDeveloperUnlimitedTraining(it) },
+                                modifier = Modifier.scale(0.85f)
+                            )
+                        }
+                        SettingRow(
+                            "Realtime Collab Test",
+                            "Collab ohne Login im Developer-Modus testen"
+                        ) {
+                            Switch(
+                                checked = developerRealtimeCollabTesting,
+                                onCheckedChange = { viewModel.setDeveloperRealtimeCollabTesting(it) },
+                                modifier = Modifier.scale(0.85f)
+                            )
+                        }
+                    }
                 }
 
                 SettingsSection("Agenten", expandedSection == "agents", onClick = { expandedSection = if (expandedSection == "agents") null else "agents" }) {
@@ -646,6 +885,12 @@ fun SettingsDialog(
                         TextButton(onClick = { viewModel.refreshCloudSyncStatus() }) {
                             Text("Aktualisieren")
                         }
+                    }
+                    SettingRow("Privacy Strict Mode", "Maskiert sensible Inhalte stärker in Logs/Status") {
+                        Switch(
+                            checked = privacyStrictModeEnabled,
+                            onCheckedChange = { viewModel.setPrivacyStrictModeEnabled(it) }
+                        )
                     }
                     SettingRow("Gastdaten bei Konto-Login löschen", "Schützt private Testdaten beim Wechsel auf echtes Konto") {
                         Switch(

@@ -40,6 +40,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 
+private data class PersonaPack(
+    val title: String,
+    val subtitle: String,
+    val preset: String,
+    val goal: String,
+    val rules: String,
+    val style: String,
+    val tools: String
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentHubScreen(
@@ -64,6 +74,35 @@ fun AgentHubScreen(
 
     val presets = listOf("Generalist", "Recherche", "Entwickler", "Marketing", "Lager & Logistik")
     val outputStyles = listOf("Klar und präzise", "Analytisch", "Schritt-für-Schritt", "Kreativ", "Kurz mit Bulletpoints")
+    val personaPacks = listOf(
+        PersonaPack(
+            title = "Architect Pack",
+            subtitle = "Systemdesign, Trade-offs, Skalierung",
+            preset = "Entwickler",
+            goal = "Entwickle robuste Architekturen mit klarer Skalierungs- und Risikoanalyse.",
+            rules = "Erst Ziele und Constraints, dann Varianten, danach klare Entscheidung mit Trade-offs.",
+            style = "Analytisch",
+            tools = "Systemdesign, API-Verträge, Failure-Modes, Performance-Checks"
+        ),
+        PersonaPack(
+            title = "Research Pack",
+            subtitle = "Fakten, Quellen, Verifikation",
+            preset = "Recherche",
+            goal = "Liefere belastbare Erkenntnisse mit klarer Quellen- und Unsicherheitsdarstellung.",
+            rules = "Keine Halluzinationen. Fakten und Annahmen trennen. Unsicherheit transparent markieren.",
+            style = "Klar und präzise",
+            tools = "Quellenabgleich, Faktencheck, Evidenzmatrix, Gegenpositionen"
+        ),
+        PersonaPack(
+            title = "Execution Pack",
+            subtitle = "Priorisierung und Delivery",
+            preset = "Generalist",
+            goal = "Bringe Aufgaben in konkrete, ausführbare Schritte mit Prioritäten.",
+            rules = "Jeder Plan enthält Owner, Risiko, Reihenfolge und Definition of Done.",
+            style = "Schritt-für-Schritt",
+            tools = "Roadmapping, Task-Breakdown, Risikoanalyse, Checklisten"
+        )
+    )
 
     LaunchedEffect(preset) { localPreset = preset }
     LaunchedEffect(name) { localName = name }
@@ -235,6 +274,47 @@ ${localTools.ifBlank { "Analyse, Problemlösung" }}
                     }
                     if (savedHint) {
                         Text("Gespeichert", fontSize = 11.sp, color = Color(0xFF0E9F6E))
+                    }
+                }
+            }
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Persona Marketplace", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    personaPacks.forEach { pack ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(pack.title, fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                                Text(pack.subtitle, fontSize = 11.sp)
+                                Button(
+                                    onClick = {
+                                        settingsViewModel.setAgentPreset(pack.preset)
+                                        settingsViewModel.setAgentName(pack.title)
+                                        settingsViewModel.setAgentGoal(pack.goal)
+                                        settingsViewModel.setAgentRules(pack.rules)
+                                        settingsViewModel.setAgentOutputStyle(pack.style)
+                                        settingsViewModel.setAgentTools(pack.tools)
+                                        localPreset = pack.preset
+                                        localName = pack.title
+                                        localGoal = pack.goal
+                                        localRules = pack.rules
+                                        localStyle = pack.style
+                                        localTools = pack.tools
+                                        savedHint = true
+                                    }
+                                ) {
+                                    Text("Installieren")
+                                }
+                            }
+                        }
                     }
                 }
             }

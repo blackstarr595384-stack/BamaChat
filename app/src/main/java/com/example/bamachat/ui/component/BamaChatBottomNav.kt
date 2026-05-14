@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +24,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.bamachat.ui.theme.AppDesignSystem
 
@@ -37,11 +40,15 @@ data class BottomNavItem(
 fun BamaChatBottomNav(
     currentRoute: String?,
     designPreset: String,
+    attachedToComposer: Boolean = false,
+    cornerRoundnessScale: Float = 1f,
+    shadowIntensityScale: Float = 1f,
+    surfaceOpacity: Float = 1f,
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
-    val navContainer = palette.chatComposerBg.copy(alpha = 0.96f)
+    val navContainer = palette.chatComposerBg.copy(alpha = (0.96f * surfaceOpacity).coerceIn(0.55f, 1f))
     val navBorder = palette.surfaceBorder.copy(alpha = 0.72f)
     val navIndicator = palette.chatNeutralControlBg.copy(alpha = 0.96f)
     val navSelected = palette.accent
@@ -51,16 +58,30 @@ fun BamaChatBottomNav(
         BottomNavItem("Home", Icons.Default.Home, "home_hub"),
         BottomNavItem("Chat", Icons.AutoMirrored.Filled.Chat, "chat"),
         BottomNavItem("Profil", Icons.Default.AccountCircle, "profile"),
-        BottomNavItem("Einstellungen", Icons.Default.Settings, "settings")
+        BottomNavItem("Optionen", Icons.Default.Settings, "settings")
+    )
+
+    val topRadius = (24f * cornerRoundnessScale).coerceIn(14f, 34f).dp
+    val bottomRadius = ((if (attachedToComposer) 18f else 24f) * cornerRoundnessScale).coerceIn(10f, 34f).dp
+    val navShape = RoundedCornerShape(
+        topStart = topRadius,
+        topEnd = topRadius,
+        bottomStart = bottomRadius,
+        bottomEnd = bottomRadius
     )
 
     NavigationBar(
         windowInsets = NavigationBarDefaults.windowInsets,
         modifier = modifier
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-            .shadow(elevation = 16.dp, shape = RoundedCornerShape(24.dp), clip = false)
-            .clip(RoundedCornerShape(24.dp))
-            .border(BorderStroke(1.dp, navBorder), RoundedCornerShape(24.dp))
+            .padding(
+                start = 10.dp,
+                end = 10.dp,
+                top = if (attachedToComposer) 0.dp else 8.dp,
+                bottom = if (attachedToComposer) 4.dp else 8.dp
+            )
+            .shadow(elevation = (16f * shadowIntensityScale).coerceIn(4f, 30f).dp, shape = navShape, clip = false)
+            .clip(navShape)
+            .border(BorderStroke(1.dp, navBorder), navShape)
             .background(navContainer),
         containerColor = navContainer,
         contentColor = navSelected,
@@ -69,17 +90,9 @@ fun BamaChatBottomNav(
         navItems.forEach { item ->
             val isSelected = currentRoute == item.route
             val scale by animateFloatAsState(
-                targetValue = if (isSelected) 1.08f else 1f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy)
-            )
-            // Bounce effect beim Auswählen
-            val bounceScale by animateFloatAsState(
-                targetValue = if (isSelected) 1.2f else 1f,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMedium
-                ),
-                label = "navItemBounce"
+                targetValue = if (isSelected) 1.04f else 1f,
+                animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+                label = "navItemScale"
             )
             NavigationBarItem(
                 selected = isSelected,
@@ -92,27 +105,17 @@ fun BamaChatBottomNav(
                     unselectedTextColor = navUnselected
                 ),
                 icon = {
-                    val iconPulse = rememberInfiniteTransition(label = "navGlassPulse")
-                    val glow by iconPulse.animateFloat(
-                        initialValue = 0.9f,
-                        targetValue = 1.08f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1100, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "navGlow"
-                    )
                     Box(
                         modifier = Modifier
                             .graphicsLayer(
-                                scaleX = if (isSelected) scale * bounceScale * glow else 1f,
-                                scaleY = if (isSelected) scale * bounceScale * glow else 1f
+                                scaleX = if (isSelected) scale else 1f,
+                                scaleY = if (isSelected) scale else 1f
                             )
                             .size(38.dp)
                             .shadow(
-                                elevation = if (isSelected) 10.dp else 2.dp,
+                                elevation = if (isSelected) 6.dp else 1.dp,
                                 shape = CircleShape,
-                                spotColor = if (isSelected) navSelected.copy(alpha = 0.55f) else Color.Transparent
+                                spotColor = if (isSelected) navSelected.copy(alpha = 0.35f) else Color.Transparent
                             )
                             .clip(CircleShape)
                             .background(
@@ -137,7 +140,12 @@ fun BamaChatBottomNav(
                 label = {
                     Text(
                         text = item.label,
-                        fontSize = if (isSelected) MaterialTheme.typography.labelMedium.fontSize else MaterialTheme.typography.labelSmall.fontSize
+                        modifier = Modifier.fillMaxWidth(),
+                        fontSize = MaterialTheme.typography.labelSmall.fontSize,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
                     )
                 },
                 alwaysShowLabel = true

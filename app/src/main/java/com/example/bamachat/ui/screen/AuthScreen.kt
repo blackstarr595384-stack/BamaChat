@@ -1,8 +1,6 @@
 package com.example.bamachat.ui.screen
 
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,11 +35,18 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.bamachat.R
+import androidx.credentials.CustomCredential
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.bamachat.ui.viewmodel.AuthViewModel
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
+import com.example.bamachat.util.AppTelemetry
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import kotlinx.coroutines.launch
 
 @Composable
 fun AuthScreen(
@@ -48,6 +54,12 @@ fun AuthScreen(
     onAuthenticated: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val credentialManager = remember(context) {
+        runCatching { CredentialManager.create(context) }
+            .onFailure { AppTelemetry.logError("auth_credential_manager_ui_init", it) }
+            .getOrNull()
+    }
     val isAuthenticated by authViewModel.isAuthenticated.collectAsStateWithLifecycle()
     val isLoading by authViewModel.isLoading.collectAsStateWithLifecycle()
     val errorMessage by authViewModel.errorMessage.collectAsStateWithLifecycle()
@@ -57,33 +69,50 @@ fun AuthScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
+    @SuppressLint("DiscouragedApi")
     val defaultWebClientId = remember(context) {
-        runCatching { context.getString(R.string.default_web_client_id) }.getOrDefault("")
+        val resId = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName
+        )
+        if (resId != 0) context.getString(resId) else ""
     }
-    val googleSignInClient = remember(defaultWebClientId) {
-        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .apply {
-                if (defaultWebClientId.isNotBlank()) {
-                    requestIdToken(defaultWebClientId)
-                }
-            }
-            .build()
-        GoogleSignIn.getClient(context, options)
-    }
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            val idToken = account.idToken.orEmpty()
-            authViewModel.signInWithGoogleIdToken(idToken)
-        } catch (e: Exception) {
-            val details = e.message?.takeIf { it.isNotBlank() } ?: "Unbekannter Fehler"
-            authViewModel.showError("Google-Login fehlgeschlagen: $details")
+
+    fun extractGoogleIdToken(credential: androidx.credentials.Credential): String {
+        if (
+            credential !is CustomCredential ||
+            credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            throw IllegalStateException("Unerwarteter Credential-Typ.")
         }
+        return GoogleIdTokenCredential.createFrom(credential.data).idToken
+    }
+
+    suspend fun requestGoogleIdTokenWithGoogleIdOption(filterAuthorizedAccounts: Boolean): String {
+        val manager = credentialManager
+            ?: throw IllegalStateException("Credential Manager ist auf diesem Gerät nicht verfügbar.")
+        val googleIdOption = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(filterAuthorizedAccounts)
+            .setServerClientId(defaultWebClientId)
+            .setAutoSelectEnabled(filterAuthorizedAccounts)
+            .build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(googleIdOption)
+            .build()
+        val response = manager.getCredential(context = context, request = request)
+        return extractGoogleIdToken(response.credential)
+    }
+
+    suspend fun requestGoogleIdTokenWithButtonFlow(): String {
+        val manager = credentialManager
+            ?: throw IllegalStateException("Credential Manager ist auf diesem Gerät nicht verfügbar.")
+        val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(defaultWebClientId).build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(signInWithGoogleOption)
+            .build()
+        val response = manager.getCredential(context = context, request = request)
+        return extractGoogleIdToken(response.credential)
     }
 
     LaunchedEffect(isAuthenticated) {
@@ -165,6 +194,7 @@ fun AuthScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
                     onClick = {
+                        AppTelemetry.logEvent(if (isLoginMode) "login_submit_clicked" else "register_submit_clicked")
                         authViewModel.clearError()
                         if (isLoginMode) {
                             authViewModel.signIn(email = email, password = password)
@@ -184,14 +214,64 @@ fun AuthScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
                     onClick = {
-                        authViewModel.clearError()
-                        if (defaultWebClientId.isBlank()) {
-                            authViewModel.showError(
-                                "Google-Login ist nicht konfiguriert (default_web_client_id fehlt)."
-                            )
-                            return@Button
+                        coroutineScope.launch {
+                            authViewModel.clearError()
+                            if (defaultWebClientId.isBlank()) {
+                                AppTelemetry.logEvent("google_login_missing_client_id")
+                                authViewModel.showError(
+                                    "Google-Login ist nicht konfiguriert (default_web_client_id fehlt)."
+                                )
+                                return@launch
+                            }
+
+                            AppTelemetry.logEvent("google_login_start")
+                            try {
+                                val idToken = try {
+                                    // Button-Flow ist robuster auf Geräten mit mehreren Google-Konten.
+                                    requestGoogleIdTokenWithButtonFlow()
+                                } catch (e: GetCredentialException) {
+                                    val isCanceled = e.javaClass.simpleName.contains("Cancellation")
+                                    if (isCanceled) throw e
+                                    // Fallback auf Bottom-Sheet-Flow mit autorisierten/allen Konten.
+                                    try {
+                                        requestGoogleIdTokenWithGoogleIdOption(filterAuthorizedAccounts = true)
+                                    } catch (_: NoCredentialException) {
+                                        requestGoogleIdTokenWithGoogleIdOption(filterAuthorizedAccounts = false)
+                                    }
+                                }
+                                authViewModel.signInWithGoogleIdToken(idToken)
+                            } catch (e: NoCredentialException) {
+                                AppTelemetry.logEvent("google_login_no_credentials")
+                                authViewModel.showError(
+                                    "Kein passendes Google-Konto auf dem Gerät gefunden."
+                                )
+                            } catch (e: GoogleIdTokenParsingException) {
+                                AppTelemetry.logError("google_login_token_parsing", e)
+                                authViewModel.showError(
+                                    "Google-Login fehlgeschlagen: Token konnte nicht verarbeitet werden."
+                                )
+                            } catch (e: GetCredentialException) {
+                                AppTelemetry.logError("google_login_get_credential", e)
+                                val isCanceled = e.javaClass.simpleName.contains("Cancellation")
+                                if (isCanceled) {
+                                    AppTelemetry.logEvent("google_login_canceled")
+                                } else {
+                                    val details = e.message?.takeIf { it.isNotBlank() }
+                                        ?: "Unbekannter Fehler"
+                                    authViewModel.showError("Google-Login fehlgeschlagen: $details")
+                                }
+                            } catch (e: IllegalStateException) {
+                                AppTelemetry.logError("google_login_unavailable", e)
+                                authViewModel.showError(
+                                    "Google-Login ist auf diesem Gerät aktuell nicht verfügbar."
+                                )
+                            } catch (e: Exception) {
+                                AppTelemetry.logError("google_login_unknown", e)
+                                val details = e.message?.takeIf { it.isNotBlank() }
+                                    ?: "Unbekannter Fehler"
+                                authViewModel.showError("Google-Login fehlgeschlagen: $details")
+                            }
                         }
-                        googleSignInLauncher.launch(googleSignInClient.signInIntent)
                     }
                 ) {
                     Text("Mit Google anmelden")

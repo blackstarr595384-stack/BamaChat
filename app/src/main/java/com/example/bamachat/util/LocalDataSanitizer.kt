@@ -26,6 +26,12 @@ class LocalDataSanitizer(context: Context) {
                 key == "current_conversation_id" ||
                 key == "selected_persona" ||
                 key == "custom_persona_prompt" ||
+                key == "project_workspaces_json" ||
+                key == "active_workspace_id" ||
+                key == "active_workspace_name" ||
+                key == "workspace_chat_filter_enabled" ||
+                key == "cloud_persona_last_sync_at" ||
+                key == "cloud_persona_last_sync_status" ||
                 key == "usage_day" ||
                 key == "usage_text_count" ||
                 key == "usage_web_search_count" ||
@@ -48,6 +54,8 @@ class LocalDataSanitizer(context: Context) {
             editor.remove("live_web_api_token")
             editor.remove("live_web_endpoint")
             editor.remove("live_web_allowed_domains")
+            editor.remove("photo_ai_cloud_api_token")
+            editor.remove("photo_ai_cloud_endpoint")
         }
         editor.apply()
     }

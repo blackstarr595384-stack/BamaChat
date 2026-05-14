@@ -11,7 +11,10 @@ import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.util.LocalDataSanitizer
 import com.example.bamachat.util.MonetizationConfig
+import com.example.bamachat.util.PhotoAiCloudConfigResolver
 import com.example.bamachat.util.PlayBillingManager
+import com.example.bamachat.util.ProjectWorkspace
+import com.example.bamachat.util.ProjectWorkspaceStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,9 +26,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         private const val KEY_CLOUD_PERSONA_LAST_SYNC_AT = "cloud_persona_last_sync_at"
         private const val KEY_CLOUD_PERSONA_LAST_SYNC_STATUS = "cloud_persona_last_sync_status"
         private const val KEY_CREDITS_BALANCE = "credits_balance"
+        private const val KEY_PROJECT_WORKSPACES_JSON = "project_workspaces_json"
+        private const val KEY_ACTIVE_WORKSPACE_ID = "active_workspace_id"
+        private const val KEY_ACTIVE_WORKSPACE_NAME = "active_workspace_name"
+        private const val KEY_PHOTO_AI_CLOUD_ENDPOINT = "photo_ai_cloud_endpoint"
+        private const val KEY_PHOTO_AI_CLOUD_API_TOKEN = "photo_ai_cloud_api_token"
         private const val DEFAULT_LIVE_WEB_ENDPOINT = "https://websearch-xxf7qxk3wq-ew.a.run.app"
+        private const val DEFAULT_PHOTO_AI_CLOUD_ENDPOINT =
+            "https://europe-west1-bamachat-d07fb.cloudfunctions.net/photoEdit"
+        private const val DEFAULT_PHOTO_AI_CLOUD_API_TOKEN =
+            "qY33-bWLaHILnkPr-8iNWr0KEIEBjSWQXrf_iWHsGr8"
         private const val DEFAULT_LIVE_WEB_ALLOWED_DOMAINS =
             "wikipedia.org,reuters.com,tagesschau.de,bundesregierung.de,heise.de,github.com,dwd.de,wetteronline.de,wetter.com,open-meteo.com"
+        val DISPLAY_PRESET_OPTIONS = DisplaySettingsPresets.options
     }
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -115,6 +128,40 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val _streamingEnabled = MutableStateFlow(prefs.getBoolean("streaming_enabled", true))
     val streamingEnabled: StateFlow<Boolean> = _streamingEnabled.asStateFlow()
+    private val _developerModeEnabled = MutableStateFlow(prefs.getBoolean("developer_mode_enabled", false))
+    val developerModeEnabled: StateFlow<Boolean> = _developerModeEnabled.asStateFlow()
+    private val _developerUnlimitedTraining = MutableStateFlow(prefs.getBoolean("developer_unlimited_training", false))
+    val developerUnlimitedTraining: StateFlow<Boolean> = _developerUnlimitedTraining.asStateFlow()
+    private val _developerRealtimeCollabTesting = MutableStateFlow(prefs.getBoolean("developer_realtime_collab_testing", false))
+    val developerRealtimeCollabTesting: StateFlow<Boolean> = _developerRealtimeCollabTesting.asStateFlow()
+    private val _agentConfirmToolActions = MutableStateFlow(prefs.getBoolean("agent_confirm_tool_actions", true))
+    val agentConfirmToolActions: StateFlow<Boolean> = _agentConfirmToolActions.asStateFlow()
+    private val _automationQuickActionsEnabled = MutableStateFlow(prefs.getBoolean("automation_quick_actions_enabled", true))
+    val automationQuickActionsEnabled: StateFlow<Boolean> = _automationQuickActionsEnabled.asStateFlow()
+    private val _privacyStrictModeEnabled = MutableStateFlow(prefs.getBoolean("privacy_strict_mode_enabled", true))
+    val privacyStrictModeEnabled: StateFlow<Boolean> = _privacyStrictModeEnabled.asStateFlow()
+    private val _voicePushToTalkEnabled = MutableStateFlow(prefs.getBoolean("voice_push_to_talk_enabled", false))
+    val voicePushToTalkEnabled: StateFlow<Boolean> = _voicePushToTalkEnabled.asStateFlow()
+
+    private val _projectWorkspaces = MutableStateFlow(
+        ProjectWorkspaceStore.decode(prefs.getString(KEY_PROJECT_WORKSPACES_JSON, ""))
+    )
+    val projectWorkspaces: StateFlow<List<ProjectWorkspace>> = _projectWorkspaces.asStateFlow()
+    private val _activeWorkspaceId = MutableStateFlow(
+        prefs.getString(KEY_ACTIVE_WORKSPACE_ID, "")?.takeIf { it.isNotBlank() }
+            ?: _projectWorkspaces.value.firstOrNull()?.id.orEmpty()
+    )
+    val activeWorkspaceId: StateFlow<String> = _activeWorkspaceId.asStateFlow()
+    private val _activeWorkspaceName = MutableStateFlow(
+        _projectWorkspaces.value.firstOrNull { it.id == _activeWorkspaceId.value }?.name
+            ?: _projectWorkspaces.value.firstOrNull()?.name
+            ?: "Standard"
+    )
+    val activeWorkspaceName: StateFlow<String> = _activeWorkspaceName.asStateFlow()
+    private val _workspaceChatFilterEnabled = MutableStateFlow(
+        prefs.getBoolean("workspace_chat_filter_enabled", false)
+    )
+    val workspaceChatFilterEnabled: StateFlow<Boolean> = _workspaceChatFilterEnabled.asStateFlow()
 
     private val _showTimestamps = MutableStateFlow(prefs.getBoolean("show_timestamps", true))
     val showTimestamps: StateFlow<Boolean> = _showTimestamps.asStateFlow()
@@ -139,6 +186,34 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         )
     )
     val uiDesignPreset: StateFlow<String> = _uiDesignPreset.asStateFlow()
+    private val _displayPreset = MutableStateFlow(
+        DisplaySettingsPresets.normalize(prefs.getString("ui_display_preset", DisplaySettingsPresets.STANDARD))
+    )
+    val displayPreset: StateFlow<String> = _displayPreset.asStateFlow()
+    private val _compactChatHeader = MutableStateFlow(
+        prefs.getBoolean("compact_chat_header", true)
+    )
+    val compactChatHeader: StateFlow<Boolean> = _compactChatHeader.asStateFlow()
+    private val _connectChatBottomBars = MutableStateFlow(
+        prefs.getBoolean("connect_chat_bottom_bars", true)
+    )
+    val connectChatBottomBars: StateFlow<Boolean> = _connectChatBottomBars.asStateFlow()
+    private val _glassEffectsEnabled = MutableStateFlow(
+        prefs.getBoolean("glass_effects_enabled", true)
+    )
+    val glassEffectsEnabled: StateFlow<Boolean> = _glassEffectsEnabled.asStateFlow()
+    private val _uiCornerRoundnessScale = MutableStateFlow(
+        prefs.getFloat("ui_corner_roundness_scale", 1.0f)
+    )
+    val uiCornerRoundnessScale: StateFlow<Float> = _uiCornerRoundnessScale.asStateFlow()
+    private val _uiShadowIntensityScale = MutableStateFlow(
+        prefs.getFloat("ui_shadow_intensity_scale", 1.0f)
+    )
+    val uiShadowIntensityScale: StateFlow<Float> = _uiShadowIntensityScale.asStateFlow()
+    private val _uiSurfaceOpacity = MutableStateFlow(
+        prefs.getFloat("ui_surface_opacity", 0.85f)
+    )
+    val uiSurfaceOpacity: StateFlow<Float> = _uiSurfaceOpacity.asStateFlow()
 
     private val _guestAutoClearOnAccountSignIn = MutableStateFlow(
         prefs.getBoolean("guest_auto_clear_on_account_signin", true)
@@ -182,6 +257,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         prefs.getBoolean("live_web_prefer_github", true)
     )
     val liveWebPreferGithub: StateFlow<Boolean> = _liveWebPreferGithub.asStateFlow()
+    private val _photoAiCloudEndpoint = MutableStateFlow(
+        prefs.getString(KEY_PHOTO_AI_CLOUD_ENDPOINT, "") ?: ""
+    )
+    val photoAiCloudEndpoint: StateFlow<String> = _photoAiCloudEndpoint.asStateFlow()
+    private val _photoAiCloudApiToken = MutableStateFlow(
+        prefs.getString(KEY_PHOTO_AI_CLOUD_API_TOKEN, "") ?: ""
+    )
+    val photoAiCloudApiToken: StateFlow<String> = _photoAiCloudApiToken.asStateFlow()
 
     private val _selectedOpenRouterModel = MutableStateFlow(
         prefs.getString("openrouter_model", "google/gemma-3-27b-it:free") ?: "google/gemma-3-27b-it:free"
@@ -264,8 +347,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     init {
         ensureLiveWebAllowlistBaseline()
         ensureLiveWebEndpointBaseline()
+        ensurePhotoAiEndpointBaseline()
+        ensurePhotoAiTokenBaseline()
         ensureAgentProfileBaseline()
+        ensureWorkspaceBaseline()
+        // Developer-Training standardmäßig freischalten (lokale App-Nutzung).
+        _developerModeEnabled.value = true
+        prefs.edit().putBoolean("developer_mode_enabled", true).apply()
+        _developerUnlimitedTraining.value = true
+        prefs.edit().putBoolean("developer_unlimited_training", true).apply()
         prefs.edit().putString("ui_design_preset", _uiDesignPreset.value).apply()
+        prefs.edit().putString("ui_display_preset", _displayPreset.value).apply()
         billingManager.connect()
         prefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
     }
@@ -296,6 +388,33 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private fun ensurePhotoAiEndpointBaseline() {
+        val current = prefs.getString(KEY_PHOTO_AI_CLOUD_ENDPOINT, "")?.trim().orEmpty()
+        if (current.isNotBlank()) {
+            _photoAiCloudEndpoint.value = current
+            return
+        }
+        val liveWebEndpoint = prefs.getString("live_web_endpoint", "")?.trim().orEmpty()
+        val derived = PhotoAiCloudConfigResolver.deriveFromLiveWebEndpoint(liveWebEndpoint)
+        val resolved = derived.ifBlank { DEFAULT_PHOTO_AI_CLOUD_ENDPOINT }
+        if (resolved.isBlank()) return
+        _photoAiCloudEndpoint.value = resolved
+        prefs.edit().putString(KEY_PHOTO_AI_CLOUD_ENDPOINT, resolved).apply()
+    }
+
+    private fun ensurePhotoAiTokenBaseline() {
+        val current = prefs.getString(KEY_PHOTO_AI_CLOUD_API_TOKEN, "")?.trim().orEmpty()
+        if (current.isNotBlank()) {
+            _photoAiCloudApiToken.value = current
+            return
+        }
+        val liveWebToken = prefs.getString("live_web_api_token", "")?.trim().orEmpty()
+        val resolved = liveWebToken.ifBlank { DEFAULT_PHOTO_AI_CLOUD_API_TOKEN }
+        if (resolved.isBlank()) return
+        _photoAiCloudApiToken.value = resolved
+        prefs.edit().putString(KEY_PHOTO_AI_CLOUD_API_TOKEN, resolved).apply()
+    }
+
     private fun ensureAgentProfileBaseline() {
         val hasStructuredProfile = _agentGoal.value.isNotBlank() &&
             _agentRules.value.isNotBlank() &&
@@ -304,6 +423,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         if (!hasStructuredProfile) {
             applyAgentPreset(_agentPreset.value.ifBlank { "Generalist" })
         }
+    }
+
+    private fun ensureWorkspaceBaseline() {
+        val sanitized = _projectWorkspaces.value
+            .distinctBy { it.id }
+            .filter { it.id.isNotBlank() && it.name.isNotBlank() }
+            .ifEmpty { ProjectWorkspaceStore.defaultWorkspaces() }
+        _projectWorkspaces.value = sanitized
+        val activeId = _activeWorkspaceId.value
+        val resolvedActiveId = sanitized.firstOrNull { it.id == activeId }?.id ?: sanitized.first().id
+        _activeWorkspaceId.value = resolvedActiveId
+        _activeWorkspaceName.value = sanitized.firstOrNull { it.id == resolvedActiveId }?.name ?: "Standard"
+        prefs.edit()
+            .putString(KEY_PROJECT_WORKSPACES_JSON, ProjectWorkspaceStore.encode(sanitized))
+            .putString(KEY_ACTIVE_WORKSPACE_ID, resolvedActiveId)
+            .putString(KEY_ACTIVE_WORKSPACE_NAME, _activeWorkspaceName.value)
+            .apply()
     }
 
     fun refreshCloudSyncStatus() {
@@ -427,6 +563,52 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         prefs.edit().putBoolean("streaming_enabled", enabled).apply()
     }
 
+    fun setDeveloperModeEnabled(enabled: Boolean) {
+        _developerModeEnabled.value = enabled
+        prefs.edit().putBoolean("developer_mode_enabled", enabled).apply()
+        if (!enabled) {
+            setDeveloperUnlimitedTraining(false)
+            setDeveloperRealtimeCollabTesting(false)
+        }
+    }
+
+    fun setDeveloperUnlimitedTraining(enabled: Boolean) {
+        val safeEnabled = enabled && _developerModeEnabled.value
+        _developerUnlimitedTraining.value = safeEnabled
+        prefs.edit().putBoolean("developer_unlimited_training", safeEnabled).apply()
+    }
+
+    fun setDeveloperRealtimeCollabTesting(enabled: Boolean) {
+        val safeEnabled = enabled && _developerModeEnabled.value
+        _developerRealtimeCollabTesting.value = safeEnabled
+        prefs.edit().putBoolean("developer_realtime_collab_testing", safeEnabled).apply()
+    }
+
+    fun setAgentConfirmToolActions(enabled: Boolean) {
+        _agentConfirmToolActions.value = enabled
+        prefs.edit().putBoolean("agent_confirm_tool_actions", enabled).apply()
+    }
+
+    fun setAutomationQuickActionsEnabled(enabled: Boolean) {
+        _automationQuickActionsEnabled.value = enabled
+        prefs.edit().putBoolean("automation_quick_actions_enabled", enabled).apply()
+    }
+
+    fun setPrivacyStrictModeEnabled(enabled: Boolean) {
+        _privacyStrictModeEnabled.value = enabled
+        prefs.edit().putBoolean("privacy_strict_mode_enabled", enabled).apply()
+    }
+
+    fun setVoicePushToTalkEnabled(enabled: Boolean) {
+        _voicePushToTalkEnabled.value = enabled
+        prefs.edit().putBoolean("voice_push_to_talk_enabled", enabled).apply()
+    }
+
+    fun setWorkspaceChatFilterEnabled(enabled: Boolean) {
+        _workspaceChatFilterEnabled.value = enabled
+        prefs.edit().putBoolean("workspace_chat_filter_enabled", enabled).apply()
+    }
+
     fun setShowTimestamps(enabled: Boolean) {
         _showTimestamps.value = enabled
         prefs.edit().putBoolean("show_timestamps", enabled).apply()
@@ -456,6 +638,62 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val normalized = AppDesignSystem.normalizePresetLabel(preset)
         _uiDesignPreset.value = normalized
         prefs.edit().putString("ui_design_preset", normalized).apply()
+    }
+
+    fun setCompactChatHeader(enabled: Boolean) {
+        _compactChatHeader.value = enabled
+        prefs.edit().putBoolean("compact_chat_header", enabled).apply()
+    }
+
+    fun setConnectChatBottomBars(enabled: Boolean) {
+        _connectChatBottomBars.value = enabled
+        prefs.edit().putBoolean("connect_chat_bottom_bars", enabled).apply()
+    }
+
+    fun setGlassEffectsEnabled(enabled: Boolean) {
+        _glassEffectsEnabled.value = enabled
+        prefs.edit().putBoolean("glass_effects_enabled", enabled).apply()
+    }
+
+    fun setUiCornerRoundnessScale(scale: Float) {
+        val clamped = scale.coerceIn(0.7f, 1.4f)
+        _uiCornerRoundnessScale.value = clamped
+        prefs.edit().putFloat("ui_corner_roundness_scale", clamped).apply()
+    }
+
+    fun setUiShadowIntensityScale(scale: Float) {
+        val clamped = scale.coerceIn(0.6f, 1.8f)
+        _uiShadowIntensityScale.value = clamped
+        prefs.edit().putFloat("ui_shadow_intensity_scale", clamped).apply()
+    }
+
+    fun setUiSurfaceOpacity(opacity: Float) {
+        val clamped = opacity.coerceIn(0.55f, 1.0f)
+        _uiSurfaceOpacity.value = clamped
+        prefs.edit().putFloat("ui_surface_opacity", clamped).apply()
+    }
+
+    fun setDisplayPreset(preset: String) {
+        val normalized = DisplaySettingsPresets.normalize(preset)
+        _displayPreset.value = normalized
+        prefs.edit().putString("ui_display_preset", normalized).apply()
+        val tuning = DisplaySettingsPresets.tuningFor(normalized)
+        setCompactChatHeader(tuning.compactChatHeader)
+        setConnectChatBottomBars(tuning.connectChatBottomBars)
+        setGlassEffectsEnabled(tuning.glassEffectsEnabled)
+        setUiCornerRoundnessScale(tuning.cornerRoundnessScale)
+        setUiShadowIntensityScale(tuning.shadowIntensityScale)
+        setUiSurfaceOpacity(tuning.surfaceOpacity)
+        setFontSize(tuning.fontSizeSp)
+    }
+
+    fun resetDisplaySettings() {
+        setPrimaryColor(DisplaySettingsPresets.DEFAULT_PRIMARY_COLOR)
+        setUiDesignPreset(AppDesignPreset.PROFESSIONAL.label)
+        setShowTimestamps(true)
+        setBubbleAnimations(true)
+        setStreamingEnabled(true)
+        setDisplayPreset(DisplaySettingsPresets.STANDARD)
     }
 
     fun setGuestAutoClearOnAccountSignIn(enabled: Boolean) {
@@ -529,6 +767,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setLiveWebPreferGithub(prefer: Boolean) {
         _liveWebPreferGithub.value = prefer
         prefs.edit().putBoolean("live_web_prefer_github", prefer).apply()
+    }
+
+    fun setPhotoAiCloudEndpoint(endpoint: String) {
+        val clean = endpoint.trim()
+        _photoAiCloudEndpoint.value = clean
+        prefs.edit().putString(KEY_PHOTO_AI_CLOUD_ENDPOINT, clean).apply()
+    }
+
+    fun setPhotoAiCloudApiToken(token: String) {
+        val clean = token.trim().replace(Regex("[\\r\\n]+"), "")
+        _photoAiCloudApiToken.value = clean
+        prefs.edit().putString(KEY_PHOTO_AI_CLOUD_API_TOKEN, clean).apply()
     }
 
     fun setSelectedOpenRouterModel(model: String) {
@@ -643,6 +893,62 @@ $tools
 """.trim()
     }
 
+    fun createWorkspace(name: String, description: String = ""): Boolean {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) return false
+        if (_projectWorkspaces.value.any { it.name.equals(cleanName, ignoreCase = true) }) return false
+        val id = "ws-" + java.util.UUID.randomUUID().toString().take(8)
+        val updated = _projectWorkspaces.value + ProjectWorkspace(
+            id = id,
+            name = cleanName,
+            description = description.trim()
+        )
+        _projectWorkspaces.value = updated
+        setActiveWorkspace(id)
+        persistWorkspaces()
+        return true
+    }
+
+    fun setActiveWorkspace(workspaceId: String) {
+        val target = _projectWorkspaces.value.firstOrNull { it.id == workspaceId } ?: return
+        _activeWorkspaceId.value = target.id
+        _activeWorkspaceName.value = target.name
+        prefs.edit()
+            .putString(KEY_ACTIVE_WORKSPACE_ID, target.id)
+            .putString(KEY_ACTIVE_WORKSPACE_NAME, target.name)
+            .apply()
+    }
+
+    fun deleteWorkspace(workspaceId: String): Boolean {
+        val current = _projectWorkspaces.value
+        if (current.size <= 1) return false
+        if (workspaceId == "ws-default") return false
+        if (current.none { it.id == workspaceId }) return false
+        val updated = current.filterNot { it.id == workspaceId }
+        _projectWorkspaces.value = updated
+        if (_activeWorkspaceId.value == workspaceId) {
+            val fallback = updated.first()
+            _activeWorkspaceId.value = fallback.id
+            _activeWorkspaceName.value = fallback.name
+            prefs.edit().putString(KEY_ACTIVE_WORKSPACE_ID, fallback.id).apply()
+        }
+        persistWorkspaces()
+        return true
+    }
+
+    private fun persistWorkspaces() {
+        prefs.edit()
+            .putString(KEY_PROJECT_WORKSPACES_JSON, ProjectWorkspaceStore.encode(_projectWorkspaces.value))
+            .putString(KEY_ACTIVE_WORKSPACE_ID, _activeWorkspaceId.value)
+            .putString(KEY_ACTIVE_WORKSPACE_NAME, _activeWorkspaceName.value)
+            .apply()
+    }
+
+    fun getActiveWorkspaceTag(): String {
+        val name = _activeWorkspaceName.value.trim()
+        return if (name.isBlank()) "Neuer Chat" else "[$name] Neuer Chat"
+    }
+
     fun refreshBillingState() {
         billingManager.connect()
         billingManager.queryProductDetails()
@@ -689,6 +995,11 @@ $tools
             _isPremiumActive.value = false
             _subscriptionTier.value = MonetizationConfig.PlanTier.FREE.key
             _creditsBalance.value = 0
+            _projectWorkspaces.value = ProjectWorkspaceStore.defaultWorkspaces()
+            _activeWorkspaceId.value = _projectWorkspaces.value.first().id
+            _activeWorkspaceName.value = _projectWorkspaces.value.first().name
+            _workspaceChatFilterEnabled.value = false
+            persistWorkspaces()
         }
     }
 

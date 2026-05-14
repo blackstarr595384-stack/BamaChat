@@ -17,7 +17,30 @@ service cloud.firestore {
     function canWriteMessages(sessionData) {
       return request.auth.uid == sessionData.ownerId ||
         sessionData.participantRoles[request.auth.uid] == "OWNER" ||
-        sessionData.participantRoles[request.auth.uid] == "EDITOR";
+        (
+          sessionData.participantRoles[request.auth.uid] == "EDITOR" &&
+          sessionData.editorCanSendMessages != false
+        );
+    }
+
+    function canWriteAiMessages(sessionData) {
+      return sessionData.aiEnabled != false && (
+        request.auth.uid == sessionData.ownerId ||
+        sessionData.participantRoles[request.auth.uid] == "OWNER" ||
+        (
+          sessionData.participantRoles[request.auth.uid] == "EDITOR" &&
+          sessionData.editorCanUseAi != false
+        )
+      );
+    }
+
+    function canWriteWorkspace(sessionData) {
+      return request.auth.uid == sessionData.ownerId ||
+        sessionData.participantRoles[request.auth.uid] == "OWNER" ||
+        (
+          sessionData.participantRoles[request.auth.uid] == "EDITOR" &&
+          sessionData.editorCanEditWorkspace != false
+        );
     }
 
     // User profile documents (used by Auth/Profile feature)
@@ -56,8 +79,10 @@ service cloud.firestore {
         isParticipantListValid() &&
         request.resource.data.participants.hasAny([request.auth.uid]) &&
         request.resource.data.participantRoles[request.auth.uid] == "OWNER";
-      allow read: if isSignedIn() &&
-        request.auth.uid in resource.data.participants;
+      // Session-Metadaten (ID, Titel, Invite-Code) sind für eingeloggte Nutzer lesbar,
+      // damit ein Join per Session-ID/Invite-Link technisch möglich ist.
+      // Nachrichten/Presence bleiben weiterhin strikt auf Teilnehmer begrenzt.
+      allow read: if isSignedIn();
 
       // Update-Fälle:
       // 1) Owner kann Session verwalten (Titel, ownerId-Transfer, Teilnehmer)
@@ -89,7 +114,16 @@ service cloud.firestore {
         allow create: if isSignedIn() &&
           request.resource.data.authorId == request.auth.uid &&
           request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants &&
-          canWriteMessages(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data);
+          (
+            (
+              request.resource.data.isAi == true &&
+              canWriteAiMessages(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data)
+            ) ||
+            (
+              request.resource.data.isAi != true &&
+              canWriteMessages(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data)
+            )
+          );
         allow update, delete: if false;
       }
 
@@ -99,6 +133,15 @@ service cloud.firestore {
         allow create, update, delete: if isSignedIn() &&
           request.auth.uid == uid &&
           request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
+      }
+
+      match /workspace/{docId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
+        allow create, update: if isSignedIn() &&
+          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants &&
+          canWriteWorkspace(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data);
+        allow delete: if false;
       }
     }
 

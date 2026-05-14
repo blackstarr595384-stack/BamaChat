@@ -18,6 +18,7 @@ import com.example.bamachat.ui.component.BamaChatBottomNav
 import com.example.bamachat.ui.viewmodel.AuthViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
+import com.example.bamachat.ui.viewmodel.ExtensionManagerViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 
 private object Routes {
@@ -32,6 +33,7 @@ private object Routes {
     const val REALTIME_COLLAB = "realtime_collab"
     const val MINI_APPS = "mini_apps"
     const val AGENT_HUB = "agent_hub"
+    const val EXTENSIONS = "extensions"
     const val COMPOSE_LAB = "compose_lab"
     const val COMPOSE_PLAYGROUND = "compose_playground"
     const val COMPOSE_ARG_DEMO = "compose_arg_demo/{demoId}"
@@ -56,12 +58,19 @@ fun BamaChatApp(
     chatViewModel: ChatViewModel,
     settingsViewModel: SettingsViewModel,
     authViewModel: AuthViewModel,
-    collabViewModel: CollabViewModel
+    collabViewModel: CollabViewModel,
+    extensionManagerViewModel: ExtensionManagerViewModel
 ) {
     val navController = rememberNavController()
     val primaryColorInt by settingsViewModel.primaryColorInt.collectAsState()
     val aiProvider by settingsViewModel.aiProvider.collectAsState()
     val designPreset by settingsViewModel.uiDesignPreset.collectAsState()
+    val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsState()
+    val connectChatBottomBars by settingsViewModel.connectChatBottomBars.collectAsState()
+    val uiCornerRoundnessScale by settingsViewModel.uiCornerRoundnessScale.collectAsState()
+    val uiShadowIntensityScale by settingsViewModel.uiShadowIntensityScale.collectAsState()
+    val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsState()
+    val developerRealtimeCollabTesting by settingsViewModel.developerRealtimeCollabTesting.collectAsState()
     val isAuthenticated by authViewModel.isAuthenticated.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -74,7 +83,7 @@ fun BamaChatApp(
                 popUpTo(Routes.AUTH) { inclusive = true }
                 launchSingleTop = true
             }
-        } else if (!isAuthenticated && normalizedRoute == Routes.REALTIME_COLLAB) {
+        } else if (!isAuthenticated && !developerRealtimeCollabTesting && normalizedRoute == Routes.REALTIME_COLLAB) {
             navController.navigate(Routes.AUTH) {
                 popUpTo(navController.graph.findStartDestination().id)
                 launchSingleTop = true
@@ -95,6 +104,10 @@ fun BamaChatApp(
                 BamaChatBottomNav(
                     currentRoute = normalizedRoute,
                     designPreset = designPreset,
+                    attachedToComposer = normalizedRoute == Routes.CHAT && connectChatBottomBars,
+                    cornerRoundnessScale = uiCornerRoundnessScale,
+                    shadowIntensityScale = uiShadowIntensityScale,
+                    surfaceOpacity = uiSurfaceOpacity,
                     onNavigate = { route ->
                         if (route != normalizedRoute) {
                             navController.navigate(route) {
@@ -229,13 +242,16 @@ fun BamaChatApp(
                 HomeHubScreen(
                     providerName = aiProvider,
                     designPreset = designPreset,
+                    activeWorkspaceName = activeWorkspaceName,
                     onOpenMenu = { navController.navigate(Routes.CHAT) },
                     onOpenChat = { navController.navigate(Routes.CHAT) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenProviderSettings = { navController.navigate(Routes.settingsRoute("ai")) },
                     onOpenDesignSettings = { navController.navigate(Routes.settingsRoute("chat")) },
+                    onOpenWorkspaceSettings = { navController.navigate(Routes.settingsRoute("workspaces")) },
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
+                    onOpenExtensions = { navController.navigate(Routes.EXTENSIONS) },
                     onOpenRealtimeCollab = { navController.navigate(Routes.REALTIME_COLLAB) },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     onOpenHelp = { navController.navigate(Routes.HELP) }
@@ -302,6 +318,13 @@ fun BamaChatApp(
             composable(Routes.AGENT_HUB) {
                 AgentHubScreen(
                     settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Routes.EXTENSIONS) {
+                ExtensionManagerScreen(
+                    extensionManagerViewModel = extensionManagerViewModel,
+                    designPreset = designPreset,
                     onBack = { navController.popBackStack() }
                 )
             }

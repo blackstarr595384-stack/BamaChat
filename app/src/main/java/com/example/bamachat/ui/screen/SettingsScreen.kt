@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -62,6 +63,7 @@ fun SettingsScreen(
 ) {
     val provider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
     val design by settingsViewModel.uiDesignPreset.collectAsStateWithLifecycle()
+    val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val tier by settingsViewModel.subscriptionTier.collectAsStateWithLifecycle()
     val credits by settingsViewModel.creditsBalance.collectAsStateWithLifecycle()
 
@@ -79,6 +81,7 @@ fun SettingsScreen(
         SettingsEntryItem("KI & Modelle", "Provider, API-Keys, Abo, Credits", Icons.Default.Tune, section = "ai"),
         SettingsEntryItem("Darstellung", "Farben, Layout, Chat-Anzeige", Icons.Default.Palette, section = "chat"),
         SettingsEntryItem("Sprache & Stimme", "TTS, Cloud-Voice, Sprachmodus", Icons.Default.GraphicEq, section = "voice"),
+        SettingsEntryItem("Workspaces & Automationen", "Projekte, Schnellaktionen, Rollen", Icons.Default.Folder, section = "workspaces"),
         SettingsEntryItem("Datenschutz & Daten", "Sync, Bereinigung, App-Info", Icons.Default.Security, section = "data")
     )
     val advancedExtraEntries = listOf(
@@ -181,6 +184,11 @@ fun SettingsScreen(
                     )
                     Text(
                         "Design: $design",
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Workspace: $activeWorkspaceName",
                         color = Color.White.copy(alpha = 0.85f),
                         style = MaterialTheme.typography.bodySmall
                     )

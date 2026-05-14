@@ -118,7 +118,7 @@ class ApiManager(
                 return result
             }
 
-            lastError = result.error
+            lastError = sanitizeSensitiveText(result.error)
             AppTelemetry.logEvent(
                 "api_stream_fallback",
                 mapOf(
@@ -330,7 +330,7 @@ class ApiManager(
                 val body = response.errorBody()?.string() ?: ""
                 return ApiResponse(
                     success = false,
-                    error = "HTTP $code: ${body.take(100)}",
+                    error = formatHttpError(code, sanitizeSensitiveText(body)),
                     usedProvider = config.provider
                 )
             }
@@ -363,7 +363,11 @@ class ApiManager(
 
             ApiResponse(success = true, content = builder.toString(), usedProvider = config.provider)
         } catch (e: Exception) {
-            ApiResponse(success = false, error = e.message ?: "Unknown error", usedProvider = config.provider)
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Unknown error"),
+                usedProvider = config.provider
+            )
         }
     }
 
@@ -394,7 +398,11 @@ class ApiManager(
 
             ApiResponse(success = true, content = content, usedProvider = config.provider)
         } catch (e: Exception) {
-            ApiResponse(success = false, error = e.message ?: "Unknown error", usedProvider = config.provider)
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Unknown error"),
+                usedProvider = config.provider
+            )
         }
     }
 
@@ -441,7 +449,7 @@ class ApiManager(
 
             ApiResponse(success = true, content = content, usedProvider = ApiClient.Provider.OPENROUTER)
         } catch (e: Exception) {
-            ApiResponse(success = false, error = e.message ?: "Vision error")
+            ApiResponse(success = false, error = sanitizeSensitiveText(e.message ?: "Vision error"))
         }
     }
 
@@ -531,6 +539,23 @@ class ApiManager(
         429 -> "Rate-Limit erreicht (429). Warte oder wechsle Provider."
         500, 502, 503 -> "Server-Fehler ($code). Gleich nochmal."
         else -> "HTTP $code: ${body?.take(100) ?: ""}"
+    }
+
+    private fun sanitizeSensitiveText(raw: String): String {
+        if (raw.isBlank()) return raw
+        val masked = raw
+            .replace(Regex("Bearer\\s+[A-Za-z0-9._\\-]+", RegexOption.IGNORE_CASE), "Bearer ***")
+            .replace(Regex("sk-or-[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "sk-or-***")
+            .replace(Regex("gsk_[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "gsk_***")
+            .replace(Regex("csk-[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "csk-***")
+            .replace(Regex("\"api[_-]?key\"\\s*:\\s*\"[^\"]+\"", RegexOption.IGNORE_CASE), "\"apiKey\":\"***\"")
+        if (!prefs.getBoolean("privacy_strict_mode_enabled", true)) {
+            return masked
+        }
+        return masked
+            .replace(Regex("https?://\\S+", RegexOption.IGNORE_CASE), "[url]")
+            .replace(Regex("[\\r\\n]+"), " ")
+            .take(140)
     }
 
     private fun parseWebResearchResponse(query: String, body: String): WebResearchResult {

@@ -2,6 +2,8 @@ package com.example.bamachat.ui.viewmodel
 
 import android.app.Application
 import android.net.Uri
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.model.UserProfile
@@ -26,11 +28,22 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("settings", Application.MODE_PRIVATE)
     private val dataSanitizer = LocalDataSanitizer(application.applicationContext)
-    private val auth = FirebaseAuth.getInstance()
-    private val firestore = FirebaseFirestore.getInstance()
-    private val storage = FirebaseStorage.getInstance()
+    private val credentialManager: CredentialManager? = runCatching {
+        CredentialManager.create(application.applicationContext)
+    }.onFailure {
+        AppTelemetry.logError("auth_credential_manager_init", it)
+    }.getOrNull()
+    private val auth: FirebaseAuth? = runCatching { FirebaseAuth.getInstance() }
+        .onFailure { AppTelemetry.logError("auth_init", it) }
+        .getOrNull()
+    private val firestore: FirebaseFirestore? = runCatching { FirebaseFirestore.getInstance() }
+        .onFailure { AppTelemetry.logError("firestore_init", it) }
+        .getOrNull()
+    private val storage: FirebaseStorage? = runCatching { FirebaseStorage.getInstance() }
+        .onFailure { AppTelemetry.logError("storage_init", it) }
+        .getOrNull()
 
-    private val _firebaseUser = MutableStateFlow<FirebaseUser?>(auth.currentUser)
+    private val _firebaseUser = MutableStateFlow<FirebaseUser?>(auth?.currentUser)
     val firebaseUser: StateFlow<FirebaseUser?> = _firebaseUser.asStateFlow()
 
     private val _profile = MutableStateFlow<UserProfile?>(null)
@@ -39,7 +52,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGuestMode = MutableStateFlow(prefs.getBoolean(KEY_GUEST_MODE, false))
     val isGuestMode: StateFlow<Boolean> = _isGuestMode.asStateFlow()
 
-    private val _isAuthenticated = MutableStateFlow(auth.currentUser != null || _isGuestMode.value)
+    private val _isAuthenticated = MutableStateFlow(auth?.currentUser != null || _isGuestMode.value)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -74,17 +87,30 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        auth.addAuthStateListener(authStateListener)
-        if (auth.currentUser != null) {
-            viewModelScope.launch {
-                runCatching { loadProfileForCurrentUser() }
-                    .onFailure { _profile.value = fallbackProfileFromCurrentUser() }
+        if (auth == null) {
+            AppTelemetry.logEvent("firebase_auth_unavailable")
+            if (!_isGuestMode.value) {
+                _statusMessage.value = "Cloud-Login ist aktuell nicht verfügbar. Gastmodus funktioniert weiter."
+            }
+        } else {
+            auth.addAuthStateListener(authStateListener)
+            if (auth.currentUser != null) {
+                viewModelScope.launch {
+                    runCatching { loadProfileForCurrentUser() }
+                        .onFailure { _profile.value = fallbackProfileFromCurrentUser() }
+                }
             }
         }
         refreshAuthState()
     }
 
     fun signIn(email: String, password: String) {
+        val firebaseAuth = auth
+        if (firebaseAuth == null) {
+            _errorMessage.value = "Login aktuell nicht verfügbar (Firebase nicht initialisiert)."
+            AppTelemetry.logEvent("login_blocked_no_firebase")
+            return
+        }
         val cleanEmail = email.trim()
         if (cleanEmail.isBlank() || password.isBlank()) {
             _errorMessage.value = "Bitte E-Mail und Passwort eingeben."
@@ -94,15 +120,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
+            val startMs = System.currentTimeMillis()
             try {
-                auth.signInWithEmailAndPassword(cleanEmail, password).await()
+                firebaseAuth.signInWithEmailAndPassword(cleanEmail, password).await()
                 if (wasGuestBeforeSignIn && prefs.getBoolean("guest_auto_clear_on_account_signin", true)) {
                     dataSanitizer.clearGuestSessionData(clearApiKeys = false)
                 }
-                AppTelemetry.logEvent("login_success")
+                AppTelemetry.logEvent(
+                    "login_success",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
+                )
                 loadProfileForCurrentUser()
             } catch (e: Exception) {
                 AppTelemetry.logError("auth_sign_in", e)
+                AppTelemetry.logEvent(
+                    "login_failed",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
+                )
                 _errorMessage.value = e.message ?: "Login fehlgeschlagen."
             } finally {
                 _isLoading.value = false
@@ -112,6 +146,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun register(displayName: String, email: String, password: String) {
+        val firebaseAuth = auth
+        if (firebaseAuth == null) {
+            _errorMessage.value = "Registrierung aktuell nicht verfügbar (Firebase nicht initialisiert)."
+            AppTelemetry.logEvent("register_blocked_no_firebase")
+            return
+        }
         val cleanName = displayName.trim()
         val cleanEmail = email.trim()
         if (cleanName.isBlank() || cleanEmail.isBlank() || password.length < 6) {
@@ -122,17 +162,18 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
+            val startMs = System.currentTimeMillis()
             try {
-                auth.createUserWithEmailAndPassword(cleanEmail, password).await()
+                firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password).await()
                 if (wasGuestBeforeRegister && prefs.getBoolean("guest_auto_clear_on_account_signin", true)) {
                     dataSanitizer.clearGuestSessionData(clearApiKeys = false)
                 }
-                auth.currentUser?.updateProfile(
+                firebaseAuth.currentUser?.updateProfile(
                     UserProfileChangeRequest.Builder()
                         .setDisplayName(cleanName)
                         .build()
                 )?.await()
-                val uid = auth.currentUser?.uid.orEmpty()
+                val uid = firebaseAuth.currentUser?.uid.orEmpty()
                 if (uid.isNotBlank()) {
                     val now = System.currentTimeMillis()
                     val profile = UserProfile(
@@ -146,9 +187,16 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     saveProfile(profile)
                     _profile.value = profile
                 }
-                AppTelemetry.logEvent("register_success")
+                AppTelemetry.logEvent(
+                    "register_success",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
+                )
             } catch (e: Exception) {
                 AppTelemetry.logError("auth_register", e)
+                AppTelemetry.logEvent(
+                    "register_failed",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
+                )
                 _errorMessage.value = e.message ?: "Registrierung fehlgeschlagen."
             } finally {
                 _isLoading.value = false
@@ -166,6 +214,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun signInWithGoogleIdToken(idToken: String) {
+        val firebaseAuth = auth
+        if (firebaseAuth == null) {
+            _errorMessage.value = "Google-Login aktuell nicht verfügbar (Firebase nicht initialisiert)."
+            AppTelemetry.logEvent("google_login_blocked_no_firebase")
+            return
+        }
         val cleanToken = idToken.trim()
         if (cleanToken.isBlank()) {
             _errorMessage.value = "Google-Login fehlgeschlagen: Ungültiges Token."
@@ -176,16 +230,24 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
+            val startMs = System.currentTimeMillis()
             try {
                 val credential = GoogleAuthProvider.getCredential(cleanToken, null)
-                auth.signInWithCredential(credential).await()
+                firebaseAuth.signInWithCredential(credential).await()
                 if (wasGuestBeforeSignIn && prefs.getBoolean("guest_auto_clear_on_account_signin", true)) {
                     dataSanitizer.clearGuestSessionData(clearApiKeys = false)
                 }
-                AppTelemetry.logEvent("login_google_success")
+                AppTelemetry.logEvent(
+                    "login_google_success",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
+                )
                 loadProfileForCurrentUser()
             } catch (e: Exception) {
                 AppTelemetry.logError("auth_google_sign_in", e)
+                AppTelemetry.logEvent(
+                    "login_google_failed",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
+                )
                 _errorMessage.value = e.message ?: "Google-Login fehlgeschlagen."
             } finally {
                 _isLoading.value = false
@@ -195,7 +257,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateDisplayName(displayName: String) {
-        val user = auth.currentUser ?: return
+        val user = auth?.currentUser ?: return
         val cleanName = displayName.trim()
         if (cleanName.isBlank()) {
             _errorMessage.value = "Name darf nicht leer sein."
@@ -239,13 +301,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun uploadProfileImage(imageUri: Uri) {
-        val user = auth.currentUser ?: return
+        val user = auth?.currentUser ?: return
+        val firebaseStorage = storage
+        if (firebaseStorage == null) {
+            _errorMessage.value = "Profilbild-Upload aktuell nicht verfügbar."
+            AppTelemetry.logEvent("profile_image_upload_blocked_no_storage")
+            return
+        }
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             _statusMessage.value = null
             try {
-                val ref = storage.reference.child("profile_images/${user.uid}.jpg")
+                val ref = firebaseStorage.reference.child("profile_images/${user.uid}.jpg")
                 ref.putFile(imageUri).await()
                 val downloadUri = ref.downloadUrl.await()
 
@@ -279,7 +347,16 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun signOut() {
         val wasGuest = _isGuestMode.value
-        auth.signOut()
+        auth?.signOut()
+        credentialManager?.let { manager ->
+            viewModelScope.launch {
+                runCatching {
+                    manager.clearCredentialState(ClearCredentialStateRequest())
+                }.onFailure {
+                    AppTelemetry.logError("auth_clear_credential_state", it)
+                }
+            }
+        }
         if (wasGuest && prefs.getBoolean("guest_auto_clear_on_signout", true)) {
             viewModelScope.launch {
                 dataSanitizer.clearGuestSessionData(clearApiKeys = false)
@@ -306,8 +383,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadProfileForCurrentUser() {
-        val user = auth.currentUser ?: return
-        val snapshot = firestore.collection("users").document(user.uid).get().await()
+        val user = auth?.currentUser ?: return
+        val cloudStore = firestore ?: run {
+            _profile.value = fallbackProfileFromCurrentUser()
+            return
+        }
+        val snapshot = cloudStore.collection("users").document(user.uid).get().await()
         val profile = snapshot.toObject(UserProfile::class.java)
         if (profile != null) {
             _profile.value = profile
@@ -320,14 +401,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun saveProfile(profile: UserProfile) {
-        firestore.collection("users")
+        val cloudStore = firestore ?: return
+        cloudStore.collection("users")
             .document(profile.uid)
             .set(profile)
             .await()
     }
 
     private fun fallbackProfileFromCurrentUser(): UserProfile? {
-        val user = auth.currentUser ?: return null
+        val user = auth?.currentUser ?: return null
         val now = System.currentTimeMillis()
         return UserProfile(
             uid = user.uid,
@@ -344,7 +426,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        auth.removeAuthStateListener(authStateListener)
+        auth?.removeAuthStateListener(authStateListener)
         super.onCleared()
     }
 }

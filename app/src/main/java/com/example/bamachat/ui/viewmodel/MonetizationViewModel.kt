@@ -31,6 +31,7 @@ class MonetizationViewModel(application: Application) : AndroidViewModel(applica
 
     fun refreshMonetizationState() {
         ensureUsageDayIsCurrent()
+        val unlimitedTraining = isDeveloperUnlimitedTrainingEnabled()
         val tier = currentPlanTier()
         val quota = MonetizationConfig.quotaForTier(tier)
         val isPremium = tier != MonetizationConfig.PlanTier.FREE
@@ -40,13 +41,13 @@ class MonetizationViewModel(application: Application) : AndroidViewModel(applica
             tierLabel = tier.label,
             creditsBalance = prefs.getInt(KEY_CREDITS_BALANCE, 0),
             textUsed = prefs.getInt(KEY_USAGE_TEXT, 0),
-            textLimit = quota.textMessages,
+            textLimit = if (unlimitedTraining) DEV_UNLIMITED_LIMIT else quota.textMessages,
             webSearchUsed = prefs.getInt(KEY_USAGE_WEB_SEARCH, 0),
-            webSearchLimit = quota.webSearchRequests,
+            webSearchLimit = if (unlimitedTraining) DEV_UNLIMITED_LIMIT else quota.webSearchRequests,
             imageAnalysisUsed = prefs.getInt(KEY_USAGE_IMAGE_ANALYSIS, 0),
-            imageAnalysisLimit = quota.imageAnalysis,
+            imageAnalysisLimit = if (unlimitedTraining) DEV_UNLIMITED_LIMIT else quota.imageAnalysis,
             imageGenerationUsed = prefs.getInt(KEY_USAGE_IMAGE_GENERATION, 0),
-            imageGenerationLimit = quota.imageGeneration
+            imageGenerationLimit = if (unlimitedTraining) DEV_UNLIMITED_LIMIT else quota.imageGeneration
         )
     }
 
@@ -59,6 +60,10 @@ class MonetizationViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun consumeQuota(type: QuotaType): Boolean {
+        if (isDeveloperUnlimitedTrainingEnabled()) {
+            refreshMonetizationState()
+            return true
+        }
         val tier = currentPlanTier()
         if (tier != MonetizationConfig.PlanTier.FREE) return true
 
@@ -133,6 +138,11 @@ class MonetizationViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun isDeveloperUnlimitedTrainingEnabled(): Boolean {
+        return prefs.getBoolean(KEY_DEVELOPER_MODE_ENABLED, false) &&
+            prefs.getBoolean(KEY_DEVELOPER_UNLIMITED_TRAINING, false)
+    }
+
     data class UsageStatus(
         val isPremium: Boolean = false,
         val tierLabel: String = MonetizationConfig.PlanTier.FREE.label,
@@ -160,6 +170,7 @@ class MonetizationViewModel(application: Application) : AndroidViewModel(applica
     }
 
     companion object {
+        private const val DEV_UNLIMITED_LIMIT = 999_999
         private const val KEY_PREMIUM_ACTIVE = "premium_active"
         private const val KEY_SUBSCRIPTION_TIER = "subscription_tier"
         private const val KEY_CREDITS_BALANCE = "credits_balance"
@@ -168,5 +179,7 @@ class MonetizationViewModel(application: Application) : AndroidViewModel(applica
         private const val KEY_USAGE_WEB_SEARCH = "usage_web_search_count"
         private const val KEY_USAGE_IMAGE_ANALYSIS = "usage_image_analysis_count"
         private const val KEY_USAGE_IMAGE_GENERATION = "usage_image_generation_count"
+        private const val KEY_DEVELOPER_MODE_ENABLED = "developer_mode_enabled"
+        private const val KEY_DEVELOPER_UNLIMITED_TRAINING = "developer_unlimited_training"
     }
 }

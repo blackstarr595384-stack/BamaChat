@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bamachat.ui.viewmodel.ComposePlaygroundViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +63,7 @@ fun ComposePlaygroundScreen(
     playgroundViewModel: ComposePlaygroundViewModel = viewModel()
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var showSheet by remember { mutableStateOf(false) }
     var showDialog by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
@@ -140,9 +143,27 @@ fun ComposePlaygroundScreen(
                 Text("BottomSheet Demo", fontWeight = FontWeight.SemiBold)
                 Text("Ideal für schnelle Aktionen, Filtersets oder Upload-Optionen.", fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(onClick = {}, label = { Text("Kamera") })
-                    AssistChip(onClick = {}, label = { Text("Foto") })
-                    AssistChip(onClick = {}, label = { Text("Datei") })
+                    AssistChip(
+                        onClick = {
+                            scope.launch { snackbarHostState.showSnackbar("Kamera-Flow Demo ausgelöst") }
+                            showSheet = false
+                        },
+                        label = { Text("Kamera") }
+                    )
+                    AssistChip(
+                        onClick = {
+                            scope.launch { snackbarHostState.showSnackbar("Foto-Import Demo ausgelöst") }
+                            showSheet = false
+                        },
+                        label = { Text("Foto") }
+                    )
+                    AssistChip(
+                        onClick = {
+                            scope.launch { snackbarHostState.showSnackbar("Datei-Import Demo ausgelöst") }
+                            showSheet = false
+                        },
+                        label = { Text("Datei") }
+                    )
                 }
                 Spacer(Modifier.height(8.dp))
             }

@@ -2,7 +2,6 @@ package com.example.bamachat
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -17,6 +16,7 @@ import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.ui.viewmodel.AuthViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
+import com.example.bamachat.ui.viewmodel.ExtensionManagerViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import androidx.fragment.app.FragmentActivity
 
@@ -37,10 +37,8 @@ class MainActivity : FragmentActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionsToRequest.add(Manifest.permission.RECORD_AUDIO)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
@@ -58,6 +56,7 @@ class MainActivity : FragmentActivity() {
         val settingsViewModel = ViewModelProvider(this)[SettingsViewModel::class.java]
         val authViewModel = ViewModelProvider(this)[AuthViewModel::class.java]
         val collabViewModel = ViewModelProvider(this)[CollabViewModel::class.java]
+        val extensionManagerViewModel = ViewModelProvider(this)[ExtensionManagerViewModel::class.java]
 
         setContent {
             BamaChatTheme {
@@ -66,7 +65,8 @@ class MainActivity : FragmentActivity() {
                         chatViewModel = chatViewModel,
                         settingsViewModel = settingsViewModel,
                         authViewModel = authViewModel,
-                        collabViewModel = collabViewModel
+                        collabViewModel = collabViewModel,
+                        extensionManagerViewModel = extensionManagerViewModel
                     )
                 }
             }

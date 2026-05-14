@@ -1,11 +1,15 @@
 # BamaChat
 
-BamaChat ist eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-Provider-KI, Sprachfunktionen, Bildanalyse/-generierung, Auth/Profil und erweiterten AI-Features (Training, Multi-Agent, Realtime-Collab, Multimodal-Import).
+BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-Provider-KI, Sprachfunktionen, Bildanalyse/-generierung, Auth/Profil und erweiterten AI-Features (Training, Multi-Agent, Realtime-Collab, Multimodal-Import). Zusätzlich gibt es einen Windows-Desktop-Client auf Compose Multiplatform sowie ein `sharedCore`-Modul fuer plattformneutrale Logik.
 
 ## Status
-- Plattform: Android (Kotlin, Compose, Room, Firebase)
+- Plattform: Android 13+ (Kotlin, Compose, Room, Firebase)
+- Windows Desktop Client: Compose Multiplatform Modul `:desktopApp` (Stage 4)
+- Shared Core: JVM-Modul `:sharedCore` fuer wiederverwendbare Business-Logik (Drafts, Workspace-Text-Tools, Quick-Action-Heuristiken, Send-Dedup, Workspace-Naming)
 - Sprache in der App: primär Deutsch
 - Build-Status: `stabilityCheck` erfolgreich (Assemble + Unit Tests + Lint)
+- Tablet-Layout: adaptive UI (u. a. Mini-Apps V2)
+- iPhone: erfordert separaten iOS-Client (nicht im Android-Projekt enthalten)
 
 ## Hauptfunktionen
 - Persona-Chat mit editierbaren Prompts und Prompt-Versionierung (Rollback)
@@ -26,7 +30,7 @@ BamaChat ist eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-P
   - Bildgenerierung
 - Auth & Profil:
   - Registrierung/Anmeldung
-  - Google Sign-In
+  - Google Sign-In über Credential Manager (Google ID Token)
   - Gastmodus
   - Profilname + Profilbild (Firebase Storage)
 - Monetarisierung-Basis:
@@ -50,6 +54,11 @@ BamaChat ist eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-P
   - Realtime-Nachrichten via Firestore
   - KI-Team-Antwort in Session (Agenten-Auswahl)
   - Presence (online/offline) pro Teilnehmer
+  - Typing-Indicator inkl. Draft-Preview pro Teilnehmer
+  - Offline-Queue mit Auto-Retry für fehlgeschlagene Collab-Nachrichten
+  - Session-Policies pro Owner (KI an/aus, Editor-Rechte für KI/Nachrichten/Workspace)
+  - Workspace-Revisionen mit Konflikthinweis (Remote übernehmen / Merge speichern)
+  - Smart-Diff-Preview + Inline-Diff-Highlighter + lokales Erzwingen bei Workspace-Konflikten
   - Owner-Moderation (Teilnehmer entfernen, Session verlassen inkl. Owner-Transfer)
   - Rollenmodell (Owner/Editor/Viewer) inkl. Schreibschutz für Viewer
   - Invite-Code + kopierbarer Invite-Link
@@ -64,6 +73,39 @@ BamaChat ist eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-P
   - OCR-Fallback für Scan-PDFs (erste Seiten)
   - Video-Keyframe-Textanalyse als zusätzliche Fallback-Pipeline
   - Falls kein Transkript möglich: klare Fehlermeldung/Guidance in der App
+- Workspaces & Automationen (neu)
+  - Projekt-Workspaces in Einstellungen (aktiv, anlegen, löschen)
+  - Neue Chats übernehmen den aktiven Workspace im Titel
+  - Optionaler Chatlisten-Filter auf den aktiven Workspace
+  - AI-Extensions Manager: installierbare Workspace-Plugins mit Capability-Freigaben (Pflichtrechte-Guardrail vor Aktivierung)
+  - Chat-Integration: aktive Extensions werden pro Turn in den Runtime-Kontext eingebunden (inkl. optionalem Live-Web-Trigger für Research-Radar)
+  - Quick-Action-Leiste im Composer: `Auto`, `Research`, `Code Review`, `Plan` für schnellere manuelle Steuerung pro Nachricht
+  - Automation-Templates (Tagesbriefing, Meeting->ToDos, Release-Check, Risiko-Scan)
+  - Persona-Marketplace im Agent Hub (installierbare Preset-Pakete)
+  - Mini-Apps V2: Discover-Hub, Favoriten, Ausblenden, Reihenfolge, Swipe-Management
+  - Neue Mini-Apps: `Prompt Lab`, `Voice Notes AI`, `Smart Workspace`, `Photo Studio`
+  - Photo Studio: Bildimport, Filter-Regler (Helligkeit/Kontrast/Sättigung/Wärme), Rotation/Spiegelung/Crop, Undo/Redo, Galerie-Export
+  - Photo Studio Pro-Aktionen: zentrales Action-Backend mit AI-Rechten/Tool-Gating, Risiko-Bestätigung und Cloud-Workflow (`Background Remove`, `Upscale HD`) über `photoEdit` Function Endpoint
+  - Bestehende Mini-Apps: `Automation Board` + `Knowledge Vault`
+- Windows Desktop Client (Stage 2):
+  - Produktiver Chat mit OpenRouter oder lokalem Ollama
+  - Persistente Desktop-Einstellungen (`%USERPROFILE%/.bamachat-desktop/settings.properties`)
+  - Shared-Core Quick-Actions + Extension-Runtime-Kontext im Chat
+- Windows Desktop Client (Stage 3):
+  - Firebase E-Mail/Passwort-Login im Desktop-Settings-Screen
+  - Token-Refresh über Firebase Secure Token API
+  - Cloud-Sync für Workspace-Notizen nach Firestore (`users/{uid}`)
+- Windows Desktop Client (Stage 4):
+  - Google-Login per Browser-OAuth (Loopback + PKCE) und Firebase `signInWithIdp`
+  - Konfigurierbare Google OAuth Client-ID/Secret im Settings-Screen
+- Windows Desktop Client (Stage 5):
+  - Automatischer Background-Refresh der Firebase Session vor Token-Ablauf
+  - Klarere Session-Expired-Behandlung (Auto-Logout bei nicht erneuerbarer Session)
+  - Optionale lokale Verschluesselung von ID-/Refresh-Token in `settings.properties`
+- Windows Desktop Client (Stage 6):
+  - Windows-Paketierung mit expliziten JVM-Modulen (`java.net.http`, `jdk.httpserver`, `jdk.crypto.ec`, `jdk.unsupported`, `java.naming`)
+  - Startmenue-Integration (`BamaChat` Gruppe) + Shortcut-Option
+  - Per-User-Installation fuer stabile Install/Reinstall ohne Admin-Rechte
 
 ## Schnellstart
 ## Voraussetzungen
@@ -88,6 +130,36 @@ Enthält:
 - `assembleDebug`
 - `testDebugUnitTest`
 - `lintDebug`
+
+## Desktop Client starten (Windows)
+```powershell
+.\gradlew.bat :desktopApp:run
+```
+
+Optionales Paket fuer Windows:
+```powershell
+.\gradlew.bat :desktopApp:packageMsi
+```
+
+Installierte App starten (bevorzugt per-user Install):
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-bamachat-desktop.ps1
+```
+
+Desktop-Start Smoke-Test:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\desktop-launch-smoke-test.ps1
+```
+
+Optional: Legacy-Machine-Installationen (Program Files) bereinigen:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\remove-legacy-machine-install.ps1
+```
+
+## Shared Core Tests
+```powershell
+.\gradlew.bat :sharedCore:test
+```
 
 ## Firebase einrichten
 1. Firebase-Projekt anlegen/verwenden.
@@ -187,6 +259,8 @@ npx firebase-tools deploy --only firestore:rules
 - Chat:
   - `app/src/main/java/com/example/bamachat/ui/screen/ChatScreen.kt`
   - `app/src/main/java/com/example/bamachat/ui/viewmodel/ChatViewModel.kt`
+  - `app/src/main/java/com/example/bamachat/ui/screen/ExtensionManagerScreen.kt`
+  - `app/src/main/java/com/example/bamachat/ui/viewmodel/ExtensionManagerViewModel.kt`
   - `app/src/main/java/com/example/bamachat/ui/screen/RealtimeCollabScreen.kt`
   - `app/src/main/java/com/example/bamachat/ui/viewmodel/CollabViewModel.kt`
 - Auth/Profil:
@@ -202,6 +276,7 @@ npx firebase-tools deploy --only firestore:rules
   - `app/src/main/java/com/example/bamachat/util/EmotionAnalyzer.kt`
   - `app/src/main/java/com/example/bamachat/util/MemoryFactExtractor.kt`
   - `app/src/main/java/com/example/bamachat/util/KnowledgeGraphExtractor.kt`
+  - `app/src/main/java/com/example/bamachat/util/WorkspaceExtensions.kt`
   - `app/src/main/java/com/example/bamachat/util/MultimodalProcessor.kt`
 
 ## E2E-Smoke-Test (Basis)
@@ -227,6 +302,7 @@ Hinweis: Für echte Ausführung ist ein verbundenes Gerät/Emulator + `adb` nöt
 ## Dokumentation für Entwickler
 Die komplette technische Entwickleranleitung ist hier:
 - [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)
+- [MINIAPPS_RELEASE_CHECKLIST.md](./MINIAPPS_RELEASE_CHECKLIST.md)
 
 ## Play-Store Preflight (Stand: 02.05.2026)
 ### Technischer Status

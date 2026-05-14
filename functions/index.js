@@ -1,5 +1,11 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
+let sharp = null;
+try {
+  sharp = require("sharp");
+} catch (error) {
+  logger.warn("sharp_not_installed", { message: error?.message || String(error) });
+}
 
 const DEFAULT_ALLOWED_DOMAINS = [
   "wikipedia.org",
@@ -15,6 +21,13 @@ const DEFAULT_RESULTS = 5;
 const MAX_QUERY_LENGTH = 280;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 20;
+const PHOTO_MAX_INPUT_BYTES = 8 * 1024 * 1024;
+const PHOTO_MAX_SIDE = 4096;
+const PHOTO_DEFAULT_UPSCALE = 2;
+const PHOTO_REMOVE_BG_TIMEOUT_MS = 45 * 1000;
+const PHOTO_PROVIDER_BG_LOCAL = "local_heuristic";
+const PHOTO_PROVIDER_BG_REMOVEBG = "removebg";
+const PHOTO_PROVIDER_UPSCALE_LOCAL = "local_lanczos";
 const requestCounters = new Map();
 
 exports.webSearch = onRequest(
@@ -88,8 +101,122 @@ exports.webSearch = onRequest(
   }
 );
 
-function isAuthorized(req) {
-  const expectedToken = process.env.WEBSEARCH_TOKEN;
+exports.photoEdit = onRequest(
+  {
+    region: "europe-west1",
+    cors: true,
+    invoker: "public",
+    timeoutSeconds: 120,
+    memory: "1GiB"
+  },
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST" });
+      return;
+    }
+    if (isRateLimited(req)) {
+      res.status(429).json({ error: "Too many requests" });
+      return;
+    }
+    if (!isAuthorized(req, "PHOTO_AI_TOKEN")) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (!sharp) {
+      res.status(500).json({ error: "Image engine not available (sharp missing)." });
+      return;
+    }
+
+    const action = normalizePhotoAction(req.body?.action);
+    if (!action) {
+      res.status(400).json({ error: "action must be 'background_remove' or 'upscale_hd'" });
+      return;
+    }
+    const qualityMode = normalizeQualityMode(req.body?.qualityMode);
+
+    const inputBuffer = decodeBase64Image(req.body?.imageBase64);
+    if (!inputBuffer || inputBuffer.length === 0) {
+      res.status(400).json({ error: "imageBase64 is required" });
+      return;
+    }
+    if (inputBuffer.length > PHOTO_MAX_INPUT_BYTES) {
+      res.status(413).json({ error: `image too large (max ${PHOTO_MAX_INPUT_BYTES} bytes)` });
+      return;
+    }
+
+    const startedAt = Date.now();
+    try {
+      let outputBuffer;
+      let outputMime;
+      let provider = "";
+      if (action === "background_remove") {
+        provider = PHOTO_PROVIDER_BG_LOCAL;
+        const removeBgApiKey = String(process.env.REMOVE_BG_API_KEY || "").trim();
+        if (removeBgApiKey) {
+          const remoteResult = await tryRemoveBgWithProvider(
+            inputBuffer,
+            removeBgApiKey
+          );
+          if (remoteResult.buffer && remoteResult.buffer.length > 0) {
+            outputBuffer = remoteResult.buffer;
+            provider = PHOTO_PROVIDER_BG_REMOVEBG;
+          } else {
+            logger.warn("photoEdit_removebg_fallback", {
+              reason: remoteResult.error || "unknown"
+            });
+          }
+        }
+        if (!outputBuffer) {
+          outputBuffer = await removeBackgroundApprox(inputBuffer);
+        }
+        outputMime = "image/png";
+      } else {
+        const factor = clampNumber(Number(req.body?.upscaleFactor || PHOTO_DEFAULT_UPSCALE), 1.1, 4);
+        const upscaled = await upscaleImage(inputBuffer, factor, qualityMode);
+        outputBuffer = upscaled.buffer;
+        outputMime = upscaled.mimeType;
+        provider = PHOTO_PROVIDER_UPSCALE_LOCAL;
+      }
+
+      const meta = await sharp(outputBuffer).metadata();
+      const processingMs = Date.now() - startedAt;
+      logger.info("photoEdit_success", {
+        action,
+        provider,
+        qualityMode,
+        width: Number(meta.width || 0),
+        height: Number(meta.height || 0),
+        bytes: outputBuffer.length,
+        processingMs
+      });
+      res.json({
+        success: true,
+        action,
+        provider,
+        qualityMode,
+        mimeType: outputMime,
+        imageBase64: outputBuffer.toString("base64"),
+        meta: {
+          width: Number(meta.width || 0),
+          height: Number(meta.height || 0),
+          bytes: outputBuffer.length,
+          processingMs
+        }
+      });
+    } catch (error) {
+      logger.error("photoEdit_failed", {
+        action,
+        message: error?.message || String(error)
+      });
+      res.status(500).json({ error: "Photo processing failed" });
+    }
+  }
+);
+
+function isAuthorized(req, tokenEnvName = "WEBSEARCH_TOKEN") {
+  const expectedToken = process.env[tokenEnvName] || process.env.WEBSEARCH_TOKEN;
   if (!expectedToken) return true;
   const authHeader = String(req.get("authorization") || "");
   const bearer = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
@@ -323,4 +450,258 @@ function resolveDuckDuckGoRedirect(url) {
   } catch (_) {
     return "";
   }
+}
+
+function normalizePhotoAction(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "background_remove") return value;
+  if (value === "upscale_hd") return value;
+  return "";
+}
+
+function normalizeQualityMode(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "fast") return "fast";
+  if (value === "high") return "high";
+  return "balanced";
+}
+
+function decodeBase64Image(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return null;
+  const commaIndex = value.indexOf(",");
+  const payload = value.startsWith("data:") && commaIndex >= 0
+    ? value.slice(commaIndex + 1)
+    : value;
+  try {
+    const clean = payload.replace(/\s+/g, "");
+    return Buffer.from(clean, "base64");
+  } catch (_) {
+    return null;
+  }
+}
+
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+async function tryRemoveBgWithProvider(inputBuffer, apiKey) {
+  const formData = new FormData();
+  formData.set("size", "auto");
+  formData.set("format", "png");
+  formData.set("image_file_b64", inputBuffer.toString("base64"));
+
+  try {
+    const response = await fetch("https://api.remove.bg/v1.0/removebg", {
+      method: "POST",
+      headers: {
+        "X-Api-Key": apiKey
+      },
+      body: formData,
+      signal: AbortSignal.timeout(PHOTO_REMOVE_BG_TIMEOUT_MS)
+    });
+    if (!response.ok) {
+      const errorBody = await response.text();
+      return {
+        buffer: null,
+        error: `remove.bg failed (${response.status}) ${String(errorBody || "").slice(0, 160)}`
+      };
+    }
+    const data = await response.arrayBuffer();
+    return {
+      buffer: Buffer.from(data),
+      error: ""
+    };
+  } catch (error) {
+    return {
+      buffer: null,
+      error: error?.message || String(error)
+    };
+  }
+}
+
+async function upscaleImage(inputBuffer, factor, qualityMode = "balanced") {
+  const metadata = await sharp(inputBuffer).metadata();
+  const srcWidth = Number(metadata.width || 0);
+  const srcHeight = Number(metadata.height || 0);
+  if (srcWidth <= 0 || srcHeight <= 0) {
+    throw new Error("Unable to determine image size");
+  }
+  const targetWidth = Math.min(PHOTO_MAX_SIDE, Math.max(1, Math.round(srcWidth * factor)));
+  const targetHeight = Math.min(PHOTO_MAX_SIDE, Math.max(1, Math.round(srcHeight * factor)));
+  const hasAlpha = Boolean(metadata.hasAlpha);
+
+  const kernel = qualityMode === "fast" ? sharp.kernel.cubic : sharp.kernel.lanczos3;
+  let processor = sharp(inputBuffer)
+    .rotate()
+    .resize({
+      width: targetWidth,
+      height: targetHeight,
+      fit: "fill",
+      kernel
+    });
+
+  if (qualityMode === "high") {
+    processor = processor
+      .sharpen({ sigma: 1.2, m1: 0.25, m2: 2.8 })
+      .modulate({ brightness: 1.01, saturation: 1.03 });
+  } else if (qualityMode === "balanced") {
+    processor = processor.sharpen({ sigma: 1.05, m1: 0.2, m2: 2.2 });
+  }
+
+  if (hasAlpha) {
+    const buffer = await processor.png({ compressionLevel: 9 }).toBuffer();
+    return { buffer, mimeType: "image/png" };
+  }
+  const buffer = await processor.jpeg({
+    quality: 94,
+    chromaSubsampling: "4:4:4",
+    mozjpeg: true
+  }).toBuffer();
+  return { buffer, mimeType: "image/jpeg" };
+}
+
+async function removeBackgroundApprox(inputBuffer) {
+  const { data, info } = await sharp(inputBuffer)
+    .rotate()
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const width = Number(info.width || 0);
+  const height = Number(info.height || 0);
+  const channels = Number(info.channels || 4);
+  if (width <= 0 || height <= 0 || channels < 4) {
+    throw new Error("Unsupported raw image format");
+  }
+
+  const bg = estimateCornerBackground(data, width, height, channels);
+  const tolerance = estimateBackgroundTolerance(data, width, height, channels, bg);
+  const visited = new Uint8Array(width * height);
+  const queue = new Uint32Array(width * height);
+  let queueHead = 0;
+  let queueTail = 0;
+
+  const maybeVisit = (x, y) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const idx = y * width + x;
+    if (visited[idx]) return;
+    const px = idx * channels;
+    const dist = colorDistance(data[px], data[px + 1], data[px + 2], bg.r, bg.g, bg.b);
+    if (dist <= tolerance) {
+      visited[idx] = 1;
+      queue[queueTail++] = idx;
+    }
+  };
+
+  for (let x = 0; x < width; x++) {
+    maybeVisit(x, 0);
+    maybeVisit(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    maybeVisit(0, y);
+    maybeVisit(width - 1, y);
+  }
+
+  while (queueHead < queueTail) {
+    const idx = queue[queueHead++];
+    const y = Math.floor(idx / width);
+    const x = idx - (y * width);
+    maybeVisit(x + 1, y);
+    maybeVisit(x - 1, y);
+    maybeVisit(x, y + 1);
+    maybeVisit(x, y - 1);
+  }
+
+  const softBand = 22;
+  for (let i = 0; i < width * height; i++) {
+    const px = i * channels;
+    if (visited[i]) {
+      data[px + 3] = 0;
+      continue;
+    }
+    const dist = colorDistance(data[px], data[px + 1], data[px + 2], bg.r, bg.g, bg.b);
+    if (dist <= tolerance + softBand) {
+      const normalized = Math.max(0, Math.min(1, (dist - tolerance) / softBand));
+      const alpha = Math.round(normalized * 255);
+      data[px + 3] = Math.min(data[px + 3], alpha);
+    }
+  }
+
+  return sharp(data, { raw: { width, height, channels: 4 } })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
+function estimateCornerBackground(data, width, height, channels) {
+  const patch = Math.max(2, Math.min(12, Math.floor(Math.min(width, height) / 18)));
+  const samples = [];
+  const corners = [
+    [0, 0],
+    [Math.max(0, width - patch), 0],
+    [0, Math.max(0, height - patch)],
+    [Math.max(0, width - patch), Math.max(0, height - patch)]
+  ];
+
+  for (const [startX, startY] of corners) {
+    for (let y = startY; y < Math.min(height, startY + patch); y++) {
+      for (let x = startX; x < Math.min(width, startX + patch); x++) {
+        const px = (y * width + x) * channels;
+        samples.push([data[px], data[px + 1], data[px + 2]]);
+      }
+    }
+  }
+
+  if (samples.length === 0) {
+    return { r: 255, g: 255, b: 255 };
+  }
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (const s of samples) {
+    r += s[0];
+    g += s[1];
+    b += s[2];
+  }
+  return {
+    r: Math.round(r / samples.length),
+    g: Math.round(g / samples.length),
+    b: Math.round(b / samples.length)
+  };
+}
+
+function estimateBackgroundTolerance(data, width, height, channels, bg) {
+  const patch = Math.max(2, Math.min(14, Math.floor(Math.min(width, height) / 16)));
+  const distances = [];
+  const corners = [
+    [0, 0],
+    [Math.max(0, width - patch), 0],
+    [0, Math.max(0, height - patch)],
+    [Math.max(0, width - patch), Math.max(0, height - patch)]
+  ];
+
+  for (const [startX, startY] of corners) {
+    for (let y = startY; y < Math.min(height, startY + patch); y++) {
+      for (let x = startX; x < Math.min(width, startX + patch); x++) {
+        const px = (y * width + x) * channels;
+        distances.push(colorDistance(data[px], data[px + 1], data[px + 2], bg.r, bg.g, bg.b));
+      }
+    }
+  }
+  if (distances.length === 0) return 28;
+  const mean = distances.reduce((sum, value) => sum + value, 0) / distances.length;
+  const variance = distances.reduce((sum, value) => {
+    const delta = value - mean;
+    return sum + delta * delta;
+  }, 0) / distances.length;
+  const std = Math.sqrt(Math.max(0, variance));
+  return clampNumber(Math.round(mean + std * 2.2), 18, 95);
+}
+
+function colorDistance(r1, g1, b1, r2, g2, b2) {
+  const dr = r1 - r2;
+  const dg = g1 - g2;
+  const db = b1 - b2;
+  return Math.sqrt(dr * dr + dg * dg + db * db);
 }

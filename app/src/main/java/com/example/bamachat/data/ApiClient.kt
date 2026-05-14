@@ -105,9 +105,7 @@ object ApiClient {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-            })
+            .addInterceptor(createLoggingInterceptor())
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
                     .addHeader("Authorization", "Bearer $cleanKey")
@@ -134,9 +132,7 @@ object ApiClient {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-            })
+            .addInterceptor(createLoggingInterceptor())
             .build()
 
         return Retrofit.Builder()
@@ -252,3 +248,9 @@ data class OpenRouterError(
     val message: String?,
     val code: Int? = null
 )
+    private fun createLoggingInterceptor(): HttpLoggingInterceptor {
+        return HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.NONE
+            redactHeader("Authorization")
+        }
+    }

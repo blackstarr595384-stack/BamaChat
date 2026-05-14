@@ -20,3 +20,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "BamaChat"
 include(":app")
+include(":desktopApp")
+include(":sharedCore")

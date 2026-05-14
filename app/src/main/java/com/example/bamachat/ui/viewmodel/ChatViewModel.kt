@@ -5,12 +5,11 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.core.app.NotificationCompat
@@ -24,18 +23,26 @@ import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.model.ChatSource
 import com.example.bamachat.data.model.ModelInfo
 import com.example.bamachat.data.repository.ChatRepository
+import com.example.bamachat.shared.core.ChatSendDeduplicator
+import com.example.bamachat.shared.core.ExtensionRuntimeOrchestrator
+import com.example.bamachat.shared.core.QuickActionInterpreter
+import com.example.bamachat.shared.core.QuickActionSuggestion
+import com.example.bamachat.shared.core.RuntimeExtension
+import com.example.bamachat.shared.core.WorkspaceNaming
 import com.example.bamachat.util.AppTelemetry
+import com.example.bamachat.util.ActiveWorkspaceExtension
+import com.example.bamachat.util.AutomationCatalog
 import com.example.bamachat.util.AudioTranscriptionManager
 import com.example.bamachat.util.DocumentIngestor
 import com.example.bamachat.util.EmotionAnalyzer
 import com.example.bamachat.util.EmotionSignal
+import com.example.bamachat.util.ExtensionStateStore
 import com.example.bamachat.util.KnowledgeGraphExtractor
 import com.example.bamachat.util.MemoryFactExtractor
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.MultimodalAsset
 import com.example.bamachat.util.MultimodalProcessor
 import com.example.bamachat.util.VideoKeyframeExtractor
-import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,11 +70,58 @@ import java.util.concurrent.TimeUnit
  *   - ApiManager (API-Calls mit Retry-Logik)
  */
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    companion object {
+        // Keep the rendering window intentionally bounded for smooth 1000+ message chats.
+        private const val INITIAL_VISIBLE_MESSAGE_LIMIT = 100
+        private const val LOAD_MORE_STEP = 70
+        private const val DEV_INITIAL_VISIBLE_MESSAGE_LIMIT = 280
+        private const val DEV_LOAD_MORE_STEP = 160
+        private const val DEFAULT_HISTORY_LIMIT = 10
+        private const val DEV_HISTORY_LIMIT = 40
+        private const val DUPLICATE_SEND_WINDOW_MS = 1300L
+        private const val KEY_EXTENSION_STATES_JSON = "workspace_extension_states_json"
+        private const val KEY_EXTENSION_QUICK_ACTION = "extension_quick_action"
+
+        internal fun computeWindowedMessages(all: List<ChatMessage>, limit: Int): List<ChatMessage> {
+            if (all.isEmpty()) return emptyList()
+            val safeLimit = limit.coerceAtLeast(1)
+            return if (all.size <= safeLimit) all.toList() else all.takeLast(safeLimit)
+        }
+
+        internal fun normalizeForDedup(raw: String): String =
+            ChatSendDeduplicator.normalizeForDedup(raw)
+
+        internal fun normalizeWorkspaceName(raw: String): String =
+            WorkspaceNaming.normalizeWorkspaceName(raw)
+
+        internal fun workspaceTagFromTitle(title: String): String? {
+            return WorkspaceNaming.workspaceTagFromTitle(title)
+        }
+
+        internal fun isDuplicateSend(
+            lastNormalizedText: String?,
+            lastConversationId: String?,
+            lastSentAtMs: Long,
+            newNormalizedText: String,
+            newConversationId: String?,
+            nowMs: Long,
+            windowMs: Long = DUPLICATE_SEND_WINDOW_MS
+        ): Boolean {
+            return ChatSendDeduplicator.isDuplicateSend(
+                lastNormalizedText = lastNormalizedText,
+                lastConversationId = lastConversationId,
+                lastSentAtMs = lastSentAtMs,
+                newNormalizedText = newNormalizedText,
+                newConversationId = newConversationId,
+                nowMs = nowMs,
+                windowMs = windowMs
+            )
+        }
+    }
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val db = ChatDatabase.getDatabase(application)
     private val repo = ChatRepository(db.chatDao())
-    private val auth = FirebaseAuth.getInstance()
     private val imageHttpClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
@@ -83,6 +137,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ===== Chat State =====
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
+    private val allMessagesBuffer = mutableListOf<ChatMessage>()
+    private val _visibleMessageLimit = MutableStateFlow(INITIAL_VISIBLE_MESSAGE_LIMIT)
+    private val _hasOlderMessages = MutableStateFlow(false)
+    val hasOlderMessages: StateFlow<Boolean> = _hasOlderMessages
 
     private val _conversations = MutableStateFlow<List<com.example.bamachat.data.local.ConversationEntity>>(emptyList())
     val conversations: StateFlow<List<com.example.bamachat.data.local.ConversationEntity>> = _conversations
@@ -130,14 +188,53 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _knowledgeGraphHints = MutableStateFlow<List<String>>(emptyList())
     val knowledgeGraphHints: StateFlow<List<String>> = _knowledgeGraphHints
+    private val _selectedExtensionQuickAction = MutableStateFlow(
+        ExtensionQuickAction.fromKey(
+            prefs.getString(KEY_EXTENSION_QUICK_ACTION, ExtensionQuickAction.AUTO.key)
+        )
+    )
+    val selectedExtensionQuickAction: StateFlow<ExtensionQuickAction> = _selectedExtensionQuickAction
+    private val _activeExtensionNames = MutableStateFlow<List<String>>(emptyList())
+    val activeExtensionNames: StateFlow<List<String>> = _activeExtensionNames
+    private val _lastAppliedExtensionNames = MutableStateFlow<List<String>>(emptyList())
+    val lastAppliedExtensionNames: StateFlow<List<String>> = _lastAppliedExtensionNames
 
     private var messagesJob: Job? = null
+    private var lastAcceptedTextSend: String? = null
+    private var lastAcceptedConversationId: String? = null
+    private var lastAcceptedTextSendAtMs: Long = 0L
+    private var activeExtensionsCache: List<ActiveWorkspaceExtension> = emptyList()
+    private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_EXTENSION_STATES_JSON) {
+            refreshActiveExtensions()
+        }
+    }
 
     private data class LiveWebContext(
         val promptContext: String,
         val sources: List<ChatSource>,
         val fetchedAtIso: String
     )
+
+    private data class ExtensionRuntimeContext(
+        val promptContext: String,
+        val appliedExtensionNames: List<String>,
+        val forceWebResearch: Boolean
+    )
+
+    enum class ExtensionQuickAction(val key: String, val label: String) {
+        AUTO("auto", "Auto"),
+        RESEARCH("research", "Research"),
+        CODE_REVIEW("code_review", "Code Review"),
+        PLAN("plan", "Plan");
+
+        companion object {
+            fun fromKey(raw: String?): ExtensionQuickAction {
+                val normalized = raw?.trim()?.lowercase(Locale.ROOT).orEmpty()
+                return entries.firstOrNull { it.key == normalized } ?: AUTO
+            }
+        }
+    }
 
     enum class Persona(val displayName: String, val emoji: String, val systemPrompt: String) {
         ASSISTANT(
@@ -178,9 +275,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     init {
         createNotificationChannel()
         monetizationViewModel.refreshMonetizationState()
+        refreshActiveExtensions()
+        prefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
 
         viewModelScope.launch {
-            repo.getAllConversations().collectLatest { _conversations.value = it }
+            repo.getAllConversations().collectLatest {
+                _conversations.value = it
+                syncConversationWorkspaceBindings(it)
+            }
         }
 
         val lastConvId = prefs.getString("current_conversation_id", null)
@@ -208,9 +310,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (!notificationsEnabled) return
 
         val app = getApplication<Application>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             return
         }
         if (!NotificationManagerCompat.from(app).areNotificationsEnabled()) return
@@ -227,11 +327,65 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         manager.notify(System.currentTimeMillis().toInt(), notification)
     }
 
+    private fun newConversationTitle(): String {
+        val workspace = prefs.getString("active_workspace_name", "")?.trim().orEmpty()
+        return if (workspace.isBlank()) "Neuer Chat" else "[$workspace] Neuer Chat"
+    }
+
+    private fun isPlaceholderConversationTitle(title: String): Boolean {
+        return WorkspaceNaming.isPlaceholderConversationTitle(title)
+    }
+
+    private fun conversationWorkspaceKey(conversationId: String): String =
+        "conversation_workspace_name_$conversationId"
+
+    private fun activeWorkspaceName(): String =
+        normalizeWorkspaceName(prefs.getString("active_workspace_name", "Standard").orEmpty())
+
+    private fun bindConversationToWorkspace(conversationId: String, workspaceName: String = activeWorkspaceName()) {
+        prefs.edit().putString(conversationWorkspaceKey(conversationId), normalizeWorkspaceName(workspaceName)).apply()
+    }
+
+    private fun removeConversationWorkspaceBinding(conversationId: String) {
+        prefs.edit().remove(conversationWorkspaceKey(conversationId)).apply()
+    }
+
+    private fun resolveConversationWorkspaceName(conversationId: String, title: String): String {
+        val persisted = prefs.getString(conversationWorkspaceKey(conversationId), "")?.trim().orEmpty()
+        if (persisted.isNotBlank()) return normalizeWorkspaceName(persisted)
+        val inferred = workspaceTagFromTitle(title)
+        if (!inferred.isNullOrBlank()) {
+            bindConversationToWorkspace(conversationId, inferred)
+            return inferred
+        }
+        return "Standard"
+    }
+
+    private fun syncConversationWorkspaceBindings(conversations: List<com.example.bamachat.data.local.ConversationEntity>) {
+        conversations.forEach { conversation ->
+            resolveConversationWorkspaceName(conversation.id, conversation.title)
+        }
+    }
+
+    fun getConversationsForWorkspace(
+        activeWorkspaceName: String,
+        onlyActiveWorkspace: Boolean
+    ): List<com.example.bamachat.data.local.ConversationEntity> {
+        val all = _conversations.value
+        if (!onlyActiveWorkspace) return all
+        val target = normalizeWorkspaceName(activeWorkspaceName)
+        return all.filter { conversation ->
+            resolveConversationWorkspaceName(conversation.id, conversation.title)
+                .equals(target, ignoreCase = true)
+        }
+    }
+
     // ===== Conversations =====
     fun newConversation() {
         viewModelScope.launch {
             val id = UUID.randomUUID().toString()
-            repo.createConversation(id, "Neuer Chat", personaViewModel.selectedPersona.value.name)
+            repo.createConversation(id, newConversationTitle(), personaViewModel.selectedPersona.value.name)
+            bindConversationToWorkspace(id)
             switchConversation(id)
         }
     }
@@ -240,13 +394,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _currentConversationId.value = id
         prefs.edit().putString("current_conversation_id", id).apply()
         _messages.value = emptyList()
+        _visibleMessageLimit.value = currentInitialVisibleMessageLimit()
+        _hasOlderMessages.value = false
+        allMessagesBuffer.clear()
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
             repo.getMessages(id).collectLatest { items ->
-                _messages.value = items
-                syncFeedbackForMessages(items)
+                allMessagesBuffer.clear()
+                allMessagesBuffer.addAll(items)
+                publishVisibleMessages()
+                syncFeedbackForMessages(allMessagesBuffer)
             }
         }
+    }
+
+    fun loadOlderMessages() {
+        _visibleMessageLimit.value += currentLoadMoreStep()
+        publishVisibleMessages()
+        AppTelemetry.logEvent(
+            "chat_load_older",
+            mapOf(
+                "visible_limit" to _visibleMessageLimit.value.toString(),
+                "total_messages" to allMessagesBuffer.size.toString(),
+                "dev_mode" to isDeveloperUnlimitedTrainingEnabled().toString()
+            )
+        )
     }
 
     fun renameConversation(id: String, newTitle: String) {
@@ -256,6 +428,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteConversation(id: String) {
         viewModelScope.launch {
             repo.deleteConversation(id)
+            removeConversationWorkspaceBinding(id)
             if (_currentConversationId.value == id) {
                 val remaining = _conversations.value.filter { it.id != id }
                 if (remaining.isNotEmpty()) switchConversation(remaining.first().id)
@@ -270,62 +443,86 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ===== Message Sending =====
-    fun sendMessage(text: String) {
-        if (text.isBlank()) return
+    fun sendMessage(
+        text: String,
+        quickAction: ExtensionQuickAction = _selectedExtensionQuickAction.value
+    ): Boolean {
+        val trimmedText = text.trim()
+        if (trimmedText.isBlank()) return false
+        if (_isLoading.value || _isStreaming.value) return false
 
-        val emotion = EmotionAnalyzer.analyze(text)
+        val convId = _currentConversationId.value
+        val now = System.currentTimeMillis()
+        val normalizedText = normalizeForDedup(trimmedText)
+        if (isDuplicateSend(
+                lastNormalizedText = lastAcceptedTextSend,
+                lastConversationId = lastAcceptedConversationId,
+                lastSentAtMs = lastAcceptedTextSendAtMs,
+                newNormalizedText = normalizedText,
+                newConversationId = convId,
+                nowMs = now
+            )
+        ) {
+            return false
+        }
+
+        val emotion = EmotionAnalyzer.analyze(trimmedText)
         _emotionSignal.value = emotion
         _chatSentiment.value = emotion.sentiment
 
-        AppTelemetry.logEvent("chat_user_message", mapOf("length_bucket" to text.length.coerceAtMost(400).toString()))
+        AppTelemetry.logEvent("chat_user_message", mapOf("length_bucket" to trimmedText.length.coerceAtMost(400).toString()))
 
         // Image Generation Query Detection
-        if (isImageQuery(text)) {
-            generateImage(text, skipUserMessage = true)
-            return
+        if (isImageQuery(trimmedText)) {
+            generateImage(trimmedText, skipUserMessage = true)
+            return true
         }
 
         // Check Quota
-        val explicitWebQuery = isExplicitWebQuery(text)
+        val explicitWebQuery = isExplicitWebQuery(trimmedText)
         if (explicitWebQuery) {
             if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.WEB_RESEARCH)) {
                 _errorMessage.value = "Live-Web-Limit erreicht. Upgrade oder Credits nötig."
-                return
+                return false
             }
         } else if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.TEXT_MESSAGE)) {
-            return
+            return false
         }
+        lastAcceptedTextSend = normalizedText
+        lastAcceptedConversationId = convId
+        lastAcceptedTextSendAtMs = now
 
-        val convId = _currentConversationId.value
         if (convId == null) {
             viewModelScope.launch {
                 val newId = UUID.randomUUID().toString()
-                repo.createConversation(newId, "Neuer Chat", personaViewModel.selectedPersona.value.name)
+                repo.createConversation(newId, newConversationTitle(), personaViewModel.selectedPersona.value.name)
+                bindConversationToWorkspace(newId)
                 switchConversation(newId)
-                sendMessage(text)
+                sendMessage(trimmedText, quickAction)
             }
-            return
+            return true
         }
 
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
-            text = text,
+            text = trimmedText,
             isUser = true,
             timestamp = System.currentTimeMillis()
         )
 
+        _isLoading.value = true
         viewModelScope.launch {
             repo.saveMessage(convId, userMessage)
 
             // Auto-title first message
             val current = _conversations.value.firstOrNull { it.id == convId }
-            if (current != null && current.title == "Neuer Chat") {
-                val newTitle = text.take(40).ifBlank { "Chat" }
+            if (current != null && isPlaceholderConversationTitle(current.title)) {
+                val newTitle = trimmedText.take(40).ifBlank { "Chat" }
                 repo.renameConversation(convId, newTitle)
             }
 
             // Extract memory facts & knowledge graph
-            val extractedFacts = MemoryFactExtractor.extractFacts(text)
+            val extractedFacts = MemoryFactExtractor.extractFacts(trimmedText)
             extractedFacts.forEach { fact ->
                 repo.saveUserMemoryFact(
                     personaName = "GLOBAL",
@@ -335,16 +532,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            val extractedEdges = KnowledgeGraphExtractor.extractEdges(text)
+            val extractedEdges = KnowledgeGraphExtractor.extractEdges(trimmedText)
             extractedEdges.forEach { edge ->
                 repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = 0.7f)
             }
 
             // Send via API
-            _isLoading.value = true
             try {
-                val runtimeContext = buildRuntimeContextForUserText(text)
-                sendChatViaApi(convId, text, runtimeContext)
+                val runtimeContext = buildRuntimeContextForUserText(trimmedText)
+                val extensionRuntime = buildExtensionRuntimeContext(trimmedText, quickAction)
+                _lastAppliedExtensionNames.value = extensionRuntime?.appliedExtensionNames.orEmpty()
+                sendChatViaApi(convId, trimmedText, runtimeContext, extensionRuntime)
             } catch (e: Exception) {
                 handleError(e)
             } finally {
@@ -352,24 +550,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _isStreaming.value = false
             }
         }
+        return true
     }
 
-    fun sendMessageWithImage(text: String, imageUri: Uri) {
-        if (text.isBlank() && imageUri == Uri.EMPTY) return
+    fun sendMessageWithImage(text: String, imageUri: Uri): Boolean {
+        if (_isLoading.value || _isStreaming.value) return false
+        if (text.isBlank() && imageUri == Uri.EMPTY) return false
 
         if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_ANALYSIS)) {
-            return
+            return false
         }
 
         val convId = _currentConversationId.value
         if (convId == null) {
             viewModelScope.launch {
                 val newId = UUID.randomUUID().toString()
-                repo.createConversation(newId, "Neuer Chat", personaViewModel.selectedPersona.value.name)
+                repo.createConversation(newId, newConversationTitle(), personaViewModel.selectedPersona.value.name)
+                bindConversationToWorkspace(newId)
                 switchConversation(newId)
                 sendMessageWithImage(text, imageUri)
             }
-            return
+            return true
         }
 
         val userMessage = ChatMessage(
@@ -380,16 +581,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             imageUrl = imageUri.toString()
         )
 
+        _isLoading.value = true
         viewModelScope.launch {
             repo.saveMessage(convId, userMessage)
 
             val current = _conversations.value.firstOrNull { it.id == convId }
-            if (current != null && current.title == "Neuer Chat") {
+            if (current != null && isPlaceholderConversationTitle(current.title)) {
                 val newTitle = text.take(40).ifBlank { "Bild-Chat" }
                 repo.renameConversation(convId, newTitle)
             }
 
-            _isLoading.value = true
             try {
                 val systemPrompt = personaViewModel.getSystemPromptCached(personaViewModel.selectedPersona.value)
                 val userInstruction = text.ifBlank { "Beschreibe den Bildinhalt präzise und strukturiert." }
@@ -435,6 +636,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 _isLoading.value = false
             }
         }
+        return true
     }
 
     // ===== Image Generation =====
@@ -449,7 +651,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             var convId = _currentConversationId.value
             if (convId == null) {
                 val newId = UUID.randomUUID().toString()
-                repo.createConversation(newId, "Neuer Chat", personaViewModel.selectedPersona.value.name)
+                repo.createConversation(newId, newConversationTitle(), personaViewModel.selectedPersona.value.name)
+                bindConversationToWorkspace(newId)
                 switchConversation(newId)
                 convId = newId
             }
@@ -465,7 +668,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val current = _conversations.value.firstOrNull { it.id == convId }
-            if (current != null && current.title == "Neuer Chat") {
+            if (current != null && isPlaceholderConversationTitle(current.title)) {
                 repo.renameConversation(convId, "Bild: ${prompt.take(30)}")
             }
 
@@ -689,14 +892,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun sendChatViaApi(
         convId: String,
         text: String,
-        runtimeContext: String? = null
+        runtimeContext: String? = null,
+        extensionRuntime: ExtensionRuntimeContext? = null
     ) {
+        val startedAt = System.currentTimeMillis()
         val systemPrompt = personaViewModel.getSystemPromptCached(personaViewModel.selectedPersona.value)
-        val webContext = resolveLiveWebContext(text)
+        val mergedRuntimeContext = mergeRuntimeContexts(runtimeContext, extensionRuntime?.promptContext)
+        val forceWebResearch = extensionRuntime?.forceWebResearch == true
+        val appliedExtensions = extensionRuntime?.appliedExtensionNames.orEmpty()
+        if (appliedExtensions.isNotEmpty()) {
+            AppTelemetry.logEvent(
+                "chat_extensions_applied",
+                mapOf(
+                    "count" to appliedExtensions.size.toString(),
+                    "names" to appliedExtensions.joinToString(","),
+                    "force_web" to forceWebResearch.toString()
+                )
+            )
+        }
+        val webContext = resolveLiveWebContext(text, forceByExtension = forceWebResearch)
         val messages = buildOpenRouterHistory(
             latestUserText = text,
             liveWebContext = webContext?.promptContext,
-            runtimeContext = runtimeContext
+            runtimeContext = mergedRuntimeContext
         )
 
         _isStreaming.value = true
@@ -725,6 +943,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             },
             onError = { error ->
                 _errorMessage.value = error
+                AppTelemetry.logEvent(
+                    "chat_stream_error",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString())
+                )
             }
         )
 
@@ -735,7 +957,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 webFetchedAtIso = webContext?.fetchedAtIso
             )
             repo.saveMessage(convId, finalized, touchConversation = true)
+            AppTelemetry.logEvent(
+                "chat_response_success",
+                mapOf(
+                    "duration_ms" to (System.currentTimeMillis() - startedAt).toString(),
+                    "response_chars" to result.content.length.coerceAtMost(4000).toString()
+                )
+            )
             showNotification("BamaChat", result.content)
+        } else {
+            AppTelemetry.logEvent(
+                "chat_response_failed",
+                mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString())
+            )
         }
     }
 
@@ -745,7 +979,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         runtimeContext: String? = null
     ): List<OpenRouterMessage> {
         val list = mutableListOf<OpenRouterMessage>()
-        val recentMessages = _messages.value.takeLast(10).toMutableList()
+        val historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
+        val recentMessages = _messages.value.takeLast(historyLimit).toMutableList()
 
         if (!latestUserText.isNullOrBlank()) {
             val last = recentMessages.lastOrNull()
@@ -787,8 +1022,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return list
     }
 
-    private suspend fun resolveLiveWebContext(text: String): LiveWebContext? {
-        if (!apiManager.shouldUseLiveWebResearch(text)) return null
+    private suspend fun resolveLiveWebContext(text: String, forceByExtension: Boolean = false): LiveWebContext? {
+        if (!forceByExtension && !apiManager.shouldUseLiveWebResearch(text)) return null
 
         val explicitWeb = isExplicitWebQuery(text)
         if (!explicitWeb && !monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.WEB_RESEARCH)) {
@@ -871,6 +1106,57 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         "tr" -> "Türkisch"
         "ar" -> "Arabisch"
         else -> "der App-Sprache"
+    }
+
+    private fun refreshActiveExtensions() {
+        val raw = prefs.getString(KEY_EXTENSION_STATES_JSON, "")
+        activeExtensionsCache = ExtensionStateStore.resolveActiveExtensions(raw)
+        _activeExtensionNames.value = activeExtensionsCache.map { it.manifest.name }
+    }
+
+    private fun buildExtensionRuntimeContext(
+        userText: String,
+        quickAction: ExtensionQuickAction
+    ): ExtensionRuntimeContext? {
+        val runtimeExtensions = activeExtensionsCache.map { extension ->
+            RuntimeExtension(
+                id = extension.manifest.id,
+                name = extension.manifest.name,
+                capabilityKeys = extension.grantedCapabilities.map { it.key }.toSet()
+            )
+        }
+        val templateTitles = AutomationCatalog.templates.take(3).map { it.title }
+        val decision = ExtensionRuntimeOrchestrator.buildRuntimeContext(
+            userText = userText,
+            quickAction = quickAction.toSharedQuickAction(),
+            activeExtensions = runtimeExtensions,
+            templateTitles = templateTitles
+        ) ?: return null
+
+        return ExtensionRuntimeContext(
+            promptContext = decision.promptContext,
+            appliedExtensionNames = decision.appliedExtensionNames,
+            forceWebResearch = decision.forceWebResearch
+        )
+    }
+
+    private fun ExtensionQuickAction.toSharedQuickAction(): QuickActionSuggestion = when (this) {
+        ExtensionQuickAction.AUTO -> QuickActionSuggestion.AUTO
+        ExtensionQuickAction.RESEARCH -> QuickActionSuggestion.RESEARCH
+        ExtensionQuickAction.CODE_REVIEW -> QuickActionSuggestion.CODE_REVIEW
+        ExtensionQuickAction.PLAN -> QuickActionSuggestion.PLAN
+    }
+
+    private fun mergeRuntimeContexts(runtimeContext: String?, extensionContext: String?): String? {
+        val blocks = listOf(runtimeContext, extensionContext)
+            .map { it?.trim().orEmpty() }
+            .filter { it.isNotBlank() }
+        return if (blocks.isEmpty()) null else blocks.joinToString("\n\n")
+    }
+
+    fun setExtensionQuickAction(action: ExtensionQuickAction) {
+        _selectedExtensionQuickAction.value = action
+        prefs.edit().putString(KEY_EXTENSION_QUICK_ACTION, action.key).apply()
     }
 
     // ===== Message Feedback =====
@@ -977,13 +1263,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun decodeBitmapFromUri(uri: Uri): Bitmap? {
         return try {
             val contentResolver = getApplication<Application>().contentResolver
-            val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val source = ImageDecoder.createSource(contentResolver, uri)
-                ImageDecoder.decodeBitmap(source)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaStore.Images.Media.getBitmap(contentResolver, uri)
-            }
+            val source = ImageDecoder.createSource(contentResolver, uri)
+            val bitmap = ImageDecoder.decodeBitmap(source)
 
             val maxSide = 1600
             if (maxOf(bitmap.width, bitmap.height) <= maxSide) return bitmap
@@ -1035,6 +1316,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleError(e: Exception) {
         AppTelemetry.logError("chat_error", e)
+        AppTelemetry.logEvent("chat_error_event")
         _errorMessage.value = when {
             e.message?.contains("timeout", ignoreCase = true) == true -> "Zeitüberschreitung. Internet prüfen."
             e.message?.contains("Unable to resolve host", ignoreCase = true) == true -> "Keine Internetverbindung."
@@ -1042,8 +1324,42 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun publishVisibleMessages() {
+        val all = allMessagesBuffer
+        if (all.isEmpty()) {
+            _messages.value = emptyList()
+            _hasOlderMessages.value = false
+            return
+        }
+        val visible = computeWindowedMessages(all, _visibleMessageLimit.value)
+        _messages.value = visible
+        _hasOlderMessages.value = all.size > visible.size
+    }
+
+    private fun currentInitialVisibleMessageLimit(): Int {
+        return if (isDeveloperUnlimitedTrainingEnabled()) {
+            DEV_INITIAL_VISIBLE_MESSAGE_LIMIT
+        } else {
+            INITIAL_VISIBLE_MESSAGE_LIMIT
+        }
+    }
+
+    private fun currentLoadMoreStep(): Int {
+        return if (isDeveloperUnlimitedTrainingEnabled()) {
+            DEV_LOAD_MORE_STEP
+        } else {
+            LOAD_MORE_STEP
+        }
+    }
+
+    private fun isDeveloperUnlimitedTrainingEnabled(): Boolean {
+        return prefs.getBoolean("developer_mode_enabled", false) &&
+            prefs.getBoolean("developer_unlimited_training", false)
+    }
+
     override fun onCleared() {
         messagesJob?.cancel()
+        prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
         super.onCleared()
     }
 

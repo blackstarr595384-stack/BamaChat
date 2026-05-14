@@ -1,31 +1,41 @@
 package com.example.bamachat.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.model.CollabMessage
 import com.example.bamachat.data.model.CollabPresence
 import com.example.bamachat.data.model.CollabSession
+import com.example.bamachat.data.model.CollabWorkspaceState
 import com.example.bamachat.util.AppTelemetry
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.gson.Gson
 import android.net.Uri
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 class CollabViewModel(application: Application) : AndroidViewModel(application) {
     enum class SessionRole { OWNER, EDITOR, VIEWER }
+    enum class MessageDeliveryStatus { SENDING, SENT, FAILED }
 
+    private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private var messageListener: ListenerRegistration? = null
     private var sessionListener: ListenerRegistration? = null
     private var presenceListener: ListenerRegistration? = null
+    private var workspaceListener: ListenerRegistration? = null
 
     private val _currentSession = MutableStateFlow<CollabSession?>(null)
     val currentSession: StateFlow<CollabSession?> = _currentSession.asStateFlow()
@@ -48,20 +58,382 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private val _workspaceState = MutableStateFlow(CollabWorkspaceState())
+    val workspaceState: StateFlow<CollabWorkspaceState> = _workspaceState.asStateFlow()
+
+    private val _syncStatus = MutableStateFlow("Nicht verbunden")
+    val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
+
+    private val _authModeLabel = MutableStateFlow("unbekannt")
+    val authModeLabel: StateFlow<String> = _authModeLabel.asStateFlow()
+
+    private val _firebaseStatus = MutableStateFlow("unbekannt")
+    val firebaseStatus: StateFlow<String> = _firebaseStatus.asStateFlow()
+
+    private val _providerLabel = MutableStateFlow("OpenRouter")
+    val providerLabel: StateFlow<String> = _providerLabel.asStateFlow()
+
+    private val _modelLabel = MutableStateFlow("google/gemma-3-27b-it:free")
+    val modelLabel: StateFlow<String> = _modelLabel.asStateFlow()
+
+    private val _lastDetailedError = MutableStateFlow<String?>(null)
+    val lastDetailedError: StateFlow<String?> = _lastDetailedError.asStateFlow()
+
+    private val _messageDeliveryStatus = MutableStateFlow<Map<String, MessageDeliveryStatus>>(emptyMap())
+    val messageDeliveryStatus: StateFlow<Map<String, MessageDeliveryStatus>> = _messageDeliveryStatus.asStateFlow()
+    private val _canWriteMessages = MutableStateFlow(false)
+    val canWriteMessages: StateFlow<Boolean> = _canWriteMessages.asStateFlow()
+    private val _canEditWorkspace = MutableStateFlow(false)
+    val canEditWorkspace: StateFlow<Boolean> = _canEditWorkspace.asStateFlow()
+    private val _canUseAi = MutableStateFlow(false)
+    val canUseAi: StateFlow<Boolean> = _canUseAi.asStateFlow()
+    private val _workspaceConflictMessage = MutableStateFlow<String?>(null)
+    val workspaceConflictMessage: StateFlow<String?> = _workspaceConflictMessage.asStateFlow()
+
+    private data class EffectiveUser(
+        val uid: String,
+        val displayName: String,
+        val localDevMode: Boolean
+    )
+
+    private class WorkspaceConflictException(
+        val remoteUser: String,
+        val remoteRevision: Long
+    ) : RuntimeException("workspace_conflict")
+
+    data class WorkspaceDiffData(
+        val identical: Boolean = true,
+        val sharedCount: Int = 0,
+        val localOnly: List<String> = emptyList(),
+        val remoteOnly: List<String> = emptyList()
+    )
+
+    companion object {
+        private const val KEY_DEVELOPER_MODE_ENABLED = "developer_mode_enabled"
+        private const val KEY_DEVELOPER_REALTIME_COLLAB_TESTING = "developer_realtime_collab_testing"
+        private const val KEY_DEVELOPER_REALTIME_COLLAB_PREFER_CLOUD = "developer_realtime_collab_prefer_cloud"
+        private const val KEY_LOCAL_DEV_COLLAB_USER_ID = "local_dev_collab_user_id"
+        private const val KEY_OFFLINE_QUEUE_PREFIX = "collab_offline_queue_"
+        private const val TYPING_THROTTLE_MS = 220L
+        private const val RETRY_LOOP_MS = 4500L
+        private const val MAX_WORKSPACE_TEXT_LENGTH = 12_000
+
+        private fun workspaceLines(text: String): List<String> {
+            return text
+                .trim()
+                .lines()
+                .map { it.trimEnd() }
+                .filter { it.isNotBlank() }
+                .distinct()
+        }
+
+        internal fun buildWorkspaceDiffDataInternal(remoteText: String, localText: String): WorkspaceDiffData {
+            val remote = remoteText.trim()
+            val local = localText.trim()
+            if (remote == local) {
+                return WorkspaceDiffData(identical = true)
+            }
+
+            val remoteLines = workspaceLines(remote)
+            val localLines = workspaceLines(local)
+            val remoteSet = remoteLines.toSet()
+            val localSet = localLines.toSet()
+            val localOnly = localLines.filterNot { remoteSet.contains(it) }
+            val remoteOnly = remoteLines.filterNot { localSet.contains(it) }
+            val sharedCount = localLines.count { remoteSet.contains(it) }
+            return WorkspaceDiffData(
+                identical = false,
+                sharedCount = sharedCount,
+                localOnly = localOnly,
+                remoteOnly = remoteOnly
+            )
+        }
+
+        internal fun mergeWorkspaceTextsInternal(remoteText: String, localText: String): String {
+            val remote = remoteText.trim()
+            val local = localText.trim()
+            if (remote.isBlank()) return local.take(MAX_WORKSPACE_TEXT_LENGTH)
+            if (local.isBlank()) return remote.take(MAX_WORKSPACE_TEXT_LENGTH)
+            val diffData = buildWorkspaceDiffDataInternal(remote, local)
+            if (diffData.identical) return local.take(MAX_WORKSPACE_TEXT_LENGTH)
+            if (diffData.localOnly.isEmpty()) return remote.take(MAX_WORKSPACE_TEXT_LENGTH)
+            if (diffData.remoteOnly.isEmpty()) return local.take(MAX_WORKSPACE_TEXT_LENGTH)
+
+            return buildString {
+                append(remote)
+                appendLine()
+                appendLine()
+                appendLine("---- Lokale Ergänzungen ----")
+                diffData.localOnly.forEach { appendLine(it) }
+            }.trim().take(MAX_WORKSPACE_TEXT_LENGTH)
+        }
+
+        internal fun buildWorkspaceDiffPreviewInternal(remoteText: String, localText: String): String {
+            val remote = remoteText.trim()
+            val local = localText.trim()
+            val diffData = buildWorkspaceDiffDataInternal(remote, local)
+            if (diffData.identical) return "Keine Unterschiede."
+            if (remote.isBlank() && local.isNotBlank()) return "Remote ist leer, lokal enthält Inhalte."
+            if (local.isBlank() && remote.isNotBlank()) return "Lokal ist leer, remote enthält Inhalte."
+
+            return buildString {
+                append("Lokal exklusiv: ${diffData.localOnly.size} Zeilen • Remote exklusiv: ${diffData.remoteOnly.size} Zeilen • Gemeinsam: ${diffData.sharedCount}")
+                if (diffData.localOnly.isNotEmpty()) {
+                    appendLine()
+                    append("Lokal: ")
+                    append(diffData.localOnly.take(3).joinToString(" | ").take(220))
+                }
+                if (diffData.remoteOnly.isNotEmpty()) {
+                    appendLine()
+                    append("Remote: ")
+                    append(diffData.remoteOnly.take(3).joinToString(" | ").take(220))
+                }
+            }.trim()
+        }
+
+        private val localSessions = mutableMapOf<String, CollabSession>()
+        private val localMessages = mutableMapOf<String, MutableList<CollabMessage>>()
+        private val localPresences = mutableMapOf<String, MutableMap<String, CollabPresence>>()
+        private val localWorkspace = mutableMapOf<String, CollabWorkspaceState>()
+        private val localLock = Any()
+    }
+
+    private var lastJoinSessionInput: String = ""
+    private var lastJoinInviteInput: String = ""
+    private val failedOutbound = mutableMapOf<String, CollabMessage>()
+    private val gson = Gson()
+    private var retryJob: Job? = null
+    private var lastTypingUpdateAt: Long = 0L
+    @Volatile
+    private var devCloudAuthInFlight = false
+    @Volatile
+    private var devCloudAuthFallbackToLocal = false
+
+    init {
+        refreshDebugInfo()
+        refreshFirebaseStatus()
+        startRetryLoop()
+    }
+
     fun clearError() {
         _errorMessage.value = null
+        _lastDetailedError.value = null
+    }
+
+    fun clearWorkspaceConflict() {
+        _workspaceConflictMessage.value = null
+    }
+
+    private fun canRoleSendMessages(session: CollabSession, role: SessionRole): Boolean {
+        return when (role) {
+            SessionRole.OWNER -> true
+            SessionRole.EDITOR -> session.editorCanSendMessages
+            SessionRole.VIEWER -> false
+        }
+    }
+
+    private fun canRoleUseAi(session: CollabSession, role: SessionRole): Boolean {
+        if (!session.aiEnabled) return false
+        return when (role) {
+            SessionRole.OWNER -> true
+            SessionRole.EDITOR -> session.editorCanUseAi
+            SessionRole.VIEWER -> false
+        }
+    }
+
+    private fun canRoleEditWorkspace(session: CollabSession, role: SessionRole): Boolean {
+        return when (role) {
+            SessionRole.OWNER -> true
+            SessionRole.EDITOR -> session.editorCanEditWorkspace
+            SessionRole.VIEWER -> false
+        }
+    }
+
+    private fun refreshCapabilities(session: CollabSession? = _currentSession.value, userId: String = _currentUserId.value) {
+        if (session == null || userId.isBlank() || !session.participants.contains(userId)) {
+            _canWriteMessages.value = false
+            _canEditWorkspace.value = false
+            _canUseAi.value = false
+            return
+        }
+        val role = roleOf(session, userId)
+        _canWriteMessages.value = canRoleSendMessages(session, role)
+        _canEditWorkspace.value = canRoleEditWorkspace(session, role)
+        _canUseAi.value = canRoleUseAi(session, role)
+    }
+
+    fun refreshDebugInfo() {
+        _providerLabel.value = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
+        _modelLabel.value = prefs.getString("openrouter_model", "google/gemma-3-27b-it:free")
+            ?: "google/gemma-3-27b-it:free"
+    }
+
+    private fun refreshFirebaseStatus() {
+        val appsAvailable = runCatching { FirebaseApp.getApps(getApplication()).isNotEmpty() }.getOrDefault(false)
+        val authUser = auth.currentUser
+        _firebaseStatus.value = when {
+            appsAvailable && authUser != null -> "ready (${authUser.uid.take(8)})"
+            appsAvailable -> "initialized (no-user)"
+            else -> "not-initialized"
+        }
+    }
+
+    private fun putDeliveryStatus(messageId: String, status: MessageDeliveryStatus) {
+        _messageDeliveryStatus.value = _messageDeliveryStatus.value.toMutableMap().apply {
+            put(messageId, status)
+        }
+    }
+
+    private fun recordDetailedError(prefix: String, details: String?) {
+        val clean = details?.trim().orEmpty()
+        _lastDetailedError.value = if (clean.isBlank()) prefix else "$prefix: $clean"
+    }
+
+    private fun publishAuthMode(user: EffectiveUser?) {
+        refreshDebugInfo()
+        refreshFirebaseStatus()
+        if (user == null) {
+            _authModeLabel.value = "nicht angemeldet"
+            return
+        }
+        _authModeLabel.value = if (user.localDevMode) {
+            "Dev-Local (${user.uid.take(10)})"
+        } else {
+            "Firebase (${user.uid.take(10)})"
+        }
+    }
+
+    private fun startRetryLoop() {
+        retryJob?.cancel()
+        retryJob = viewModelScope.launch {
+            while (isActive) {
+                delay(RETRY_LOOP_MS)
+                retryFailedOutboundNow()
+            }
+        }
+    }
+
+    private fun queueStorageKey(sessionId: String): String = "$KEY_OFFLINE_QUEUE_PREFIX$sessionId"
+
+    private fun persistOfflineQueue(sessionId: String) {
+        if (sessionId.isBlank()) return
+        val payload = failedOutbound.values
+            .filter { it.id.isNotBlank() && it.text.isNotBlank() }
+            .toList()
+        if (payload.isEmpty()) {
+            prefs.edit().remove(queueStorageKey(sessionId)).apply()
+            return
+        }
+        prefs.edit().putString(queueStorageKey(sessionId), gson.toJson(payload)).apply()
+    }
+
+    private fun restoreOfflineQueue(sessionId: String) {
+        if (sessionId.isBlank()) return
+        val raw = prefs.getString(queueStorageKey(sessionId), "")?.trim().orEmpty()
+        if (raw.isBlank()) return
+        val restored = runCatching {
+            gson.fromJson(raw, Array<CollabMessage>::class.java)?.toList().orEmpty()
+        }.getOrDefault(emptyList())
+        if (restored.isEmpty()) {
+            prefs.edit().remove(queueStorageKey(sessionId)).apply()
+            return
+        }
+        restored.forEach { message ->
+            failedOutbound[message.id] = message
+            putDeliveryStatus(message.id, MessageDeliveryStatus.FAILED)
+        }
+        _messages.value = (_messages.value + restored).distinctBy { it.id }.sortedBy { it.timestamp }
+    }
+
+    fun retryFailedOutboundNow() {
+        val session = _currentSession.value ?: return
+        val user = resolveEffectiveUser() ?: return
+        if (user.localDevMode) return
+        if (failedOutbound.isEmpty()) return
+        val pending = failedOutbound.values.toList()
+        pending.forEach { failed ->
+            viewModelScope.launch {
+                runCatching {
+                    putDeliveryStatus(failed.id, MessageDeliveryStatus.SENDING)
+                    firestore.collection("collab_sessions")
+                        .document(session.id)
+                        .collection("messages")
+                        .document(failed.id)
+                        .set(failed)
+                        .await()
+                    failedOutbound.remove(failed.id)
+                    putDeliveryStatus(failed.id, MessageDeliveryStatus.SENT)
+                    if (failedOutbound.isEmpty()) {
+                        prefs.edit().remove(queueStorageKey(session.id)).apply()
+                    } else {
+                        persistOfflineQueue(session.id)
+                    }
+                    _syncStatus.value = "Offline-Queue synchronisiert"
+                }.onFailure {
+                    putDeliveryStatus(failed.id, MessageDeliveryStatus.FAILED)
+                    persistOfflineQueue(session.id)
+                }
+            }
+        }
     }
 
     fun createSession(title: String) {
-        val user = auth.currentUser
+        val user = resolveEffectiveUser()
+        if (user == null && tryBootstrapDeveloperCloudAuth { createSession(title) }) {
+            return
+        }
+        publishAuthMode(user)
         if (user == null) {
-            _errorMessage.value = "Realtime-Collab benötigt Anmeldung (kein Gastmodus)."
+            _errorMessage.value = "Realtime-Collab benötigt Anmeldung oder den Schalter 'Realtime Collab Test' im Entwickler-Modus."
             return
         }
         _currentUserId.value = user.uid
         val cleanTitle = title.trim().ifBlank { "Collab Session" }
         val sessionId = UUID.randomUUID().toString().take(8).uppercase()
         val inviteCode = UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
+        lastJoinSessionInput = sessionId
+        lastJoinInviteInput = inviteCode
+
+        if (user.localDevMode) {
+            val session = CollabSession(
+                id = sessionId,
+                title = cleanTitle,
+                ownerId = user.uid,
+                participants = listOf(user.uid),
+                participantRoles = mapOf(user.uid to SessionRole.OWNER.name),
+                inviteCode = inviteCode,
+                createdAt = System.currentTimeMillis()
+            )
+            synchronized(localLock) {
+                localSessions[sessionId] = session
+                localMessages[sessionId] = mutableListOf()
+                localPresences[sessionId] = mutableMapOf(
+                    user.uid to CollabPresence(
+                        userId = user.uid,
+                        displayName = user.displayName,
+                        active = true,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                )
+                localWorkspace[sessionId] = CollabWorkspaceState()
+            }
+            _currentSession.value = session
+            _myRole.value = SessionRole.OWNER
+            _messages.value = emptyList()
+            _workspaceState.value = localWorkspace[sessionId] ?: CollabWorkspaceState()
+            _syncStatus.value = "Lokaler Dev-Workspace aktiv (nur dieses Gerät)"
+            _presences.value = listOf(
+                CollabPresence(
+                    userId = user.uid,
+                    displayName = user.displayName,
+                    active = true,
+                    lastSeenAt = System.currentTimeMillis()
+                )
+            )
+            refreshCapabilities(session, user.uid)
+            AppTelemetry.logEvent("collab_session_created_local_dev")
+            return
+        }
 
         viewModelScope.launch {
             _isLoading.value = true
@@ -82,40 +454,147 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
 
                 bindSession(sessionId)
                 setOwnPresence(active = true)
+                _syncStatus.value = "Session verbunden: $sessionId"
                 AppTelemetry.logEvent("collab_session_created")
             }.onFailure {
                 AppTelemetry.logError("collab_create", it)
                 _errorMessage.value = "Session konnte nicht erstellt werden."
+                recordDetailedError("collab_create", it.message)
             }
             _isLoading.value = false
         }
     }
 
     fun joinSession(sessionIdInput: String, inviteCodeInput: String = "") {
-        val user = auth.currentUser
+        val user = resolveEffectiveUser()
+        if (user == null && tryBootstrapDeveloperCloudAuth { joinSession(sessionIdInput, inviteCodeInput) }) {
+            return
+        }
+        publishAuthMode(user)
         if (user == null) {
-            _errorMessage.value = "Realtime-Collab benötigt Anmeldung (kein Gastmodus)."
+            _errorMessage.value = "Realtime-Collab benötigt Anmeldung oder den Schalter 'Realtime Collab Test' im Entwickler-Modus."
+            return
+        }
+        _errorMessage.value = null
+        lastJoinSessionInput = sessionIdInput.trim()
+        lastJoinInviteInput = inviteCodeInput.trim().uppercase()
+        if (sessionIdInput.trim().isBlank() && inviteCodeInput.trim().isNotBlank()) {
+            _errorMessage.value = "Nur Invite-Code reicht nicht. Bitte zusätzlich Session-ID oder kompletten Invite-Link einfügen."
             return
         }
         _currentUserId.value = user.uid
         val joinTarget = parseJoinInput(sessionIdInput, inviteCodeInput)
         if (joinTarget == null || joinTarget.sessionId.isBlank()) {
-            _errorMessage.value = "Bitte Session-ID eingeben."
+            _errorMessage.value = "Ungültiger Invite-Link oder Session-ID. Nutze den kopierten Link mit ?session=... oder nur die Session-ID."
             return
         }
-        val sessionId = joinTarget.sessionId
+        val sessionIdCandidates = buildSessionIdCandidates(joinTarget.sessionId)
+        if (sessionIdCandidates.isEmpty()) {
+            _errorMessage.value = "Ungültige Session-ID. Bitte nur den Session-Code oder einen gültigen Invite-Link einfügen."
+            return
+        }
         val inviteCode = joinTarget.inviteCode
+        val inviteCodeCandidates = buildInviteCodeCandidates(
+            primaryInviteCode = inviteCode,
+            rawSessionInput = joinTarget.sessionId
+        )
+
+        if (user.localDevMode) {
+            synchronized(localLock) {
+                val resolvedSessionIdById = sessionIdCandidates.firstOrNull { localSessions.containsKey(it) }
+                val sessionFromId = resolvedSessionIdById?.let { localSessions[it] }
+                val sessionByInvite = if (sessionFromId == null) {
+                    localSessions.entries.firstOrNull { entry ->
+                        inviteCodeCandidates.any { code -> code.equals(entry.value.inviteCode, ignoreCase = true) }
+                    }
+                } else null
+                val resolvedSessionId = resolvedSessionIdById ?: sessionByInvite?.key
+                val existing = sessionFromId ?: sessionByInvite?.value
+                if (existing == null) {
+                    _errorMessage.value = "Session nicht gefunden."
+                    return
+                }
+                if (resolvedSessionId == null) {
+                    _errorMessage.value = "Session nicht gefunden."
+                    return
+                }
+                if (inviteCode.isNotBlank() &&
+                    existing.inviteCode.isNotBlank() &&
+                    inviteCode.trim().uppercase() != existing.inviteCode.uppercase()
+                ) {
+                    _errorMessage.value = "Invite-Code ist ungültig."
+                    return
+                }
+                val updatedParticipants = (existing.participants + user.uid).distinct()
+                val updatedRoles = existing.participantRoles.toMutableMap().apply {
+                    putIfAbsent(user.uid, SessionRole.EDITOR.name)
+                }
+                val updated = existing.copy(
+                    participants = updatedParticipants,
+                    participantRoles = updatedRoles
+                )
+                lastJoinSessionInput = resolvedSessionId
+                lastJoinInviteInput = existing.inviteCode
+                localSessions[resolvedSessionId] = updated
+                val presenceMap = localPresences.getOrPut(resolvedSessionId) { mutableMapOf() }
+                presenceMap[user.uid] = CollabPresence(
+                    userId = user.uid,
+                    displayName = user.displayName,
+                    active = true,
+                    lastSeenAt = System.currentTimeMillis()
+                )
+                _currentSession.value = updated
+                _messages.value = localMessages[resolvedSessionId].orEmpty().toList()
+                _workspaceState.value = localWorkspace[resolvedSessionId] ?: CollabWorkspaceState()
+                _presences.value = presenceMap.values.sortedByDescending { it.active }
+                _myRole.value = roleOf(updated, user.uid)
+                _syncStatus.value = "Lokaler Dev-Workspace verbunden (nur dieses Gerät): $resolvedSessionId"
+                refreshCapabilities(updated, user.uid)
+            }
+            AppTelemetry.logEvent("collab_session_joined_local_dev")
+            return
+        }
 
         viewModelScope.launch {
             _isLoading.value = true
             runCatching {
-                val docRef = firestore.collection("collab_sessions").document(sessionId)
-                val snapshot = docRef.get().await()
-                val existing = snapshot.toObject(CollabSession::class.java)
+                var resolvedSessionId: String? = null
+                var existing: CollabSession? = null
+                for (candidateId in sessionIdCandidates) {
+                    val candidateSnapshot = firestore.collection("collab_sessions")
+                        .document(candidateId)
+                        .get()
+                        .await()
+                    val candidateSession = candidateSnapshot.toObject(CollabSession::class.java)
+                    if (candidateSession != null) {
+                        resolvedSessionId = candidateId
+                        existing = candidateSession
+                        break
+                    }
+                }
+                if (existing == null && inviteCodeCandidates.isNotEmpty()) {
+                    for (candidateInvite in inviteCodeCandidates) {
+                        val querySnapshot = firestore.collection("collab_sessions")
+                            .whereEqualTo("inviteCode", candidateInvite)
+                            .limit(1)
+                            .get()
+                            .await()
+                        val first = querySnapshot.documents.firstOrNull()
+                        val candidateSession = first?.toObject(CollabSession::class.java)
+                        if (candidateSession != null) {
+                            resolvedSessionId = first.id
+                            existing = candidateSession
+                            break
+                        }
+                    }
+                }
                 if (existing == null) {
                     _errorMessage.value = "Session nicht gefunden."
                     return@runCatching
                 }
+                val docRef = firestore.collection("collab_sessions").document(resolvedSessionId!!)
+                lastJoinSessionInput = resolvedSessionId!!
+                lastJoinInviteInput = existing.inviteCode
 
                 if (inviteCode.isNotBlank() &&
                     existing.inviteCode.isNotBlank() &&
@@ -134,15 +613,30 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
                         mapOf(
                             "participants" to updatedParticipants,
                             "participantRoles" to updatedRoles
-                        )
+                    )
                     ).await()
                 }
-                bindSession(sessionId)
+                bindSession(resolvedSessionId)
                 setOwnPresence(active = true)
+                _syncStatus.value = "Session verbunden: $resolvedSessionId"
                 AppTelemetry.logEvent("collab_session_joined")
             }.onFailure {
                 AppTelemetry.logError("collab_join", it)
-                _errorMessage.value = "Session-Beitritt fehlgeschlagen."
+                val details = it.message?.take(140).orEmpty()
+                recordDetailedError("collab_join", details)
+                val mapped = when {
+                    details.contains("PERMISSION_DENIED", ignoreCase = true) ->
+                        "Kein Zugriff auf Session-Metadaten. Bitte Firestore-Regeln für collab_sessions veröffentlichen."
+                    else -> ""
+                }
+                _errorMessage.value = if (mapped.isNotBlank()) {
+                    mapped
+                } else if (details.isNotBlank()) {
+                    "Session-Beitritt fehlgeschlagen: $details"
+                } else {
+                    "Session-Beitritt fehlgeschlagen."
+                }
+                _syncStatus.value = "Join fehlgeschlagen"
             }
             _isLoading.value = false
         }
@@ -156,67 +650,351 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
     private fun parseJoinInput(sessionIdInput: String, inviteCodeInput: String): JoinTarget? {
         val raw = sessionIdInput.trim()
         if (raw.isBlank()) return null
-        if (raw.contains("session=") && (raw.startsWith("bamachat://") || raw.startsWith("http"))) {
+        val looksLikeLink =
+            raw.startsWith("bamachat://", ignoreCase = true) ||
+                raw.startsWith("http://", ignoreCase = true) ||
+                raw.startsWith("https://", ignoreCase = true)
+        if (looksLikeLink) {
             return runCatching {
                 val uri = Uri.parse(raw)
-                val session = uri.getQueryParameter("session").orEmpty().trim().uppercase()
-                val invite = uri.getQueryParameter("invite").orEmpty().trim().uppercase()
+                val sessionFromQuery = queryParamIgnoreCase(uri, "session").orEmpty().trim()
+                val sessionFromPath = uri.pathSegments
+                    .firstOrNull { it.isNotBlank() && !it.equals("collab", ignoreCase = true) }
+                    .orEmpty()
+                    .trim()
+                val sessionFromHost = uri.host
+                    .orEmpty()
+                    .trim()
+                    .takeIf {
+                        it.isNotBlank() &&
+                            !it.equals("collab", ignoreCase = true) &&
+                            !it.equals("collab-link", ignoreCase = true)
+                    }
+                val session = when {
+                    sessionFromQuery.isNotBlank() -> sessionFromQuery
+                    sessionFromPath.isNotBlank() -> sessionFromPath
+                    !sessionFromHost.isNullOrBlank() -> sessionFromHost
+                    else -> ""
+                }
+                val invite = queryParamIgnoreCase(uri, "invite").orEmpty().trim().uppercase()
+                if (session.isBlank()) {
+                    null
+                } else {
                 JoinTarget(
                     sessionId = session,
                     inviteCode = if (inviteCodeInput.isBlank()) invite else inviteCodeInput.trim().uppercase()
                 )
+                }
             }.getOrNull()
         }
         return JoinTarget(
-            sessionId = raw.uppercase(),
+            sessionId = raw,
             inviteCode = inviteCodeInput.trim().uppercase()
         )
     }
 
+    private fun queryParamIgnoreCase(uri: Uri, key: String): String? {
+        val match = uri.queryParameterNames.firstOrNull { it.equals(key, ignoreCase = true) } ?: return null
+        return uri.getQueryParameter(match)
+    }
+
+    private fun buildSessionIdCandidates(sessionId: String): List<String> {
+        val trimmed = sessionId.trim()
+        if (trimmed.isBlank()) return emptyList()
+        return linkedSetOf(trimmed, trimmed.uppercase(), trimmed.lowercase())
+            .filter { isValidFirestoreId(it) }
+            .toList()
+    }
+
+    private fun buildInviteCodeCandidates(
+        primaryInviteCode: String,
+        rawSessionInput: String
+    ): List<String> {
+        val normalizedPrimary = primaryInviteCode.trim().uppercase()
+        val normalizedSessionInput = rawSessionInput.trim().uppercase()
+        return linkedSetOf(normalizedPrimary, normalizedSessionInput)
+            .filter { isLikelyInviteCode(it) }
+            .toList()
+    }
+
+    private fun isLikelyInviteCode(value: String): Boolean {
+        if (value.isBlank()) return false
+        if (value.length !in 6..16) return false
+        return value.all { it.isLetterOrDigit() }
+    }
+
+    private fun isValidFirestoreId(id: String): Boolean {
+        val trimmed = id.trim()
+        if (trimmed.isBlank()) return false
+        if (trimmed == "." || trimmed == "..") return false
+        return !trimmed.contains("/")
+    }
+
     fun sendMessage(text: String, isAi: Boolean = false) {
-        val user = auth.currentUser
+        val user = resolveEffectiveUser()
+        if (user == null && tryBootstrapDeveloperCloudAuth()) {
+            return
+        }
+        publishAuthMode(user)
         val session = _currentSession.value
+        _errorMessage.value = null
         if (user == null || session == null) return
         if (!session.participants.contains(user.uid)) {
             _errorMessage.value = "Du bist kein Teilnehmer dieser Session."
             return
         }
         val role = roleOf(session, user.uid)
-        if (!isAi && role == SessionRole.VIEWER) {
-            _errorMessage.value = "Viewer dürfen nicht schreiben."
+        if (isAi && !canRoleUseAi(session, role)) {
+            _errorMessage.value = if (!session.aiEnabled) {
+                "KI-Antworten sind für diese Session deaktiviert."
+            } else {
+                "KI-Aktionen sind für deine Rolle gesperrt."
+            }
+            return
+        }
+        if (!isAi && !canRoleSendMessages(session, role)) {
+            _errorMessage.value = when (role) {
+                SessionRole.VIEWER -> "Viewer dürfen nicht schreiben."
+                SessionRole.EDITOR -> "Editor-Nachrichten sind in dieser Session deaktiviert."
+                else -> "Schreiben ist aktuell nicht erlaubt."
+            }
             return
         }
 
         val cleanText = text.trim()
         if (cleanText.isBlank()) return
+        val messageId = UUID.randomUUID().toString()
+        val msg = CollabMessage(
+            id = messageId,
+            authorId = user.uid,
+            authorName = if (isAi) "Bama AI" else user.displayName,
+            text = cleanText,
+            timestamp = System.currentTimeMillis(),
+            isAi = isAi
+        )
+
+        if (user.localDevMode) {
+            synchronized(localLock) {
+                val list = localMessages.getOrPut(session.id) { mutableListOf() }
+                list.add(msg)
+                _messages.value = list.toList()
+                putDeliveryStatus(messageId, MessageDeliveryStatus.SENT)
+                failedOutbound.remove(messageId)
+                _syncStatus.value = "Lokale Nachricht gesendet (${_messages.value.size}, nur dieses Gerät)"
+            }
+            return
+        }
+
+        putDeliveryStatus(messageId, MessageDeliveryStatus.SENDING)
+        failedOutbound.remove(messageId)
+        _messages.value = (_messages.value.filterNot { it.id == messageId } + msg).sortedBy { it.timestamp }
 
         viewModelScope.launch {
+            _syncStatus.value = "Sende Nachricht..."
             runCatching {
-                val messageId = UUID.randomUUID().toString()
-                val msg = CollabMessage(
-                    id = messageId,
-                    authorId = user.uid,
-                    authorName = if (isAi) "Bama AI" else (user.displayName ?: "User"),
-                    text = cleanText,
-                    timestamp = System.currentTimeMillis(),
-                    isAi = isAi
-                )
                 firestore.collection("collab_sessions")
                     .document(session.id)
                     .collection("messages")
                     .document(messageId)
                     .set(msg)
                     .await()
+                putDeliveryStatus(messageId, MessageDeliveryStatus.SENT)
+                failedOutbound.remove(messageId)
+                persistOfflineQueue(session.id)
+                _syncStatus.value = "Nachricht gesendet (${_messages.value.size})"
             }.onFailure {
                 AppTelemetry.logError("collab_send", it)
-                _errorMessage.value = "Nachricht konnte nicht gesendet werden."
+                val details = it.message?.take(140).orEmpty()
+                failedOutbound[messageId] = msg
+                putDeliveryStatus(messageId, MessageDeliveryStatus.FAILED)
+                persistOfflineQueue(session.id)
+                recordDetailedError("collab_send", details)
+                _errorMessage.value = if (details.isNotBlank()) {
+                    "Nachricht konnte nicht gesendet werden: $details"
+                } else {
+                    "Nachricht konnte nicht gesendet werden."
+                }
+                _syncStatus.value = "Senden fehlgeschlagen"
+            }
+        }
+    }
+
+    fun updateWorkspaceText(text: String, force: Boolean = false) {
+        val user = resolveEffectiveUser()
+        if (user == null && tryBootstrapDeveloperCloudAuth()) {
+            return
+        }
+        publishAuthMode(user)
+        val session = _currentSession.value ?: return
+        if (user == null) return
+        if (!session.participants.contains(user.uid)) return
+        val role = roleOf(session, user.uid)
+        if (!canRoleEditWorkspace(session, role)) {
+            _errorMessage.value = if (role == SessionRole.EDITOR) {
+                "Workspace-Bearbeitung ist für Editoren deaktiviert."
+            } else {
+                "Workspace-Bearbeitung ist für deine Rolle gesperrt."
+            }
+            return
+        }
+
+        val payload = CollabWorkspaceState(
+            text = text.take(MAX_WORKSPACE_TEXT_LENGTH),
+            updatedBy = user.displayName,
+            updatedAt = System.currentTimeMillis(),
+            revision = (_workspaceState.value.revision + 1).coerceAtLeast(1L),
+            baseRevision = _workspaceState.value.revision.coerceAtLeast(0L)
+        )
+
+        if (user.localDevMode) {
+            synchronized(localLock) {
+                localWorkspace[session.id] = payload
+                _workspaceState.value = payload
+                _syncStatus.value = "Lokaler Workspace synchron (nur dieses Gerät)"
+                _workspaceConflictMessage.value = null
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                val workspaceRef = firestore.collection("collab_sessions")
+                    .document(session.id)
+                    .collection("workspace")
+                    .document("state")
+                val knownRevision = _workspaceState.value.revision.coerceAtLeast(0L)
+                firestore.runTransaction { transaction ->
+                    val remote = transaction.get(workspaceRef).toObject(CollabWorkspaceState::class.java)
+                        ?: CollabWorkspaceState()
+                    val remoteRevision = remote.revision.coerceAtLeast(0L)
+                    val remoteUpdatedBy = remote.updatedBy.trim()
+                    val remoteChangedByOther =
+                        remoteRevision > knownRevision &&
+                            remoteUpdatedBy.isNotBlank() &&
+                            !remoteUpdatedBy.equals(user.displayName, ignoreCase = true)
+                    if (remoteChangedByOther && !force) {
+                        throw WorkspaceConflictException(remoteUpdatedBy, remoteRevision)
+                    }
+                    val nextPayload = CollabWorkspaceState(
+                        text = text.take(MAX_WORKSPACE_TEXT_LENGTH),
+                        updatedBy = user.displayName,
+                        updatedAt = System.currentTimeMillis(),
+                        revision = remoteRevision + 1L,
+                        baseRevision = knownRevision
+                    )
+                    transaction.set(workspaceRef, nextPayload)
+                    nextPayload
+                }.await()
+            }.onSuccess { resolvedPayload ->
+                _workspaceState.value = resolvedPayload
+                _workspaceConflictMessage.value = null
+                _syncStatus.value = "Workspace synchronisiert"
+            }.onFailure {
+                if (it is WorkspaceConflictException) {
+                    _workspaceConflictMessage.value =
+                        "Konflikt erkannt: ${it.remoteUser.ifBlank { "anderer Nutzer" }} hat Revision ${it.remoteRevision} gespeichert."
+                    _syncStatus.value = "Workspace-Konflikt erkannt"
+                    return@onFailure
+                }
+                AppTelemetry.logError("collab_workspace_update", it)
+                _syncStatus.value = "Workspace Sync fehlgeschlagen"
+            }
+        }
+    }
+
+    fun forceWorkspaceOverwrite(text: String) {
+        updateWorkspaceText(text = text, force = true)
+    }
+
+    fun buildWorkspaceDiffData(localDraft: String): WorkspaceDiffData {
+        return buildWorkspaceDiffDataInternal(_workspaceState.value.text, localDraft)
+    }
+
+    fun buildWorkspaceDiffPreview(localDraft: String): String {
+        return buildWorkspaceDiffPreviewInternal(_workspaceState.value.text, localDraft)
+    }
+
+    fun mergeWorkspaceTexts(localDraft: String): String {
+        return mergeWorkspaceTextsInternal(_workspaceState.value.text, localDraft)
+    }
+
+    fun updateSessionPolicy(
+        aiEnabled: Boolean? = null,
+        editorCanUseAi: Boolean? = null,
+        editorCanSendMessages: Boolean? = null,
+        editorCanEditWorkspace: Boolean? = null
+    ) {
+        val current = _currentSession.value ?: return
+        val me = resolveEffectiveUser()?.uid
+            ?: run {
+                if (tryBootstrapDeveloperCloudAuth {
+                        updateSessionPolicy(
+                            aiEnabled = aiEnabled,
+                            editorCanUseAi = editorCanUseAi,
+                            editorCanSendMessages = editorCanSendMessages,
+                            editorCanEditWorkspace = editorCanEditWorkspace
+                        )
+                    }
+                ) {
+                    return
+                }
+                return
+            }
+        if (current.ownerId != me) {
+            _errorMessage.value = "Nur der Owner darf Session-Policies ändern."
+            return
+        }
+        val patched = current.copy(
+            aiEnabled = aiEnabled ?: current.aiEnabled,
+            editorCanUseAi = editorCanUseAi ?: current.editorCanUseAi,
+            editorCanSendMessages = editorCanSendMessages ?: current.editorCanSendMessages,
+            editorCanEditWorkspace = editorCanEditWorkspace ?: current.editorCanEditWorkspace
+        )
+        if (patched == current) return
+
+        if (isLocalDevSession(current.id)) {
+            synchronized(localLock) {
+                localSessions[current.id] = patched
+            }
+            _currentSession.value = patched
+            _myRole.value = roleOf(patched, me)
+            refreshCapabilities(patched, me)
+            _syncStatus.value = "Session-Policy lokal aktualisiert"
+            AppTelemetry.logEvent("collab_policy_updated_local_dev")
+            return
+        }
+
+        viewModelScope.launch {
+            runCatching {
+                firestore.collection("collab_sessions")
+                    .document(current.id)
+                    .update(
+                        mapOf(
+                            "aiEnabled" to patched.aiEnabled,
+                            "editorCanUseAi" to patched.editorCanUseAi,
+                            "editorCanSendMessages" to patched.editorCanSendMessages,
+                            "editorCanEditWorkspace" to patched.editorCanEditWorkspace
+                        )
+                    )
+                    .await()
+                _syncStatus.value = "Session-Policy aktualisiert"
+                AppTelemetry.logEvent("collab_policy_updated")
+            }.onFailure {
+                AppTelemetry.logError("collab_policy_updated", it)
+                _errorMessage.value = "Session-Policy konnte nicht aktualisiert werden."
             }
         }
     }
 
     fun setParticipantRole(userId: String, role: SessionRole) {
         val current = _currentSession.value ?: return
-        val me = auth.currentUser?.uid ?: return
+        val me = resolveEffectiveUser()?.uid
+            ?: run {
+                if (tryBootstrapDeveloperCloudAuth { setParticipantRole(userId, role) }) {
+                    return
+                }
+                return
+            }
         if (current.ownerId != me) {
             _errorMessage.value = "Nur der Owner darf Rollen ändern."
             return
@@ -227,6 +1005,21 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (userId == me && role != SessionRole.OWNER) {
             _errorMessage.value = "Owner-Rolle kann nicht herabgestuft werden."
+            return
+        }
+
+        if (isLocalDevSession(current.id)) {
+            synchronized(localLock) {
+                val updatedRoles = current.participantRoles.toMutableMap().apply {
+                    put(userId, role.name)
+                }
+                val updated = current.copy(participantRoles = updatedRoles)
+                localSessions[current.id] = updated
+                _currentSession.value = updated
+                _myRole.value = roleOf(updated, me)
+                refreshCapabilities(updated, me)
+            }
+            AppTelemetry.logEvent("collab_role_updated_local_dev")
             return
         }
 
@@ -249,12 +1042,27 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
 
     fun rotateInviteCode() {
         val current = _currentSession.value ?: return
-        val me = auth.currentUser?.uid ?: return
+        val me = resolveEffectiveUser()?.uid
+            ?: run {
+                if (tryBootstrapDeveloperCloudAuth { rotateInviteCode() }) {
+                    return
+                }
+                return
+            }
         if (current.ownerId != me) {
             _errorMessage.value = "Nur der Owner darf Invite-Codes erneuern."
             return
         }
         val newCode = UUID.randomUUID().toString().replace("-", "").take(8).uppercase()
+        if (isLocalDevSession(current.id)) {
+            synchronized(localLock) {
+                val updated = current.copy(inviteCode = newCode)
+                localSessions[current.id] = updated
+                _currentSession.value = updated
+            }
+            AppTelemetry.logEvent("collab_invite_rotated_local_dev")
+            return
+        }
         viewModelScope.launch {
             runCatching {
                 firestore.collection("collab_sessions")
@@ -271,13 +1079,37 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
 
     fun removeParticipant(userId: String) {
         val current = _currentSession.value ?: return
-        val me = auth.currentUser?.uid ?: return
+        val me = resolveEffectiveUser()?.uid
+            ?: run {
+                if (tryBootstrapDeveloperCloudAuth { removeParticipant(userId) }) {
+                    return
+                }
+                return
+            }
         if (current.ownerId != me) {
             _errorMessage.value = "Nur der Owner darf Teilnehmer entfernen."
             return
         }
         if (userId == me) {
             _errorMessage.value = "Owner kann sich nicht selbst entfernen."
+            return
+        }
+
+        if (isLocalDevSession(current.id)) {
+            synchronized(localLock) {
+                val updatedParticipants = current.participants.filterNot { it == userId }
+                val updatedRoles = current.participantRoles.toMutableMap().apply { remove(userId) }
+                val updated = current.copy(
+                    participants = updatedParticipants,
+                    participantRoles = updatedRoles
+                )
+                localSessions[current.id] = updated
+                localPresences[current.id]?.remove(userId)
+                _currentSession.value = updated
+                _presences.value = localPresences[current.id]?.values?.sortedByDescending { it.active }.orEmpty()
+                refreshCapabilities(updated, me)
+            }
+            AppTelemetry.logEvent("collab_remove_participant_local_dev")
             return
         }
 
@@ -312,7 +1144,58 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
 
     fun leaveSession() {
         val session = _currentSession.value ?: return
-        val user = auth.currentUser ?: return
+        val user = resolveEffectiveUser()
+            ?: run {
+                if (tryBootstrapDeveloperCloudAuth { leaveSession() }) {
+                    return
+                }
+                return
+            }
+
+        if (user.localDevMode) {
+            synchronized(localLock) {
+                val remaining = session.participants.filterNot { it == user.uid }
+                if (session.ownerId == user.uid) {
+                    if (remaining.isEmpty()) {
+                        localSessions.remove(session.id)
+                        localMessages.remove(session.id)
+                        localPresences.remove(session.id)
+                        localWorkspace.remove(session.id)
+                    } else {
+                        val newOwner = remaining.first()
+                        val updatedRoles = session.participantRoles.toMutableMap().apply {
+                            remove(user.uid)
+                            put(newOwner, SessionRole.OWNER.name)
+                        }
+                        localSessions[session.id] = session.copy(
+                            ownerId = newOwner,
+                            participants = remaining,
+                            participantRoles = updatedRoles
+                        )
+                    }
+                } else {
+                    val updatedRoles = session.participantRoles.toMutableMap().apply { remove(user.uid) }
+                    localSessions[session.id] = session.copy(
+                        participants = remaining,
+                        participantRoles = updatedRoles
+                    )
+                }
+                localPresences[session.id]?.remove(user.uid)
+            }
+            _currentSession.value = null
+            _messages.value = emptyList()
+            _messageDeliveryStatus.value = emptyMap()
+            failedOutbound.clear()
+            prefs.edit().remove(queueStorageKey(session.id)).apply()
+            _presences.value = emptyList()
+            _workspaceState.value = CollabWorkspaceState()
+            _myRole.value = SessionRole.VIEWER
+            _workspaceConflictMessage.value = null
+            refreshCapabilities(null, "")
+            _syncStatus.value = "Nicht verbunden"
+            AppTelemetry.logEvent("collab_left_session_local_dev")
+            return
+        }
 
         viewModelScope.launch {
             runCatching {
@@ -348,8 +1231,15 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
                 stopListeners()
                 _currentSession.value = null
                 _messages.value = emptyList()
+                _messageDeliveryStatus.value = emptyMap()
+                failedOutbound.clear()
+                prefs.edit().remove(queueStorageKey(session.id)).apply()
                 _presences.value = emptyList()
+                _workspaceState.value = CollabWorkspaceState()
                 _myRole.value = SessionRole.VIEWER
+                _workspaceConflictMessage.value = null
+                refreshCapabilities(null, "")
+                _syncStatus.value = "Nicht verbunden"
                 AppTelemetry.logEvent("collab_left_session")
             }.onFailure {
                 AppTelemetry.logError("collab_leave", it)
@@ -360,13 +1250,77 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setOwnPresence(active: Boolean) {
         val session = _currentSession.value ?: return
-        val user = auth.currentUser ?: return
+        val user = resolveEffectiveUser()
+            ?: run {
+                if (tryBootstrapDeveloperCloudAuth { setOwnPresence(active) }) {
+                    return
+                }
+                return
+            }
+        if (user.localDevMode) {
+            synchronized(localLock) {
+                val map = localPresences.getOrPut(session.id) { mutableMapOf() }
+                map[user.uid] = CollabPresence(
+                    userId = user.uid,
+                    displayName = user.displayName,
+                    active = active,
+                    lastSeenAt = System.currentTimeMillis(),
+                    typing = false,
+                    draftPreview = "",
+                    cursorIndex = 0
+                )
+                _presences.value = map.values.sortedByDescending { it.active }
+            }
+            return
+        }
         val payload = CollabPresence(
             userId = user.uid,
-            displayName = user.displayName ?: "User",
+            displayName = user.displayName,
             active = active,
-            lastSeenAt = System.currentTimeMillis()
+            lastSeenAt = System.currentTimeMillis(),
+            typing = false,
+            draftPreview = "",
+            cursorIndex = 0
         )
+        viewModelScope.launch {
+            runCatching {
+                firestore.collection("collab_sessions")
+                    .document(session.id)
+                    .collection("presence")
+                    .document(user.uid)
+                    .set(payload)
+                    .await()
+            }
+        }
+    }
+
+    fun setTypingState(draftText: String, cursorIndex: Int) {
+        val session = _currentSession.value ?: return
+        val user = resolveEffectiveUser() ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastTypingUpdateAt < TYPING_THROTTLE_MS) return
+        lastTypingUpdateAt = now
+
+        val preview = draftText.trim().take(32)
+        val payload = CollabPresence(
+            userId = user.uid,
+            displayName = user.displayName,
+            active = true,
+            lastSeenAt = now,
+            typing = draftText.isNotBlank(),
+            draftPreview = preview,
+            cursorIndex = cursorIndex.coerceAtLeast(0)
+        )
+
+        if (user.localDevMode) {
+            synchronized(localLock) {
+                val map = localPresences.getOrPut(session.id) { mutableMapOf() }
+                map[user.uid] = payload
+                _presences.value = map.values.sortedByDescending { it.active }
+            }
+            return
+        }
+
         viewModelScope.launch {
             runCatching {
                 firestore.collection("collab_sessions")
@@ -384,11 +1338,124 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
         return roleOf(session, userId).name
     }
 
+    fun retryMessage(messageId: String): Boolean {
+        val failed = failedOutbound[messageId] ?: return false
+        sendMessage(failed.text, failed.isAi)
+        return true
+    }
+
+    fun reconnectNow() {
+        _errorMessage.value = null
+        _syncStatus.value = "Reconnect läuft..."
+        val activeSessionId = _currentSession.value?.id.orEmpty()
+        if (activeSessionId.isNotBlank()) {
+            bindSession(activeSessionId)
+            setOwnPresence(active = true)
+            _syncStatus.value = "Reconnect ok: $activeSessionId"
+            return
+        }
+        if (lastJoinSessionInput.isBlank()) {
+            _errorMessage.value = "Kein letzter Session-Join gespeichert."
+            _syncStatus.value = "Reconnect fehlgeschlagen"
+            return
+        }
+        joinSession(lastJoinSessionInput, lastJoinInviteInput)
+    }
+
+    private fun resolveEffectiveUser(): EffectiveUser? {
+        auth.currentUser?.let { firebaseUser ->
+            devCloudAuthFallbackToLocal = false
+            return EffectiveUser(
+                uid = firebaseUser.uid,
+                displayName = firebaseUser.displayName ?: "User",
+                localDevMode = false
+            )
+        }
+        if (!isDeveloperCollabTestingEnabled()) return null
+        if (isDeveloperCloudPreferred() && !devCloudAuthFallbackToLocal) {
+            // Cloud-first: ohne Firebase-Identity kein geteilter Realtime-Workspace über mehrere Geräte.
+            return null
+        }
+        val stored = prefs.getString(KEY_LOCAL_DEV_COLLAB_USER_ID, "")?.trim().orEmpty()
+        val localId = if (stored.isNotBlank()) {
+            stored
+        } else {
+            val generated = "dev-${UUID.randomUUID().toString().take(8)}"
+            prefs.edit().putString(KEY_LOCAL_DEV_COLLAB_USER_ID, generated).apply()
+            generated
+        }
+        return EffectiveUser(
+            uid = localId,
+            displayName = "Dev Tester",
+            localDevMode = true
+        )
+    }
+
+    private fun tryBootstrapDeveloperCloudAuth(onReady: (() -> Unit)? = null): Boolean {
+        if (!isDeveloperCollabTestingEnabled()) return false
+        if (!isDeveloperCloudPreferred()) return false
+        if (auth.currentUser != null) return false
+
+        if (devCloudAuthInFlight) {
+            _syncStatus.value = "Dev-Cloud Login läuft ..."
+            return true
+        }
+
+        devCloudAuthInFlight = true
+        _isLoading.value = true
+        _syncStatus.value = "Dev-Cloud Login läuft ..."
+        _errorMessage.value = null
+
+        viewModelScope.launch {
+            runCatching {
+                auth.signInAnonymously().await().user
+            }.onSuccess { firebaseUser ->
+                if (firebaseUser == null) {
+                    devCloudAuthFallbackToLocal = true
+                    _syncStatus.value = "Dev-Cloud Login fehlgeschlagen, lokaler Modus aktiv"
+                    _errorMessage.value = "Cloud-Login nicht möglich. Lokaler Dev-Modus ist nur auf diesem Gerät sichtbar."
+                    recordDetailedError("collab_dev_auth", "anonymous user missing")
+                } else {
+                    devCloudAuthFallbackToLocal = false
+                    _syncStatus.value = "Dev-Cloud verbunden (${firebaseUser.uid.take(8)})"
+                    AppTelemetry.logEvent("collab_dev_auth_success")
+                    devCloudAuthInFlight = false
+                    onReady?.invoke()
+                }
+            }.onFailure { throwable ->
+                devCloudAuthFallbackToLocal = true
+                AppTelemetry.logError("collab_dev_auth", throwable)
+                recordDetailedError("collab_dev_auth", throwable.message)
+                _syncStatus.value = "Dev-Cloud Login fehlgeschlagen, lokaler Modus aktiv"
+                _errorMessage.value = "Cloud-Login fehlgeschlagen. Lokaler Dev-Modus ist nur auf diesem Gerät sichtbar."
+            }
+            devCloudAuthInFlight = false
+            _isLoading.value = false
+            publishAuthMode(resolveEffectiveUser())
+        }
+        return true
+    }
+
+    private fun isDeveloperCollabTestingEnabled(): Boolean {
+        return prefs.getBoolean(KEY_DEVELOPER_MODE_ENABLED, false) &&
+            prefs.getBoolean(KEY_DEVELOPER_REALTIME_COLLAB_TESTING, false)
+    }
+
+    private fun isDeveloperCloudPreferred(): Boolean {
+        return prefs.getBoolean(KEY_DEVELOPER_REALTIME_COLLAB_PREFER_CLOUD, true)
+    }
+
+    private fun isLocalDevSession(sessionId: String): Boolean {
+        return isDeveloperCollabTestingEnabled() && sessionId.isNotBlank() && localSessions.containsKey(sessionId)
+    }
+
     private fun bindSession(sessionId: String) {
         stopListeners()
+        restoreOfflineQueue(sessionId)
         listenToSession(sessionId)
         listenToMessages(sessionId)
         listenToPresence(sessionId)
+        listenToWorkspace(sessionId)
     }
 
     private fun listenToSession(sessionId: String) {
@@ -397,13 +1464,20 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     _errorMessage.value = "Session-Listener Fehler."
+                    _syncStatus.value = "Session-Listener Fehler"
+                    recordDetailedError("session_listener", error.message)
                     return@addSnapshotListener
                 }
                 val session = snapshot?.toObject(CollabSession::class.java)
                 _currentSession.value = session
-                val me = auth.currentUser?.uid.orEmpty()
+                val me = resolveEffectiveUser()?.uid.orEmpty()
                 _currentUserId.value = me
                 _myRole.value = if (session == null) SessionRole.VIEWER else roleOf(session, me)
+                refreshCapabilities(session, me)
+                if (session == null) {
+                    _workspaceConflictMessage.value = null
+                }
+                _syncStatus.value = if (session != null) "Session aktiv: ${session.id}" else "Session beendet"
             }
     }
 
@@ -415,11 +1489,24 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
             .addSnapshotListener { value, error ->
                 if (error != null) {
                     _errorMessage.value = "Realtime-Listener Fehler."
+                    _syncStatus.value = "Message-Listener Fehler"
+                    recordDetailedError("message_listener", error.message)
                     return@addSnapshotListener
                 }
                 val messages = value?.documents.orEmpty()
                     .mapNotNull { it.toObject(CollabMessage::class.java) }
                 _messages.value = messages
+                val ownId = _currentUserId.value
+                if (ownId.isNotBlank()) {
+                    val statusMap = _messageDeliveryStatus.value.toMutableMap()
+                    messages.filter { it.authorId == ownId }.forEach { message ->
+                        statusMap[message.id] = MessageDeliveryStatus.SENT
+                        failedOutbound.remove(message.id)
+                    }
+                    _messageDeliveryStatus.value = statusMap
+                    persistOfflineQueue(sessionId)
+                }
+                _syncStatus.value = "Live-Sync: ${messages.size} Nachrichten"
             }
     }
 
@@ -430,12 +1517,29 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
             .addSnapshotListener { value, error ->
                 if (error != null) {
                     _errorMessage.value = "Presence-Listener Fehler."
+                    _syncStatus.value = "Presence-Listener Fehler"
+                    recordDetailedError("presence_listener", error.message)
                     return@addSnapshotListener
                 }
                 val entries = value?.documents.orEmpty()
                     .mapNotNull { it.toObject(CollabPresence::class.java) }
                     .sortedByDescending { it.active }
                 _presences.value = entries
+            }
+    }
+
+    private fun listenToWorkspace(sessionId: String) {
+        workspaceListener = firestore.collection("collab_sessions")
+            .document(sessionId)
+            .collection("workspace")
+            .document("state")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _syncStatus.value = "Workspace-Listener Fehler"
+                    recordDetailedError("workspace_listener", error.message)
+                    return@addSnapshotListener
+                }
+                _workspaceState.value = snapshot?.toObject(CollabWorkspaceState::class.java) ?: CollabWorkspaceState()
             }
     }
 
@@ -455,10 +1559,14 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
         sessionListener = null
         presenceListener?.remove()
         presenceListener = null
+        workspaceListener?.remove()
+        workspaceListener = null
     }
 
     override fun onCleared() {
         runCatching { setOwnPresence(active = false) }
+        retryJob?.cancel()
+        retryJob = null
         stopListeners()
         super.onCleared()
     }

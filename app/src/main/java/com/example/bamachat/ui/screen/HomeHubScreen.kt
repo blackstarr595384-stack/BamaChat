@@ -69,12 +69,15 @@ private data class HubEntry(
 fun HomeHubScreen(
     providerName: String,
     designPreset: String,
+    activeWorkspaceName: String,
     onOpenChat: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenProviderSettings: () -> Unit,
     onOpenDesignSettings: () -> Unit,
+    onOpenWorkspaceSettings: () -> Unit,
     onOpenMiniApps: () -> Unit,
     onOpenAgentHub: () -> Unit,
+    onOpenExtensions: () -> Unit,
     onOpenRealtimeCollab: () -> Unit,
     onOpenHelp: () -> Unit,
     @Suppress("UNUSED_PARAMETER") onOpenMenu: () -> Unit = {},
@@ -107,12 +110,28 @@ fun HomeHubScreen(
             onClick = onOpenMiniApps
         ),
         HubEntry(
+            title = "AI Extensions",
+            subtitle = "Plugins installieren und Berechtigungen steuern",
+            icon = Icons.Default.Tune,
+            iconStartColor = Color(0xFF6A8CFF),
+            iconEndColor = Color(0xFF9AB6FF),
+            onClick = onOpenExtensions
+        ),
+        HubEntry(
             title = "Realtime Collab",
             subtitle = "Live-Sessions mit Rollen und Präsenz",
             icon = Icons.Default.Groups,
             iconStartColor = Color(0xFFFF8D5C),
             iconEndColor = Color(0xFFFFB889),
             onClick = onOpenRealtimeCollab
+        ),
+        HubEntry(
+            title = "Workspaces",
+            subtitle = "Projektkontext und Automationen",
+            icon = Icons.Default.Settings,
+            iconStartColor = Color(0xFF11B79F),
+            iconEndColor = Color(0xFF8DE1D4),
+            onClick = onOpenWorkspaceSettings
         )
     )
 
@@ -134,7 +153,11 @@ fun HomeHubScreen(
                 .padding(bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            HeroHeader(providerName = providerName, palette = palette)
+            HeroHeader(
+                providerName = providerName,
+                activeWorkspaceName = activeWorkspaceName,
+                palette = palette
+            )
 
             StatusRow(
                 providerName = providerName,
@@ -153,7 +176,11 @@ fun HomeHubScreen(
 }
 
 @Composable
-private fun HeroHeader(providerName: String, palette: AppDesignPalette) {
+private fun HeroHeader(
+    providerName: String,
+    activeWorkspaceName: String,
+    palette: AppDesignPalette
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -179,6 +206,11 @@ private fun HeroHeader(providerName: String, palette: AppDesignPalette) {
             )
             Text(
                 text = "Aktiver Provider: $providerName",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.heroOverline
+            )
+            Text(
+                text = "Workspace: $activeWorkspaceName",
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.heroOverline
             )
