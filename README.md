@@ -84,6 +84,7 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - Automation-Templates (Tagesbriefing, Meeting->ToDos, Release-Check, Risiko-Scan)
   - Persona-Marketplace im Agent Hub (installierbare Preset-Pakete)
   - Mini-Apps V2: Discover-Hub, Favoriten, Ausblenden, Reihenfolge, Swipe-Management
+  - Mini-App-Detailkarten nutzen kompakte Aktionszeilen statt vieler Einzelbuttons
   - Neue Mini-Apps: `Prompt Lab`, `Voice Notes AI`, `Smart Workspace`, `Photo Studio`
   - Photo Studio: Bildimport, Filter-Regler (Helligkeit/Kontrast/Sättigung/Wärme), Rotation/Spiegelung/Crop, Undo/Redo, Galerie-Export
   - Photo Studio Pro-Aktionen: zentrales Action-Backend mit AI-Rechten/Tool-Gating, Risiko-Bestätigung und Cloud-Workflow (`Background Remove`, `Upscale HD`) über `photoEdit` Function Endpoint

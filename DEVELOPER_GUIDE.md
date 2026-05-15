@@ -249,6 +249,7 @@ Verhalten:
     - Cloud-Client: `PhotoAiCloudClient.kt` (Endpoint-Auflösung, Auth-Header, Base64 I/O, Fehler-Mapping)
     - Backend: Firebase Function `photoEdit` in `functions/index.js` (Cloud-Pipeline für Background Remove + Upscale)
     - Chat-Komposer: Bild hochladen, Kamera-Foto aufnehmen und Bildgenerierung direkt aus dem Mehr-Menü
+    - Detailkarten nutzen kompakte Aktionszeilen statt vieler einzelner Buttons
   - Bestehende Apps weiterhin aktiv: `AutomationBoard` + `KnowledgeVault`
   - Persona-Marketplace in `AgentHubScreen.kt`
 

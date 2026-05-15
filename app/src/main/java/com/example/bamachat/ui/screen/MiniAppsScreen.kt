@@ -924,24 +924,39 @@ private fun AppsHub(
                 )
                 Text(appInSheet.description, color = Color.White.copy(alpha = 0.78f))
                 HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-                TextButton(onClick = {
-                    selectedAppForSheet = null
-                    onOpenApp(appInSheet)
-                }) { Text("Öffnen") }
-                TextButton(onClick = { onToggleFavorite(appInSheet) }) {
-                    Text(if (favorites.contains(appInSheet.name)) "Aus Favoriten entfernen" else "Zu Favoriten hinzufügen")
-                }
-                TextButton(onClick = { onToggleHidden(appInSheet) }) {
-                    Text(if (hiddenApps.contains(appInSheet.name)) "Wieder einblenden" else "Ausblenden")
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { onMoveApp(appInSheet, -1) }, modifier = Modifier.weight(1f)) {
-                        Text("Nach oben")
-                    }
-                    OutlinedButton(onClick = { onMoveApp(appInSheet, 1) }, modifier = Modifier.weight(1f)) {
-                        Text("Nach unten")
-                    }
-                }
+                CompactTextActionRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    actions = listOf(
+                        CompactTextAction(
+                            label = "Öffnen",
+                            onClick = {
+                                selectedAppForSheet = null
+                                onOpenApp(appInSheet)
+                            }
+                        ),
+                        CompactTextAction(
+                            label = if (favorites.contains(appInSheet.name)) "Favorit aus" else "Favorit an",
+                            onClick = { onToggleFavorite(appInSheet) }
+                        ),
+                        CompactTextAction(
+                            label = if (hiddenApps.contains(appInSheet.name)) "Einblenden" else "Ausblenden",
+                            onClick = { onToggleHidden(appInSheet) }
+                        )
+                    )
+                )
+                CompactTextActionRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    actions = listOf(
+                        CompactTextAction(
+                            label = "Nach oben",
+                            onClick = { onMoveApp(appInSheet, -1) }
+                        ),
+                        CompactTextAction(
+                            label = "Nach unten",
+                            onClick = { onMoveApp(appInSheet, 1) }
+                        )
+                    )
+                )
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
