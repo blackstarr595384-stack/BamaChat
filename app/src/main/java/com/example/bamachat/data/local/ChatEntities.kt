@@ -1,6 +1,8 @@
 package com.example.bamachat.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Fts4
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -130,7 +132,24 @@ data class PersonaTrainingExampleEntity(
     val userInput: String,
     val idealResponse: String,
     val source: String = "manual",
-    val createdAt: Long,
-    val updatedAt: Long,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
     val enabled: Boolean = true
+)
+
+@Fts4
+@Entity(tableName = "chat_messages_fts")
+data class ChatMessageFtsEntity(
+    @PrimaryKey @ColumnInfo(name = "rowid")
+    val rowid: Long = 0,
+    @ColumnInfo(name = "message_id")
+    val messageId: String,
+    @ColumnInfo(name = "conversation_id")
+    val conversationId: String,
+    @ColumnInfo(name = "text")
+    val text: String,
+    @ColumnInfo(name = "is_user")
+    val isUser: Boolean,
+    @ColumnInfo(name = "timestamp")
+    val timestamp: Long
 )

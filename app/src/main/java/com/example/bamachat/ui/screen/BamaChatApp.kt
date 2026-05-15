@@ -13,6 +13,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.example.bamachat.ui.component.BamaChatBottomNav
 import com.example.bamachat.ui.viewmodel.AuthViewModel
@@ -36,6 +37,8 @@ private object Routes {
     const val EXTENSIONS = "extensions"
     const val COMPOSE_LAB = "compose_lab"
     const val COMPOSE_PLAYGROUND = "compose_playground"
+    const val KNOWLEDGE_GRAPH = "knowledge_graph"
+    const val CHAT_SEARCH = "chat_search"
     const val COMPOSE_ARG_DEMO = "compose_arg_demo/{demoId}"
 
     fun settingsRoute(section: String?): String =
@@ -54,13 +57,12 @@ private fun normalizeRoute(route: String?): String? = route?.substringBefore("?"
 private fun topLevelRank(route: String?): Int = topLevelRoutes.indexOf(normalizeRoute(route))
 
 @Composable
-fun BamaChatApp(
-    chatViewModel: ChatViewModel,
-    settingsViewModel: SettingsViewModel,
-    authViewModel: AuthViewModel,
-    collabViewModel: CollabViewModel,
-    extensionManagerViewModel: ExtensionManagerViewModel
-) {
+fun BamaChatApp() {
+    val chatViewModel: ChatViewModel = hiltViewModel()
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val authViewModel: AuthViewModel = hiltViewModel()
+    val collabViewModel: CollabViewModel = hiltViewModel()
+    val extensionManagerViewModel: ExtensionManagerViewModel = hiltViewModel()
     val navController = rememberNavController()
     val primaryColorInt by settingsViewModel.primaryColorInt.collectAsState()
     val aiProvider by settingsViewModel.aiProvider.collectAsState()
@@ -253,6 +255,7 @@ fun BamaChatApp(
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenExtensions = { navController.navigate(Routes.EXTENSIONS) },
                     onOpenRealtimeCollab = { navController.navigate(Routes.REALTIME_COLLAB) },
+                    onOpenKnowledgeGraph = { navController.navigate(Routes.KNOWLEDGE_GRAPH) },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     onOpenHelp = { navController.navigate(Routes.HELP) }
                 )
@@ -263,7 +266,8 @@ fun BamaChatApp(
                     settingsViewModel = settingsViewModel,
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
-                    onOpenComposeLab = { navController.navigate(Routes.COMPOSE_LAB) }
+                    onOpenComposeLab = { navController.navigate(Routes.COMPOSE_LAB) },
+                    onSearchClick = { navController.navigate(Routes.CHAT_SEARCH) }
                 )
             }
             composable(
@@ -328,10 +332,26 @@ fun BamaChatApp(
                     onBack = { navController.popBackStack() }
                 )
             }
+            composable(Routes.KNOWLEDGE_GRAPH) {
+                KnowledgeGraphScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
             composable(Routes.COMPOSE_LAB) {
                 ComposeLabScreen(
                     onBack = { navController.popBackStack() },
                     onOpenPlayground = { navController.navigate(Routes.COMPOSE_PLAYGROUND) }
+                )
+            }
+            composable(Routes.CHAT_SEARCH) {
+                ChatSearchScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenConversation = { conversationId ->
+                        navController.navigate(Routes.CHAT) {
+                            popUpTo(Routes.HOME_HUB)
+                        }
+                        chatViewModel.switchConversation(conversationId)
+                    }
                 )
             }
             composable(Routes.COMPOSE_PLAYGROUND) {

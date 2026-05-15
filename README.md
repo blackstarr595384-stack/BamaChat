@@ -87,6 +87,16 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - Photo Studio: Bildimport, Filter-Regler (Helligkeit/Kontrast/Sättigung/Wärme), Rotation/Spiegelung/Crop, Undo/Redo, Galerie-Export
   - Photo Studio Pro-Aktionen: zentrales Action-Backend mit AI-Rechten/Tool-Gating, Risiko-Bestätigung und Cloud-Workflow (`Background Remove`, `Upscale HD`) über `photoEdit` Function Endpoint
   - Bestehende Mini-Apps: `Automation Board` + `Knowledge Vault`
+- MCP (Model Context Protocol):
+  - stdio-basierte MCP-Client-Integration für lokale Tool-Server
+  - Multi-Server-Management mit Start/Stop pro Server in den Einstellungen
+  - Automatische Tool-Registry und Konvertierung in OpenAI-Function-Calling-Format
+  - Agent Loop: KI kann MCP-Tools autonom aufrufen und Ergebnisse verarbeiten
+  - Default-Server: Dateisystem, Web-Suche, Knowledge Graph, Code-Ausführung
+- Workflow-Automation:
+  - Mehrstufige Tool-Pipelines (z. B. Web-Recherche+Fetch, Code-Lint+Review)
+  - Workflows werden als `workflow_<id>`-Tools im Agent-Kontext registriert
+  - Step-für-Step-Ausführung mit Kontext-Weitergabe zwischen Steps
 - Windows Desktop Client (Stage 2):
   - Produktiver Chat mit OpenRouter oder lokalem Ollama
   - Persistente Desktop-Einstellungen (`%USERPROFILE%/.bamachat-desktop/settings.properties`)
@@ -106,6 +116,39 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - Windows-Paketierung mit expliziten JVM-Modulen (`java.net.http`, `jdk.httpserver`, `jdk.crypto.ec`, `jdk.unsupported`, `java.naming`)
   - Startmenue-Integration (`BamaChat` Gruppe) + Shortcut-Option
   - Per-User-Installation fuer stabile Install/Reinstall ohne Admin-Rechte
+
+## MCP (Model Context Protocol) Integration
+
+BamaChat unterstützt das stdio-basierte MCP-Protokoll zur Anbindung lokaler Tools und Datenquellen.
+
+### Architektur
+- `util/McpClient.kt` — JSON-RPC 2.0 Client über stdio-Prozesskommunikation
+- `util/McpServerManager.kt` — Multi-Server-Management, Tool-Registry, Konvertierung in OpenAI-kompatibles Tool-Format (`getToolDefinitionsOpenAI()`)
+- `util/McpTypes.kt` — Datenmodelle (`McpServerConfig`, `McpToolDefinition`, `McpToolCall`, `McpToolResult`)
+- `util/McpWorkflowManager.kt` — Workflow-Engine für mehrstufige Tool-Pipelines
+
+### Standard-MCP-Server
+Vorkonfigurierte Default-Server in `McpTypes.kt`:
+- **Dateisystem** (`@modelcontextprotocol/server-filesystem`)
+- **Web-Suche** (`@anthropic-ai/mcp-server-web-search`)
+- **Knowledge Graph** (`@modelcontextprotocol/server-memory`)
+- **Code-Ausführung** (`@anthropic-ai/mcp-server-code-executor`)
+
+Server können in den Einstellungen (KI & Modelle → MCP Server) aktiviert/deaktiviert werden.
+
+### Agent Loop (Tool-Calling)
+Wenn MCP- oder Workflow-Tools verfügbar sind, schaltet `sendChatViaApi` automatisch in den Agent-Modus:
+1. Request mit `tools`-Array und `tool_choice: "auto"` an den Provider
+2. Bei `tool_calls` in der Antwort: Ausführung via `McpServerManager.callTool()` oder `McpWorkflowManager.executeWorkflow()`
+3. Tool-Ergebnisse werden als `role: "tool"`-Messages zurückgegeben
+4. Wiederholung bis max. 5 Iterationen oder finale Text-Antwort
+
+### Workflows
+Definierte Abläufe in `McpWorkflowManager`:
+- **Web-Recherche & Zusammenfassung**: `web_search` → `web_fetch`
+- **Code-Review-Pipeline**: `read_file` → `execute_command`
+
+Workflows werden als `workflow_<id>`-Tools im Agent-Kontext registriert und können vom KI-Modell wie normale Tools aufgerufen werden.
 
 ## Schnellstart
 ## Voraussetzungen
@@ -278,6 +321,11 @@ npx firebase-tools deploy --only firestore:rules
   - `app/src/main/java/com/example/bamachat/util/KnowledgeGraphExtractor.kt`
   - `app/src/main/java/com/example/bamachat/util/WorkspaceExtensions.kt`
   - `app/src/main/java/com/example/bamachat/util/MultimodalProcessor.kt`
+  - `app/src/main/java/com/example/bamachat/util/McpClient.kt`
+  - `app/src/main/java/com/example/bamachat/util/McpServerManager.kt`
+  - `app/src/main/java/com/example/bamachat/util/McpTypes.kt`
+  - `app/src/main/java/com/example/bamachat/util/McpWorkflowManager.kt`
+  - `app/src/main/java/com/example/bamachat/util/McpWorkflowTypes.kt`
 
 ## E2E-Smoke-Test (Basis)
 - Datei:

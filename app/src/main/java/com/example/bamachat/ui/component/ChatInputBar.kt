@@ -1,0 +1,369 @@
+package com.example.bamachat.ui.component
+
+import android.net.Uri
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateContentSize
+import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.bamachat.ui.viewmodel.ChatViewModel
+
+data class PromptTemplate(
+    val id: String,
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val description: String,
+    val prompt: String
+)
+
+val defaultPromptTemplates = listOf(
+    PromptTemplate("translate", "Übersetzen", Icons.Default.Translate, "Text übersetzen", "Übersetze den folgenden Text ins Deutsche:\n\n"),
+    PromptTemplate("summarize", "Zusammenfassen", Icons.Default.Summarize, "Text zusammenfassen", "Fasse den folgenden Text präzise zusammen:\n\n"),
+    PromptTemplate("explain", "Erklären", Icons.Default.Lightbulb, "Komplexes erklären", "Erkläre das folgende Konzept einfach und verständlich:\n\n"),
+    PromptTemplate("grammar", "Grammatik", Icons.Default.Spellcheck, "Grammatik korrigieren", "Korrigiere die Grammatik und Rechtschreibung in:\n\n"),
+    PromptTemplate("code_review", "Code Review", Icons.Default.Code, "Code überprüfen", "Führe einen Code Review durch. Analysiere:\n- Sicherheitslücken\n- Performance\n- Best Practices\n\nCode:\n"),
+    PromptTemplate("brainstorm", "Brainstorming", Icons.Default.Cloud, "Ideen sammeln", "Brainstorme zum Thema:\n\n"),
+    PromptTemplate("outline", "Gliederung", Icons.Default.ListAlt, "Gliederung erstellen", "Erstelle eine detaillierte Gliederung für:\n\n"),
+    PromptTemplate("email", "E-Mail", Icons.Default.Email, "E-Mail schreiben", "Schreibe eine professionelle E-Mail zum Thema:\n\n"),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatInputBar(
+    inputText: String,
+    onInputChange: (String) -> Unit,
+    onSend: (String) -> Boolean,
+    onImageGen: () -> Unit,
+    onUpload: () -> Unit,
+    selectedImageUri: Uri?,
+    onClearImage: () -> Unit,
+    isListening: Boolean,
+    voicePushToTalkEnabled: Boolean,
+    onMicClick: () -> Unit,
+    onMicPressStart: () -> Unit,
+    onMicPressEnd: () -> Unit,
+    themeColor: Color,
+    surfaceColor: Color,
+    isLoading: Boolean,
+    designTokens: ChatDesignTokens,
+    connectChatBottomBars: Boolean,
+    glassEffectsEnabled: Boolean,
+    uiCornerRoundnessScale: Float,
+    uiShadowIntensityScale: Float,
+    uiSurfaceOpacity: Float,
+    selectedExtensionQuickAction: ChatViewModel.ExtensionQuickAction,
+    onSelectExtensionQuickAction: (ChatViewModel.ExtensionQuickAction) -> Unit,
+    promptTemplates: List<PromptTemplate> = emptyList(),
+    onSelectPromptTemplate: (PromptTemplate) -> Unit = {}
+) {
+    val focusManager = LocalFocusManager.current
+    val topRadius = (24f * uiCornerRoundnessScale).coerceIn(14f, 34f).dp
+    val bottomRadius = (if (connectChatBottomBars) 0f else 14f * uiCornerRoundnessScale).coerceAtLeast(0f).dp
+    val baseAlpha = if (glassEffectsEnabled) 0.74f else 0.9f
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp)
+            .navigationBarsPadding()
+            .imePadding()
+            .animateContentSize(animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing)),
+        color = surfaceColor.copy(alpha = (baseAlpha * uiSurfaceOpacity).coerceIn(0.55f, 1f)),
+        shadowElevation = (22f * uiShadowIntensityScale).coerceIn(4f, 36f).dp,
+        shape = RoundedCornerShape(topStart = topRadius, topEnd = topRadius, bottomStart = bottomRadius, bottomEnd = bottomRadius),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = if (glassEffectsEnabled) 0.14f else 0.08f))
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            var localInputValue by remember { mutableStateOf(TextFieldValue(inputText)) }
+            var sendLatchUntil by remember { mutableLongStateOf(0L) }
+            LaunchedEffect(inputText) {
+                if (inputText != localInputValue.text) {
+                    localInputValue = TextFieldValue(
+                        text = inputText,
+                        selection = TextRange(inputText.length)
+                    )
+                }
+            }
+            if (selectedImageUri != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AsyncImage(
+                        model = selectedImageUri,
+                        contentDescription = "Vorschau",
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(surfaceColor.copy(alpha = 0.9f))
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Bild angehängt",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onClearImage, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, "Entfernen", tint = Color.White.copy(alpha = 0.6f))
+                    }
+                }
+            }
+            val quickActionOptions = remember {
+                listOf(
+                    ChatViewModel.ExtensionQuickAction.AUTO,
+                    ChatViewModel.ExtensionQuickAction.RESEARCH,
+                    ChatViewModel.ExtensionQuickAction.CODE_REVIEW,
+                    ChatViewModel.ExtensionQuickAction.PLAN
+                )
+            }
+            val canSend = !isLoading && (localInputValue.text.trim().isNotEmpty() || selectedImageUri != null)
+            val sendButtonColor by animateColorAsState(
+                targetValue = if (canSend) themeColor else Color(0xFF35383D),
+                animationSpec = tween(durationMillis = 160, easing = LinearOutSlowInEasing),
+                label = "sendButtonColor"
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    quickActionOptions.forEach { action ->
+                        FilterChip(
+                            selected = selectedExtensionQuickAction == action,
+                            onClick = { onSelectExtensionQuickAction(action) },
+                            label = {
+                                Text(
+                                    text = action.label,
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            },
+                            leadingIcon = if (selectedExtensionQuickAction == action) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            } else null
+                        )
+                    }
+                }
+                val triggerSend: () -> Unit = send@{
+                    val now = System.currentTimeMillis()
+                    if (now < sendLatchUntil) return@send
+                    val submitted = localInputValue.text
+                    val hasInput = submitted.trim().isNotEmpty() || selectedImageUri != null
+                    if (!isLoading && hasInput) {
+                        val accepted = onSend(submitted)
+                        if (accepted) {
+                            sendLatchUntil = now + 220L
+                            focusManager.clearFocus(force = true)
+                            localInputValue = TextFieldValue("")
+                            onInputChange("")
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextField(
+                        value = localInputValue,
+                        onValueChange = {
+                            localInputValue = it
+                            onInputChange(it.text)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 46.dp),
+                        placeholder = { Text("Schreib was... ( / für Befehle)", color = Color.White.copy(alpha = 0.4f)) },
+                        label = { Text("Nachricht", color = Color.White.copy(alpha = 0.7f)) },
+                        shape = RoundedCornerShape((designTokens.inputCornerRadius - 6.dp).coerceAtLeast(10.dp)),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = surfaceColor.copy(alpha = 0.95f),
+                            unfocusedContainerColor = surfaceColor.copy(alpha = 0.9f),
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = themeColor
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { triggerSend() }),
+                        maxLines = 4
+                    )
+                    // Slash command palette dropdown
+                    val showSlashMenu = localInputValue.text.startsWith("/") && !isLoading
+                    if (showSlashMenu) {
+                        val filteredTemplates = promptTemplates.filter {
+                            val query = localInputValue.text.removePrefix("/").trim().lowercase()
+                            query.isBlank() || it.label.lowercase().contains(query) || it.id.contains(query)
+                        }
+                        DropdownMenu(
+                            expanded = true,
+                            onDismissRequest = {
+                                localInputValue = TextFieldValue(localInputValue.text.removePrefix("/").trim())
+                                onInputChange(localInputValue.text)
+                            }
+                        ) {
+                            if (filteredTemplates.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Keine Befehle gefunden", fontSize = 12.sp) },
+                                    onClick = {}
+                                )
+                            } else {
+                                filteredTemplates.forEach { template ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Icon(template.icon, null, tint = themeColor, modifier = Modifier.size(18.dp))
+                                                Column {
+                                                    Text(template.label, fontSize = 13.sp)
+                                                    Text(template.description, fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            localInputValue = TextFieldValue(template.prompt)
+                                            onInputChange(template.prompt)
+                                            onSelectPromptTemplate(template)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    FilledIconButton(
+                        onClick = { triggerSend() },
+                        enabled = canSend,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .shadow(
+                                elevation = if (canSend) 8.dp else 0.dp,
+                                shape = CircleShape,
+                                spotColor = themeColor.copy(alpha = 0.45f)
+                            ),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = sendButtonColor,
+                            contentColor = Color.White,
+                            disabledContainerColor = Color(0xFF35383D),
+                            disabledContentColor = Color.White.copy(alpha = 0.7f)
+                        )
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(Icons.AutoMirrored.Filled.Send, "Senden", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Spracherkennung starten"
+                            }
+                            .clip(CircleShape)
+                            .background(if (isListening) themeColor.copy(alpha = 0.25f) else surfaceColor.copy(alpha = 0.92f))
+                            .then(
+                                if (voicePushToTalkEnabled) {
+                                    Modifier.pointerInput(isListening) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                onMicPressStart()
+                                                tryAwaitRelease()
+                                                onMicPressEnd()
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    Modifier.clickable { onMicClick() }
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isListening) VoiceVisualizer(themeColor)
+                        else Icon(Icons.Default.Mic, "Diktieren", tint = Color.White.copy(alpha = 0.7f))
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Bild hochladen"
+                            }
+                            .clip(CircleShape)
+                            .background(surfaceColor.copy(alpha = 0.92f))
+                            .clickable { onUpload() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.AttachFile, "Hochladen", tint = Color.White.copy(alpha = 0.7f))
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = "Bild generieren"
+                            }
+                            .clip(CircleShape)
+                            .background(surfaceColor.copy(alpha = 0.92f))
+                            .clickable { onImageGen() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.AutoFixHigh, "Bild generieren", tint = themeColor.copy(alpha = 0.85f))
+                    }
+                }
+            }
+        }
+    }
+}

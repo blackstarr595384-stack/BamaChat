@@ -8,6 +8,7 @@ plugins {
     id("com.google.gms.google-services") apply false
     id("com.google.firebase.crashlytics")
     id("io.gitlab.arturbosch.detekt") version "1.23.6"
+    id("com.google.dagger.hilt.android")
 }
 
 val googleServicesFiles = listOf(
@@ -39,7 +40,7 @@ android {
     defaultConfig {
         applicationId = "com.example.bamachat"
         minSdk = 33
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -183,6 +184,12 @@ dependencies {
 
     // Google Play Billing (Abo/Paywall Vorbereitung)
     implementation("com.android.billingclient:billing-ktx:8.3.0")
+
+    // Hilt DI
+    val hiltVersion = "2.54"
+    implementation("com.google.dagger:hilt-android:$hiltVersion")
+    ksp("com.google.dagger:hilt-compiler:$hiltVersion")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Firebase (Auth / Profile / Storage)
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))

@@ -15,13 +15,18 @@ import com.example.bamachat.util.PhotoAiCloudConfigResolver
 import com.example.bamachat.util.PlayBillingManager
 import com.example.bamachat.util.ProjectWorkspace
 import com.example.bamachat.util.ProjectWorkspaceStore
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
-class SettingsViewModel(application: Application) : AndroidViewModel(application) {
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    application: Application
+) : AndroidViewModel(application) {
     companion object {
         private const val KEY_CLOUD_PERSONA_LAST_SYNC_AT = "cloud_persona_last_sync_at"
         private const val KEY_CLOUD_PERSONA_LAST_SYNC_STATUS = "cloud_persona_last_sync_status"
@@ -34,8 +39,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         private const val DEFAULT_LIVE_WEB_ENDPOINT = "https://websearch-xxf7qxk3wq-ew.a.run.app"
         private const val DEFAULT_PHOTO_AI_CLOUD_ENDPOINT =
             "https://europe-west1-bamachat-d07fb.cloudfunctions.net/photoEdit"
-        private const val DEFAULT_PHOTO_AI_CLOUD_API_TOKEN =
-            "qY33-bWLaHILnkPr-8iNWr0KEIEBjSWQXrf_iWHsGr8"
+        // WARN: Setze photo_ai_cloud_api_token in den App-Einstellungen.
+        // Kein Hardcoded-Token im Source Code! Bei Bedarf via BuildConfig konfigurieren.
+        private const val DEFAULT_PHOTO_AI_CLOUD_API_TOKEN = ""
         private const val DEFAULT_LIVE_WEB_ALLOWED_DOMAINS =
             "wikipedia.org,reuters.com,tagesschau.de,bundesregierung.de,heise.de,github.com,dwd.de,wetteronline.de,wetter.com,open-meteo.com"
         val DISPLAY_PRESET_OPTIONS = DisplaySettingsPresets.options

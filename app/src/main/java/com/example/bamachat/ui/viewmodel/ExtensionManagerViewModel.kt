@@ -8,6 +8,8 @@ import com.example.bamachat.util.ExtensionCatalog
 import com.example.bamachat.util.ExtensionManifest
 import com.example.bamachat.util.ExtensionStateStore
 import com.example.bamachat.util.InstalledExtensionState
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,7 +29,10 @@ data class ManagedExtension(
         get() = state?.grantedCapabilities.orEmpty()
 }
 
-class ExtensionManagerViewModel(application: Application) : AndroidViewModel(application) {
+@HiltViewModel
+class ExtensionManagerViewModel @Inject constructor(
+    application: Application
+) : AndroidViewModel(application) {
     companion object {
         private const val KEY_EXTENSION_STATES_JSON = "workspace_extension_states_json"
     }

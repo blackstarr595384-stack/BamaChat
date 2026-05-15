@@ -3,6 +3,16 @@ package com.example.bamachat.data.local
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+data class MessageFtsResult(
+    val rowid: Long,
+    val message_id: String,
+    val conversation_id: String,
+    val text: String,
+    val is_user: Boolean,
+    val timestamp: Long,
+    val snippet: String
+)
+
 data class PersonaFeedbackStats(
     val helpfulCount: Int,
     val unhelpfulCount: Int
@@ -41,6 +51,22 @@ interface ChatDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: ChatMessageEntity)
+
+    // ===== FTS4 Message Search =====
+    @Query("SELECT rowid, message_id, conversation_id, text, is_user, timestamp, snippet(chat_messages_fts, '<b>', '</b>', '...', -1, 20) AS snippet FROM chat_messages_fts WHERE chat_messages_fts MATCH :query ORDER BY rank LIMIT :limit")
+    suspend fun searchMessagesFts(query: String, limit: Int = 30): List<MessageFtsResult>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMessageFts(fts: ChatMessageFtsEntity)
+
+    @Query("DELETE FROM chat_messages_fts WHERE message_id = :messageId")
+    suspend fun deleteMessageFts(messageId: String)
+
+    @Query("DELETE FROM chat_messages_fts WHERE conversation_id = :conversationId")
+    suspend fun deleteMessagesFtsForConversation(conversationId: String)
+
+    @Query("DELETE FROM chat_messages_fts")
+    suspend fun deleteAllMessagesFts()
 
     @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
     suspend fun deleteMessagesForConversation(conversationId: String)

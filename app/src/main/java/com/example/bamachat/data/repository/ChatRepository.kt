@@ -2,9 +2,11 @@ package com.example.bamachat.data.repository
 
 import com.example.bamachat.data.local.ChatDao
 import com.example.bamachat.data.local.ChatMessageEntity
+import com.example.bamachat.data.local.ChatMessageFtsEntity
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.data.local.KnowledgeChunkEntity
 import com.example.bamachat.data.local.KnowledgeEdgeEntity
+import com.example.bamachat.data.local.MessageFtsResult
 import com.example.bamachat.data.local.PersonaFeedbackEntity
 import com.example.bamachat.data.local.PersonaFeedbackStats
 import com.example.bamachat.data.local.PersonaMemoryEntity
@@ -94,6 +96,15 @@ class ChatRepository(private val chatDao: ChatDao) {
                 webFetchedAtIso = message.webFetchedAtIso
             )
         )
+        chatDao.insertMessageFts(
+            ChatMessageFtsEntity(
+                messageId = message.id,
+                conversationId = conversationId,
+                text = message.text,
+                isUser = message.isUser,
+                timestamp = message.timestamp
+            )
+        )
         if (touchConversation) {
             chatDao.touchConversation(conversationId, System.currentTimeMillis())
         }
@@ -101,6 +112,17 @@ class ChatRepository(private val chatDao: ChatDao) {
 
     suspend fun clearMessages(conversationId: String) {
         chatDao.deleteMessagesForConversation(conversationId)
+        chatDao.deleteMessagesFtsForConversation(conversationId)
+    }
+
+    suspend fun searchMessages(query: String, limit: Int = 30): List<MessageFtsResult> {
+        val ftsQuery = query.trim().lowercase()
+            .replace(Regex("[^a-zA-ZäöüÄÖÜß0-9\\s]"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.length >= 2 }
+            .joinToString(" AND ")
+        if (ftsQuery.isBlank()) return emptyList()
+        return chatDao.searchMessagesFts(ftsQuery, limit)
     }
 
     // ===== Persona Memory =====

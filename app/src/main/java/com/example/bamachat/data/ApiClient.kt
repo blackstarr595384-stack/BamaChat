@@ -187,7 +187,10 @@ data class OpenRouterChatRequest(
     @SerializedName("max_tokens")
     val maxTokens: Int = 1024,
     val temperature: Float = 0.7f,
-    val stream: Boolean = false
+    val stream: Boolean = false,
+    val tools: List<Map<String, Any>>? = null,
+    @SerializedName("tool_choice")
+    val toolChoice: String? = null
 )
 
 data class OpenRouterVisionChatRequest(
@@ -211,12 +214,40 @@ data class OpenRouterStreamChoice(
 
 data class OpenRouterStreamDelta(
     val role: String? = null,
-    val content: String? = null
+    val content: String? = null,
+    @SerializedName("tool_calls")
+    val toolCalls: List<OpenRouterStreamToolCall>? = null
+)
+
+data class OpenRouterStreamToolCall(
+    val id: String? = null,
+    val type: String? = null,
+    val function: OpenRouterStreamToolCallFunction? = null
+)
+
+data class OpenRouterStreamToolCallFunction(
+    val name: String? = null,
+    val arguments: String? = null
 )
 
 data class OpenRouterMessage(
     val role: String,
-    val content: String
+    val content: String? = null,
+    @SerializedName("tool_calls")
+    val toolCalls: List<OpenRouterToolCall>? = null,
+    @SerializedName("tool_call_id")
+    val toolCallId: String? = null
+)
+
+data class OpenRouterToolCall(
+    val id: String,
+    val type: String = "function",
+    val function: OpenRouterToolCallFunction
+)
+
+data class OpenRouterToolCallFunction(
+    val name: String,
+    val arguments: String
 )
 
 data class OpenRouterVisionMessage(

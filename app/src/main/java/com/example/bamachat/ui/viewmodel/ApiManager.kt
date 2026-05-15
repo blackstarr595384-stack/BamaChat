@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.data.OpenRouterChatRequest
+import com.example.bamachat.data.OpenRouterChatResponse
 import com.example.bamachat.data.OpenRouterImageUrl
 import com.example.bamachat.data.OpenRouterMessage
 import com.example.bamachat.data.OpenRouterStreamChunk
@@ -157,6 +158,23 @@ class ApiManager(
         }
 
         return ApiResponse(success = false, error = "Keine Provider verfügbar")
+    }
+
+    suspend fun oneShotChatCompletion(
+        request: OpenRouterChatRequest,
+        systemPrompt: String
+    ): OpenRouterChatResponse? {
+        val providers = buildProviderFallbackList()
+        for (config in providers) {
+            try {
+                val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
+                val messagesWithSystem = listOf(OpenRouterMessage("system", systemPrompt)) + request.messages
+                val fullRequest = request.copy(messages = messagesWithSystem)
+                val response = service.chatCompletion(fullRequest)
+                if (response.choices?.isNotEmpty() == true) return response
+            } catch (_: Exception) {}
+        }
+        return null
     }
 
     /**

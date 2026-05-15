@@ -9,6 +9,8 @@ import com.example.bamachat.data.model.CollabPresence
 import com.example.bamachat.data.model.CollabSession
 import com.example.bamachat.data.model.CollabWorkspaceState
 import com.example.bamachat.util.AppTelemetry
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -25,7 +27,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
-class CollabViewModel(application: Application) : AndroidViewModel(application) {
+@HiltViewModel
+class CollabViewModel @Inject constructor(
+    application: Application
+) : AndroidViewModel(application) {
     enum class SessionRole { OWNER, EDITOR, VIEWER }
     enum class MessageDeliveryStatus { SENDING, SENT, FAILED }
 

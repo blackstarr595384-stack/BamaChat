@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.HelpCenter
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Psychology
@@ -79,6 +80,7 @@ fun HomeHubScreen(
     onOpenAgentHub: () -> Unit,
     onOpenExtensions: () -> Unit,
     onOpenRealtimeCollab: () -> Unit,
+    onOpenKnowledgeGraph: () -> Unit,
     onOpenHelp: () -> Unit,
     @Suppress("UNUSED_PARAMETER") onOpenMenu: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") onOpenProfile: () -> Unit = {}
@@ -132,6 +134,14 @@ fun HomeHubScreen(
             iconStartColor = Color(0xFF11B79F),
             iconEndColor = Color(0xFF8DE1D4),
             onClick = onOpenWorkspaceSettings
+        ),
+        HubEntry(
+            title = "Wissensgraph",
+            subtitle = "Verbindungen und Konzepte visualisieren",
+            icon = Icons.Default.AccountTree,
+            iconStartColor = Color(0xFF43C6AC),
+            iconEndColor = Color(0xFF7FD7D0),
+            onClick = onOpenKnowledgeGraph
         )
     )
 

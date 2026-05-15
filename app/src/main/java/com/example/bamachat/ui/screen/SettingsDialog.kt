@@ -33,6 +33,8 @@ import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PlayBillingManager
+import com.example.bamachat.util.McpServerManager
+import com.example.bamachat.util.McpWorkflowManager
 import java.util.Locale
 
 @Suppress("UNUSED_VARIABLE", "UNUSED_PARAMETER")
@@ -40,7 +42,9 @@ import java.util.Locale
 fun SettingsDialog(
     viewModel: SettingsViewModel,
     onDismiss: () -> Unit,
-    initialSection: String? = null
+    initialSection: String? = null,
+    mcpServerManager: McpServerManager? = null,
+    mcpWorkflowManager: McpWorkflowManager? = null
 ) {
     val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
     val primaryColor by viewModel.primaryColorInt.collectAsState()
@@ -51,6 +55,7 @@ fun SettingsDialog(
     val cerebrasApiKey by viewModel.cerebrasApiKey.collectAsState()
     val togetherApiKey by viewModel.togetherApiKey.collectAsState()
     val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+    val aiProvider by viewModel.aiProvider.collectAsState()
     val ollamaUrl by viewModel.ollamaUrl.collectAsState()
     val liveWebEnabled by viewModel.liveWebEnabled.collectAsState()
     val liveWebEndpoint by viewModel.liveWebEndpoint.collectAsState()
@@ -582,6 +587,68 @@ fun SettingsDialog(
 
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1A2A3A).copy(alpha = 0.95f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, Color(0xFF43C6AC).copy(alpha = if (aiProvider == "Ollama") 0.7f else 0.2f)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(Icons.Default.CloudOff, null, tint = if (aiProvider == "Ollama") Color(0xFF43C6AC) else Color.White.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+                                    Text("Ollama Offline-Modus", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color.White)
+                                }
+                                Switch(
+                                    checked = aiProvider == "Ollama",
+                                    onCheckedChange = { checked ->
+                                        viewModel.setAiProvider(if (checked) "Ollama" else "OpenRouter")
+                                    },
+                                    modifier = Modifier.scale(0.85f),
+                                    colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF43C6AC))
+                                )
+                            }
+                            if (aiProvider == "Ollama") {
+                                Text(
+                                    "Aktiv - alle Anfragen laufen lokal über Ollama",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF43C6AC)
+                                )
+                            } else {
+                                Text(
+                                    "Inaktiv - Cloud-Provider werden genutzt",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.5f)
+                                )
+                            }
+                            Text("Ollama Server-URL", fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedTextField(
+                                    value = ollamaUrl,
+                                    onValueChange = { viewModel.setOllamaUrl(it) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp, color = Color.White),
+                                    placeholder = { Text("http://192.168.178.162:11434/", fontSize = 11.sp) },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFF43C6AC),
+                                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f)
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    if (mcpServerManager != null) {
+                        McpServersSection(mcpServerManager, mcpWorkflowManager)
+                    }
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
                         color = if (multiProvider) MaterialTheme.colorScheme.primaryContainer
                                 else MaterialTheme.colorScheme.surfaceVariant
@@ -633,7 +700,7 @@ fun SettingsDialog(
                         }
                     }
 
-                    ProviderCardMini("Together AI", "Llama 70B kostenlos", "https://api.together.xyz/settings/api-keys", togetherApiKey, "tgp_v1_...") { viewModel.setTogetherApiKey(it) }
+                    ProviderCardMini("Together AI", "Llama 70B kostenlos", "https://api.together.xyz/settings/api-keys", togetherApiKey, "tgp_v1_...") { viewModel.setTogetherApiKey(it)                     }
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
@@ -644,14 +711,6 @@ fun SettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         placeholder = { Text("AIza...") },
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                    )
-                    OutlinedTextField(
-                        value = ollamaUrl,
-                        onValueChange = { viewModel.setOllamaUrl(it) },
-                        label = { Text("Ollama URL", fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
                         textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
                     )
 
@@ -1047,6 +1106,84 @@ private fun ProviderCardMini(
                 placeholder = { Text(placeholder, fontSize = 10.sp) },
                 textStyle = LocalTextStyle.current.copy(fontSize = 11.sp)
             )
+        }
+    }
+}
+
+@Composable
+private fun McpServersSection(
+    manager: McpServerManager,
+    workflowManager: McpWorkflowManager? = null
+) {
+    val servers by manager.servers.collectAsState()
+    val allTools by manager.allTools.collectAsState()
+    val connStates by manager.connectionStates.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1A2A3A).copy(alpha = 0.95f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF9B59B6).copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.Extension, null, tint = Color(0xFF9B59B6), modifier = Modifier.size(18.dp))
+                Text("MCP Server", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color.White)
+                Spacer(Modifier.weight(1f))
+                Text("${servers.size} Server", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+            }
+            servers.forEach { config ->
+                val connState = connStates[config.id]
+                val isConnected = connState?.connected == true
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(config.name, fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (isConnected) "Verbunden" else "Getrennt",
+                            fontSize = 10.sp,
+                            color = if (isConnected) Color(0xFF00B894) else Color.White.copy(alpha = 0.4f)
+                        )
+                    }
+                    Switch(
+                        checked = isConnected,
+                        onCheckedChange = { enable ->
+                            scope.launch {
+                                if (enable) manager.startServer(config.id)
+                                else manager.stopServer(config.id)
+                            }
+                        },
+                        modifier = Modifier.scale(0.75f),
+                        colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF9B59B6))
+                    )
+                }
+            }
+            if (allTools.isNotEmpty()) {
+                Text("Verfügbare MCP-Tools (${allTools.size})", fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+                allTools.take(8).forEach { tool ->
+                    Text(" • ${tool.name}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                }
+                if (allTools.size > 8) {
+                    Text(" ... +${allTools.size - 8} weitere", fontSize = 10.sp, color = Color.White.copy(alpha = 0.3f))
+                }
+            }
+            if (workflowManager != null) {
+                val wfs by workflowManager.workflows.collectAsState()
+                if (wfs.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Workflows (${wfs.size})", fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+                    wfs.forEach { wf ->
+                        Text(" • ${wf.name}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.5f))
+                    }
+                }
+            }
         }
     }
 }
