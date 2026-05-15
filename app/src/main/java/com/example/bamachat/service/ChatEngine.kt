@@ -68,7 +68,7 @@ class ChatEngine(
 
     fun normalizeForDedup(raw: String): String = ChatSendDeduplicator.normalizeForDedup(raw)
 
-    fun buildRuntimeContext(text: String): String? {
+    suspend fun buildRuntimeContext(text: String): String? {
         if (!prefs.getBoolean("auto_language_detection_enabled", true)) return null
         val detected = MultimodalProcessor.detectLanguageCode(text) ?: return null
         val appLang = prefs.getString("language", "de")?.trim()?.lowercase(Locale.ROOT).orEmpty()
