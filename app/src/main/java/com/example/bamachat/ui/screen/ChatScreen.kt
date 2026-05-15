@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
@@ -78,6 +79,8 @@ import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.ui.viewmodel.MonetizationViewModel
+import com.example.bamachat.ui.viewmodel.ToolCallProgress
+import com.example.bamachat.ui.viewmodel.ToolCallStatus
 import com.example.bamachat.util.CloudVoiceManager
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
@@ -196,6 +199,7 @@ fun ChatScreen(
     val activeExtensionNames by viewModel.activeExtensionNames.collectAsStateWithLifecycle()
     val lastAppliedExtensionNames by viewModel.lastAppliedExtensionNames.collectAsStateWithLifecycle()
     val selectedExtensionQuickAction by viewModel.selectedExtensionQuickAction.collectAsStateWithLifecycle()
+    val activeToolCalls by viewModel.activeToolCalls.collectAsStateWithLifecycle()
 
     val isBiometricEnabled by settingsViewModel.isBiometricEnabled.collectAsStateWithLifecycle()
     val primaryColorInt by settingsViewModel.primaryColorInt.collectAsStateWithLifecycle()
@@ -632,7 +636,8 @@ fun ChatScreen(
             activeExtensionNames = activeExtensionNames,
             lastAppliedExtensionNames = lastAppliedExtensionNames,
             selectedExtensionQuickAction = selectedExtensionQuickAction,
-            onSelectExtensionQuickAction = { viewModel.setExtensionQuickAction(it) }
+            onSelectExtensionQuickAction = { viewModel.setExtensionQuickAction(it) },
+            activeToolCalls = activeToolCalls
         )
     }
 }
@@ -730,7 +735,8 @@ private fun ChatContent(
     activeExtensionNames: List<String>,
     lastAppliedExtensionNames: List<String>,
     selectedExtensionQuickAction: ChatViewModel.ExtensionQuickAction,
-    onSelectExtensionQuickAction: (ChatViewModel.ExtensionQuickAction) -> Unit
+    onSelectExtensionQuickAction: (ChatViewModel.ExtensionQuickAction) -> Unit,
+    activeToolCalls: List<ToolCallProgress>
 ) {
     val designPreset = remember(uiDesignPreset) { ChatDesignPreset.fromSetting(uiDesignPreset) }
     val designPalette = remember(uiDesignPreset) { AppDesignSystem.paletteForStored(uiDesignPreset) }
@@ -1090,6 +1096,9 @@ private fun ChatContent(
                             if (isLoading && !isStreaming) {
                                 item { TypingIndicator(themeColor, bubbleAnimations) }
                             }
+                            if (isLoading && activeToolCalls.isNotEmpty()) {
+                                item { ToolCallsDisplay(activeToolCalls = activeToolCalls, themeColor = themeColor) }
+                            }
                         }
                     }
                     if (messageOverlayAlpha > 0f) {
@@ -1129,6 +1138,60 @@ private fun ChatContent(
                     promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
                     onSelectPromptTemplate = {}
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor: Color) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        activeToolCalls.forEach { tc ->
+            val icon = when (tc.status) {
+                ToolCallStatus.RUNNING -> "◌"
+                ToolCallStatus.DONE -> "✓"
+                ToolCallStatus.ERROR -> "✗"
+            }
+            val surface = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = surface,
+                tonalElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(icon, fontSize = 14.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tc.toolName,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = tc.arguments.take(80),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (tc.status == ToolCallStatus.RUNNING) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = themeColor
+                        )
+                    }
+                }
             }
         }
     }

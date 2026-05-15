@@ -64,7 +64,7 @@ class McpServerManager(private val context: Context) {
     suspend fun callTool(name: String, arguments: Map<String, Any> = emptyMap()): McpToolResult {
         val builtinNames = BuiltinTools.definitions.map { (it["function"] as? Map<*, *>)?.get("name")?.toString() }.filterNotNull()
         if (name in builtinNames) {
-            return BuiltinTools.execute(name, arguments)
+            return BuiltinTools.execute(name, arguments, context.filesDir.absolutePath)
         }
         for (client in clients.values) {
             val tool = client.tools.value.find { it.name == name } ?: continue
