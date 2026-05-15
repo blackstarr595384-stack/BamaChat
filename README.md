@@ -95,11 +95,12 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - Automatische Tool-Registry und Konvertierung in OpenAI-Function-Calling-Format
   - Agent Loop: KI kann MCP-Tools autonom aufrufen und Ergebnisse verarbeiten
   - Default-Server: Dateisystem, Web-Suche, Knowledge Graph, Code-Ausführung
+  - Builtin-Self-Audit: Git-Branches, Remotes und TODO-Hotspots werden direkt in der App analysierbar
 
 ## Release-Story / So kannst du die App erklären
 - BamaChat ist nicht nur ein Chatfenster, sondern ein autonomer Arbeitsraum fuer Sprache, Bild, Dateien, Web und Agenten-Workflows.
 - Im Chat kannst du direkt Text schreiben, Bilder hochladen oder per Kamera aufnehmen und die KI mit echtem Kontext fragen.
-- MCP, Builtin-Tools, Extensions und Workflows machen die App selbststaendiger: sie kann Kontext prüfen, Dateien analysieren, Git-Status lesen und Aufgaben strukturieren.
+- MCP, Builtin-Tools, Extensions und Workflows machen die App selbststaendiger: sie kann Kontext prüfen, Dateien analysieren, Git-Status lesen, Branches/Remotes checken und Aufgaben strukturieren.
 - Mini-Apps und Agent Hub sind die Bedienoberfläche fuer Produktivität: weniger verstreute Buttons, mehr wiederverwendbare Bausteine und Presets.
 - Ziel der Roadmap: weniger manuelle Klicks, mehr Selbstorganisation, mehr Autonomie und klarere Feature-Erklärungen beim Release.
 - Workflow-Automation:
@@ -155,7 +156,7 @@ Wenn MCP- oder Workflow-Tools verfügbar sind, schaltet `sendChatViaApi` automat
 ### Workflows
 Definierte Abläufe in `McpWorkflowManager`:
 - **Web-Recherche & Zusammenfassung**: `web_search` → `web_fetch`
-- **Code-Review-Pipeline**: `read_file` → `execute_command`
+- **Code-Review-Pipeline**: `read_file` → `run_terminal`
 
 Workflows werden als `workflow_<id>`-Tools im Agent-Kontext registriert und können vom KI-Modell wie normale Tools aufgerufen werden.
 

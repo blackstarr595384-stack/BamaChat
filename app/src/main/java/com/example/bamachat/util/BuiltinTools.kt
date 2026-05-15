@@ -242,6 +242,42 @@ object BuiltinTools {
         mapOf(
             "type" to "function",
             "function" to mapOf(
+                "name" to "git_branch",
+                "description" to "Zeigt den aktuellen Git-Branch und die lokalen Branches des Projekts.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf<String, Any>()
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "git_remote",
+                "description" to "Zeigt die konfigurierten Git-Remotes und deren URLs.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf<String, Any>()
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "todo_scan",
+                "description" to "Sucht im Projekt nach TODO/FIXME/HACK-Hotspots und gibt die wichtigsten Stellen zurück.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Optionaler Startpfad", "default" to "."),
+                        "maxResults" to mapOf("type" to "number", "description" to "Maximale Anzahl an Treffern", "default" to 20)
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
                 "name" to "project_inventory",
                 "description" to "Erstellt ein kompaktes Inventar des Projekts mit Dateitypen, Schwerpunktbereichen und großen Hotspots.",
                 "parameters" to mapOf(
@@ -580,6 +616,43 @@ object BuiltinTools {
                             content = listOf(McpContentItem(type = "text", text = text))
                         )
                     }
+                    "git_branch" -> {
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val (currentExit, currentOutput) = runGitCommand(basePath, listOf("branch", "--show-current"))
+                        val (branchExit, branchOutput) = runGitCommand(basePath, listOf("branch", "-vv", "--no-color"))
+                        val currentBranch = currentOutput.trim().ifBlank { "(detached oder unbekannt)" }
+                        val text = buildString {
+                            appendLine("Aktueller Branch: $currentBranch")
+                            appendLine()
+                            append(formatGitOutput(branchExit, branchOutput, 16000))
+                        }
+                        McpToolResult(
+                            success = currentExit == 0 && branchExit == 0,
+                            content = listOf(McpContentItem(type = "text", text = text))
+                        )
+                    }
+                    "git_remote" -> {
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val (exitCode, output) = runGitCommand(basePath, listOf("remote", "-v"))
+                        val text = buildString {
+                            appendLine("Konfigurierte Remotes:")
+                            append(formatGitOutput(exitCode, output, 12000))
+                        }
+                        McpToolResult(
+                            success = exitCode == 0,
+                            content = listOf(McpContentItem(type = "text", text = text))
+                        )
+                    }
+                    "todo_scan" -> {
+                        val path = args["path"]?.toString()?.trim().orEmpty().ifBlank { "." }
+                        val maxResults = (args["maxResults"] as? Number)?.toInt()?.coerceIn(1, 100) ?: 20
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val output = scanTodoHotspots(basePath, path, maxResults)
+                        McpToolResult(
+                            success = true,
+                            content = listOf(McpContentItem(type = "text", text = output))
+                        )
+                    }
                     "project_inventory" -> {
                         val path = args["path"]?.toString()?.trim().orEmpty().ifBlank { "." }
                         val maxResults = (args["maxResults"] as? Number)?.toInt()?.coerceIn(1, 50) ?: 10
@@ -814,6 +887,70 @@ object BuiltinTools {
         val trimmed = output.trim().ifBlank { "(keine Ausgabe)" }
         val text = if (trimmed.length > limit) trimmed.take(limit) + "\n\n[truncated]" else trimmed
         return "Exit $exitCode:\n$text"
+    }
+
+    private fun scanTodoHotspots(basePath: String, path: String, maxResults: Int): String {
+        val root = sandboxFile(basePath, path)
+        if (!root.exists()) return "Pfad nicht gefunden: $path"
+        val base = File(basePath).normalize().absoluteFile
+
+        val candidates = if (root.isFile) {
+            listOf(root)
+        } else {
+            root.walkTopDown().filter { file ->
+                file.isFile &&
+                    file.length() <= 512_000L &&
+                    !shouldSkipAuditPath(file.relativeTo(base).path)
+            }.toList()
+        }
+
+        val todoRegex = Regex("""\b(TODO|FIXME|HACK|XXX|TBD)\b[:\-\s]*([^\n]{0,180})""", RegexOption.IGNORE_CASE)
+        val findings = mutableListOf<String>()
+        var markerCount = 0
+
+        candidates.forEach { file ->
+            val relativePath = file.relativeTo(base).path
+            val text = runCatching { file.readText() }.getOrNull().orEmpty()
+            if (text.isBlank()) return@forEach
+
+            text.lineSequence().withIndex().forEach { (index, line) ->
+                val match = todoRegex.find(line) ?: return@forEach
+                markerCount++
+                if (findings.size < maxResults) {
+                    val tag = match.groupValues.getOrNull(1).orEmpty().uppercase(Locale.ROOT)
+                    val snippet = line.trim().take(180)
+                    findings += "📄 $relativePath:${index + 1} [$tag] $snippet"
+                }
+            }
+        }
+
+        return buildString {
+            appendLine("TODO-Audit für '$path'")
+            appendLine("- Dateien gescannt: ${candidates.size}")
+            appendLine("- Marker gefunden: $markerCount")
+            appendLine("- Hotspots:")
+            if (findings.isEmpty()) {
+                appendLine("  - Keine TODO/FIXME/HACK-Marker gefunden.")
+            } else {
+                findings.forEachIndexed { index, item ->
+                    appendLine("  ${index + 1}. $item")
+                }
+                val remaining = (markerCount - findings.size).coerceAtLeast(0)
+                if (remaining > 0) {
+                    appendLine("  ... +$remaining weitere Marker")
+                }
+            }
+        }.trim()
+    }
+
+    private fun shouldSkipAuditPath(relativePath: String): Boolean {
+        val normalized = relativePath.replace('\\', '/')
+        return normalized.startsWith(".git/") ||
+            normalized.startsWith(".gradle/") ||
+            normalized.startsWith(".idea/") ||
+            normalized.contains("/build/") ||
+            normalized.contains("/out/") ||
+            normalized.contains("/generated/")
     }
 
     private fun error(msg: String) = McpToolResult(success = false, content = listOf(McpContentItem(type = "text", text = msg)), isError = true)

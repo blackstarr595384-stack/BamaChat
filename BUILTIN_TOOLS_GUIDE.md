@@ -30,12 +30,15 @@ Diese Tools sind der Autonomie-Kern der App. Sie machen BamaChat eher zu einem k
 | `git_diff` | Git-Diff anzeigen | "Welche Änderungen sind gerade offen?" |
 | `git_log` | Letzte Commits anzeigen | "Welche letzten Commits gab es?" |
 | `git_show` | Commit-Details anzeigen | "Zeig mir den letzten Commit im Detail" |
+| `git_branch` | Aktuellen Branch und lokale Branches anzeigen | "Auf welchem Branch bin ich gerade?" |
+| `git_remote` | Git-Remotes und URLs anzeigen | "Welche Remotes sind konfiguriert?" |
+| `todo_scan` | TODO/FIXME/HACK-Hotspots im Repo finden | "Wo sind die dringendsten Wartungsstellen?" |
 | `project_inventory` | Projekt-Inventar und Hotspots erstellen | "Was ist das Wichtigste in diesem Repo?" |
 | `ui_action_audit` | UI auf doppelte Buttons/Hotspots prüfen | "Findet die App doppelte Aktionen in der Oberfläche?" |
 | `config_audit` | Konfigurationen auf Inkonsistenzen prüfen | "Prüfe, ob die Settings doppelt oder widersprüchlich sind" |
 
 ### Warum das wichtig ist
-- Mit `search_files`, `git_*` und den Audit-Tools kann die App sich selbst analysieren und vereinfachen.
+- Mit `search_files`, `git_*`, `todo_scan` und den Audit-Tools kann die App sich selbst analysieren und vereinfachen.
 - Genau diese Tools helfen dir später beim Release, die App als "autonom", "selbstprüfend" und "selbstoptimierend" zu erklären.
 - Für eine opencode/openclaw-ähnliche Story sind diese internen Werkzeuge wichtiger als noch mehr lose UI-Buttons.
 

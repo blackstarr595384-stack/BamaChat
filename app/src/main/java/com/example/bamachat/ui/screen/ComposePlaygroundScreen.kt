@@ -15,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -52,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.bamachat.ui.component.CompactTextAction
+import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.ui.viewmodel.ComposePlaygroundViewModel
 import kotlinx.coroutines.launch
 
@@ -198,14 +199,18 @@ fun ComposePlaygroundScreen(
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("UI Interactions", fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { showSheet = true }) {
-                            Icon(Icons.Default.Tune, contentDescription = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text("BottomSheet")
-                        }
-                        Button(onClick = { showDialog = true }) { Text("Dialog") }
-                    }
+                    CompactTextActionRow(
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "BottomSheet",
+                                onClick = { showSheet = true }
+                            ),
+                            CompactTextAction(
+                                label = "Dialog",
+                                onClick = { showDialog = true }
+                            )
+                        )
+                    )
                 }
             }
 
@@ -251,20 +256,22 @@ fun ComposePlaygroundScreen(
                     Text("Uptime: ${flowUiState.uptimeSeconds}s", fontSize = 12.sp)
                     Text("Status: ${flowUiState.statusText}", fontSize = 12.sp)
                     Text("Queue: ${flowUiState.queuedTasks}", fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(
-                            onClick = { playgroundViewModel.toggleOnline() },
-                            label = { Text("Online toggeln") }
+                    CompactTextActionRow(
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "Online toggeln",
+                                onClick = { playgroundViewModel.toggleOnline() }
+                            ),
+                            CompactTextAction(
+                                label = "Task +1",
+                                onClick = { playgroundViewModel.addTask() }
+                            ),
+                            CompactTextAction(
+                                label = "Queue löschen",
+                                onClick = { playgroundViewModel.clearTasks() }
+                            )
                         )
-                        AssistChip(
-                            onClick = { playgroundViewModel.addTask() },
-                            label = { Text("Task +1") }
-                        )
-                        AssistChip(
-                            onClick = { playgroundViewModel.clearTasks() },
-                            label = { Text("Queue löschen") }
-                        )
-                    }
+                    )
                 }
             }
 
@@ -379,16 +386,18 @@ fun ComposePlaygroundScreen(
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Lifecycle Effects", fontWeight = FontWeight.SemiBold)
                     Text("Key wechseln, um `LaunchedEffect`/`DisposableEffect` live zu sehen.", fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(
-                            onClick = { effectKey = "A" },
-                            label = { Text("Key A") }
+                    CompactTextActionRow(
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "Key A",
+                                onClick = { effectKey = "A" }
+                            ),
+                            CompactTextAction(
+                                label = "Key B",
+                                onClick = { effectKey = "B" }
+                            )
                         )
-                        AssistChip(
-                            onClick = { effectKey = "B" },
-                            label = { Text("Key B") }
-                        )
-                    }
+                    )
                     lifecycleLog.forEach { line ->
                         Text("• $line", fontSize = 11.sp)
                     }

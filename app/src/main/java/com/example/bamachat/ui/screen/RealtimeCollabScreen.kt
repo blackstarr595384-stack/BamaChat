@@ -29,7 +29,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -62,6 +61,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bamachat.ui.component.CompactTextAction
+import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
 import com.example.bamachat.util.AutomationCatalog
@@ -473,28 +474,34 @@ fun RealtimeCollabScreen(
                                         }
                                     }
                                 }
-                                Button(
-                                    onClick = { clipboard.setText(AnnotatedString(inviteLink)) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Invite-Link kopieren")
-                                }
-                                if (isOwner) {
-                                    Button(
-                                        onClick = { collabViewModel.rotateInviteCode() },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("Invite-Code erneuern")
-                                    }
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                    Button(onClick = { collabViewModel.reconnectNow() }, modifier = Modifier.weight(1f)) {
-                                        Text("Erneut verbinden")
-                                    }
-                                    Button(onClick = { collabViewModel.leaveSession() }, modifier = Modifier.weight(1f)) {
-                                        Text("Session verlassen")
-                                    }
-                                }
+                                CompactTextActionRow(
+                                    actions = listOfNotNull(
+                                        CompactTextAction(
+                                            label = "Link kopieren",
+                                            onClick = { clipboard.setText(AnnotatedString(inviteLink)) }
+                                        ),
+                                        if (isOwner) {
+                                            CompactTextAction(
+                                                label = "Code neu",
+                                                onClick = { collabViewModel.rotateInviteCode() }
+                                            )
+                                        } else {
+                                            null
+                                        }
+                                    )
+                                )
+                                CompactTextActionRow(
+                                    actions = listOf(
+                                        CompactTextAction(
+                                            label = "Reconnect",
+                                            onClick = { collabViewModel.reconnectNow() }
+                                        ),
+                                        CompactTextAction(
+                                            label = "Verlassen",
+                                            onClick = { collabViewModel.leaveSession() }
+                                        )
+                                    )
+                                )
                             }
                         }
                     }
@@ -517,17 +524,22 @@ fun RealtimeCollabScreen(
                                     Text(if (showDebug) "Ausblenden" else "Einblenden")
                                 }
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                                Button(onClick = { collabViewModel.refreshDebugInfo() }, modifier = Modifier.weight(1f)) {
-                                    Text("Debug aktualisieren")
-                                }
-                                Button(onClick = { collabViewModel.reconnectNow() }, modifier = Modifier.weight(1f)) {
-                                    Text("Reconnect")
-                                }
-                            }
-                            TextButton(onClick = { collabViewModel.retryFailedOutboundNow() }) {
-                                Text("Offline-Queue jetzt senden")
-                            }
+                            CompactTextActionRow(
+                                actions = listOf(
+                                    CompactTextAction(
+                                        label = "Debug neu",
+                                        onClick = { collabViewModel.refreshDebugInfo() }
+                                    ),
+                                    CompactTextAction(
+                                        label = "Reconnect",
+                                        onClick = { collabViewModel.reconnectNow() }
+                                    ),
+                                    CompactTextAction(
+                                        label = "Queue senden",
+                                        onClick = { collabViewModel.retryFailedOutboundNow() }
+                                    )
+                                )
+                            )
                             if (showDebug) {
                                 Text("Provider: $providerLabel", color = Color.White)
                                 Text("Model: $modelLabel", color = Color.White)
@@ -719,24 +731,28 @@ fun RealtimeCollabScreen(
                                             title = "Inline-Diff (lokal vs remote)",
                                             compact = compactLayout
                                         )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            TextButton(
-                                                onClick = {
-                                                    workspaceDraft = workspaceState.text
-                                                    localWorkspaceDirty = false
-                                                    remoteWorkspaceAheadMessage = null
-                                                }
-                                            ) { Text("Remote laden") }
-                                            TextButton(
-                                                onClick = {
-                                                    val merged = collabViewModel.mergeWorkspaceTexts(workspaceDraft)
-                                                    workspaceDraft = merged
-                                                    localWorkspaceDirty = false
-                                                    remoteWorkspaceAheadMessage = null
-                                                    collabViewModel.forceWorkspaceOverwrite(merged)
-                                                }
-                                            ) { Text("Smart Merge") }
-                                        }
+                                        CompactTextActionRow(
+                                            actions = listOf(
+                                                CompactTextAction(
+                                                    label = "Remote laden",
+                                                    onClick = {
+                                                        workspaceDraft = workspaceState.text
+                                                        localWorkspaceDirty = false
+                                                        remoteWorkspaceAheadMessage = null
+                                                    }
+                                                ),
+                                                CompactTextAction(
+                                                    label = "Smart Merge",
+                                                    onClick = {
+                                                        val merged = collabViewModel.mergeWorkspaceTexts(workspaceDraft)
+                                                        workspaceDraft = merged
+                                                        localWorkspaceDirty = false
+                                                        remoteWorkspaceAheadMessage = null
+                                                        collabViewModel.forceWorkspaceOverwrite(merged)
+                                                    }
+                                                )
+                                            )
+                                        )
                                     }
                                 }
                             }
@@ -765,34 +781,43 @@ fun RealtimeCollabScreen(
                                             title = "Konflikt-Diff",
                                             compact = compactLayout
                                         )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            TextButton(
-                                                onClick = {
-                                                    workspaceDraft = workspaceState.text
-                                                    localWorkspaceDirty = false
-                                                    remoteWorkspaceAheadMessage = null
-                                                    collabViewModel.clearWorkspaceConflict()
-                                                }
-                                            ) { Text("Remote übernehmen") }
-                                            TextButton(
-                                                onClick = {
-                                                    val merged = collabViewModel.mergeWorkspaceTexts(workspaceDraft)
-                                                    workspaceDraft = merged
-                                                    localWorkspaceDirty = false
-                                                    remoteWorkspaceAheadMessage = null
-                                                    collabViewModel.forceWorkspaceOverwrite(merged)
-                                                    collabViewModel.clearWorkspaceConflict()
-                                                }
-                                            ) { Text("Merge speichern") }
-                                            TextButton(
-                                                onClick = {
-                                                    localWorkspaceDirty = false
-                                                    remoteWorkspaceAheadMessage = null
-                                                    collabViewModel.forceWorkspaceOverwrite(workspaceDraft)
-                                                    collabViewModel.clearWorkspaceConflict()
-                                                }
-                                            ) { Text("Lokal erzwingen") }
-                                        }
+                                        CompactTextActionRow(
+                                            actions = listOf(
+                                                CompactTextAction(
+                                                    label = "Remote übernehmen",
+                                                    onClick = {
+                                                        workspaceDraft = workspaceState.text
+                                                        localWorkspaceDirty = false
+                                                        remoteWorkspaceAheadMessage = null
+                                                        collabViewModel.clearWorkspaceConflict()
+                                                    }
+                                                ),
+                                                CompactTextAction(
+                                                    label = "Merge speichern",
+                                                    onClick = {
+                                                        val merged = collabViewModel.mergeWorkspaceTexts(workspaceDraft)
+                                                        workspaceDraft = merged
+                                                        localWorkspaceDirty = false
+                                                        remoteWorkspaceAheadMessage = null
+                                                        collabViewModel.forceWorkspaceOverwrite(merged)
+                                                        collabViewModel.clearWorkspaceConflict()
+                                                    }
+                                                )
+                                            )
+                                        )
+                                        CompactTextActionRow(
+                                            actions = listOf(
+                                                CompactTextAction(
+                                                    label = "Lokal erzwingen",
+                                                    onClick = {
+                                                        localWorkspaceDirty = false
+                                                        remoteWorkspaceAheadMessage = null
+                                                        collabViewModel.forceWorkspaceOverwrite(workspaceDraft)
+                                                        collabViewModel.clearWorkspaceConflict()
+                                                    }
+                                                )
+                                            )
+                                        )
                                     }
                                 }
                             }
@@ -907,44 +932,43 @@ fun RealtimeCollabScreen(
                     if (!multiAgentError.isNullOrBlank()) {
                         Text(multiAgentError.orEmpty(), color = Color(0xFFFFD9A8))
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(
-                            onClick = sendSessionMessage,
-                            modifier = Modifier.weight(1f),
-                            enabled = messagePrompt.isNotBlank() && session != null && canWriteMessages
-                        ) {
-                            Text("Senden")
-                        }
-                        Button(
-                            onClick = {
-                                if (aiPrompt.isBlank()) return@Button
-                                if (messagePrompt.isNotBlank()) {
-                                    messageInput = ""
-                                    collabViewModel.setTypingState("", 0)
-                                }
-                                val personasForRun = if (selectedAgents.isEmpty()) {
-                                    listOf(ChatViewModel.Persona.DEVELOPER, ChatViewModel.Persona.TEACHER)
-                                } else {
-                                    selectedAgents.toList()
-                                }
-                                runAiRequest(AiRetryRequest(aiPrompt, personasForRun))
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4A7CFF)),
-                            enabled = aiPrompt.isNotBlank() && session != null && canUseAi && !multiAgentIsRunning
-                        ) {
-                            Text(if (multiAgentIsRunning) "KI läuft..." else "KI Team-Antwort")
-                        }
-                    }
-
+                    CompactTextActionRow(
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "Senden",
+                                onClick = sendSessionMessage,
+                                enabled = messagePrompt.isNotBlank() && session != null && canWriteMessages
+                            ),
+                            CompactTextAction(
+                                label = if (multiAgentIsRunning) "KI läuft..." else "KI Team-Antwort",
+                                onClick = aiAction@{
+                                    if (aiPrompt.isBlank()) return@aiAction
+                                    if (messagePrompt.isNotBlank()) {
+                                        messageInput = ""
+                                        collabViewModel.setTypingState("", 0)
+                                    }
+                                    val personasForRun = if (selectedAgents.isEmpty()) {
+                                        listOf(ChatViewModel.Persona.DEVELOPER, ChatViewModel.Persona.TEACHER)
+                                    } else {
+                                        selectedAgents.toList()
+                                    }
+                                    runAiRequest(AiRetryRequest(aiPrompt, personasForRun))
+                                },
+                                color = Color(0xFF9BE7FF),
+                                enabled = aiPrompt.isNotBlank() && session != null && canUseAi && !multiAgentIsRunning
+                            )
+                        )
+                    )
                     if (lastAiFailedRequest != null && !multiAgentIsRunning) {
-                        Button(
-                            onClick = { runAiRequest(lastAiFailedRequest!!) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3C5F95))
-                        ) {
-                            Text("Letzte KI-Anfrage wiederholen")
-                        }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Wiederholen",
+                                    onClick = { runAiRequest(lastAiFailedRequest!!) },
+                                    color = Color(0xFFFFD9A8)
+                                )
+                            )
+                        )
                     }
                 }
             }
