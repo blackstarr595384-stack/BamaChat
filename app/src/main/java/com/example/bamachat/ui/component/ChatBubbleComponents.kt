@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,13 +108,28 @@ fun ChatBubble(
                         if (isUser) UploadedImageCard(message.imageUrl, message.text, themeColor)
                         else GeneratedImageCard(message.imageUrl, message.text, themeColor)
                     } else if (isUser) {
-                        Text(message.text, color = Color.White, fontSize = fontSize.sp,
-                            lineHeight = (fontSize * 1.35f).sp, fontWeight = FontWeight.Medium)
+                        SelectionContainer {
+                            Text(
+                                message.text,
+                                color = Color.White,
+                                fontSize = fontSize.sp,
+                                lineHeight = (fontSize * 1.35f).sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     } else {
                         if (message.text.isBlank()) BlinkingDot(themeColor)
                         else {
-                            MarkdownText(markdown = message.text, style = MaterialTheme.typography.bodyMedium.copy(
-                                color = Color(0xFFEDEEF0), fontSize = fontSize.sp, lineHeight = (fontSize * 1.5f).sp))
+                            SelectionContainer {
+                                MarkdownText(
+                                    markdown = message.text,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        color = Color(0xFFEDEEF0),
+                                        fontSize = fontSize.sp,
+                                        lineHeight = (fontSize * 1.5f).sp
+                                    )
+                                )
+                            }
                             if (message.sources.isNotEmpty()) {
                                 Spacer(Modifier.height(10.dp))
                                 BubbleSourcesSection(message.sources, message.webFetchedAtIso, themeColor)
