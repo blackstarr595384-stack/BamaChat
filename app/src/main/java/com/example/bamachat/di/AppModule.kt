@@ -1,5 +1,6 @@
 package com.example.bamachat.di
 
+import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.bamachat.data.local.ChatDatabase
@@ -86,15 +87,15 @@ object AppModule {
     @Singleton
     fun provideChatEngine(
         apiManager: ApiManager,
-        @ApplicationContext context: Context
+        app: Application
     ): ChatEngine {
-        return ChatEngine(apiManager, context)
+        return ChatEngine(apiManager, app)
     }
 
     @Provides
     @Singleton
-    fun provideNotificationService(@ApplicationContext context: Context): NotificationService {
-        return NotificationService(context)
+    fun provideNotificationService(app: Application): NotificationService {
+        return NotificationService(app)
     }
 
     @Provides
