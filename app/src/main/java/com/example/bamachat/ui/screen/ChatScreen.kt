@@ -354,6 +354,7 @@ fun ChatScreen(
     var lastVoiceAutoSendText by remember { mutableStateOf("") }
     var hasHadVoiceExchange by remember { mutableStateOf(false) }
     val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
+    val speechRecognitionAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
     val recognizerIntent = remember {
         val langCode = settingsViewModel.language.value
         val locale = when (langCode) {
@@ -367,6 +368,10 @@ fun ChatScreen(
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale.toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
     }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -403,9 +408,7 @@ fun ChatScreen(
                     else -> "Spracherkennungsfehler ($error)"
                 }
                 android.util.Log.w("ChatScreen", "SpeechRecognizer: $errorMsg")
-                if (error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT) {
-                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-                }
+                Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
             }
             override fun onResults(results: Bundle?) {
                 val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -424,17 +427,31 @@ fun ChatScreen(
                             }
                             lastVoiceAutoSendText = recognizedText
                             lastVoiceAutoSendAt = now
-                            inputText = ""
                             val imageUri = selectedImageUri
-                            if (imageUri != null) {
+                            val accepted = if (imageUri != null) {
                                 viewModel.sendMessageWithImage(recognizedText, imageUri)
-                                selectedImageUri = null
                             } else {
                                 viewModel.sendMessage(recognizedText)
                             }
+                            if (accepted) {
+                                inputText = ""
+                                if (imageUri != null) {
+                                    selectedImageUri = null
+                                }
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Sprache erkannt, aber nicht gesendet.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                             hasHadVoiceExchange = true
                         }
+                    } else {
+                        Toast.makeText(context, "Erkannt: $recognizedText", Toast.LENGTH_SHORT).show()
                     }
+                } else {
+                    Toast.makeText(context, "Keine Sprache erkannt.", Toast.LENGTH_SHORT).show()
                 }
                 isListeningState.value = false
             }
@@ -581,24 +598,41 @@ fun ChatScreen(
             isListening = isListening,
             voicePushToTalkEnabled = voicePushToTalkEnabled,
             onMicClick = {
-                if (isListening) speechRecognizer.stopListening()
-                else if (ContextCompat.checkSelfPermission(
+                if (!speechRecognitionAvailable) {
+                    Toast.makeText(
+                        context,
+                        "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else if (isListening) {
+                    speechRecognizer.stopListening()
+                } else if (ContextCompat.checkSelfPermission(
                         context,
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
+                    Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
                     speechRecognizer.startListening(recognizerIntent)
                 } else {
                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
             onMicPressStart = {
-                if (ContextCompat.checkSelfPermission(
+                if (!speechRecognitionAvailable) {
+                    Toast.makeText(
+                        context,
+                        "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else if (ContextCompat.checkSelfPermission(
                         context,
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    if (!isListening) speechRecognizer.startListening(recognizerIntent)
+                    if (!isListening) {
+                        Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
+                        speechRecognizer.startListening(recognizerIntent)
+                    }
                 } else {
                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -1206,6 +1240,4 @@ private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor
         }
     }
 }
-
-
 

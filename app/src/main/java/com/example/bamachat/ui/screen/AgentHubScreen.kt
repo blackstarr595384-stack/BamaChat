@@ -119,6 +119,15 @@ fun AgentHubScreen(
             localStyle != style ||
             localTools != tools
 
+    fun isPackApplied(pack: PersonaPack): Boolean {
+        return localPreset == pack.preset &&
+            localName == pack.title &&
+            localGoal == pack.goal &&
+            localRules == pack.rules &&
+            localStyle == pack.style &&
+            localTools == pack.tools
+    }
+
     val preview = remember(localPreset, localName, localGoal, localRules, localStyle, localTools) {
         """
 [Agent-Profil]
@@ -286,6 +295,7 @@ ${localTools.ifBlank { "Analyse, Problemlösung" }}
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Persona Marketplace", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                     personaPacks.forEach { pack ->
+                        val packInstalled = isPackApplied(pack)
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.small,
@@ -295,6 +305,7 @@ ${localTools.ifBlank { "Analyse, Problemlösung" }}
                                 Text(pack.title, fontWeight = FontWeight.Medium, fontSize = 12.sp)
                                 Text(pack.subtitle, fontSize = 11.sp)
                                 Button(
+                                    enabled = !packInstalled,
                                     onClick = {
                                         settingsViewModel.setAgentPreset(pack.preset)
                                         settingsViewModel.setAgentName(pack.title)
@@ -311,7 +322,7 @@ ${localTools.ifBlank { "Analyse, Problemlösung" }}
                                         savedHint = true
                                     }
                                 ) {
-                                    Text("Installieren")
+                                    Text(if (packInstalled) "Installiert" else "Installieren")
                                 }
                             }
                         }
