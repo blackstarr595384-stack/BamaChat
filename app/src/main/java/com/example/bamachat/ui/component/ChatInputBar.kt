@@ -4,7 +4,7 @@ import android.net.Uri
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateContentSize
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
