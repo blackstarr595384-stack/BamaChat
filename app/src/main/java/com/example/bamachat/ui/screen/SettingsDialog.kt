@@ -29,6 +29,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.ui.component.CompactTextAction
+import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
@@ -319,9 +321,14 @@ fun SettingsDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { viewModel.resetDisplaySettings() }) {
-                            Text("Anzeige zurücksetzen")
-                        }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Anzeige zurücksetzen",
+                                    onClick = { viewModel.resetDisplaySettings() }
+                                )
+                            )
+                        )
                     }
                 }
 
@@ -440,16 +447,21 @@ fun SettingsDialog(
                                         )
                                     }
                                 }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = { viewModel.setActiveWorkspace(workspace.id) }) {
-                                        Text(if (isActive) "Aktiv" else "Aktivieren", fontSize = 11.sp)
-                                    }
-                                    if (workspace.id != "ws-default") {
-                                        TextButton(onClick = { viewModel.deleteWorkspace(workspace.id) }) {
-                                            Text("Löschen", color = Color(0xFFD63031), fontSize = 11.sp)
+                                CompactTextActionRow(
+                                    actions = listOfNotNull(
+                                        CompactTextAction(
+                                            label = if (isActive) "Aktiv" else "Aktivieren",
+                                            onClick = { viewModel.setActiveWorkspace(workspace.id) }
+                                        ),
+                                        workspace.id.takeIf { it != "ws-default" }?.let {
+                                            CompactTextAction(
+                                                label = "Löschen",
+                                                onClick = { viewModel.deleteWorkspace(workspace.id) },
+                                                color = Color(0xFFD63031)
+                                            )
                                         }
-                                    }
-                                }
+                                    )
+                                )
                             }
                         }
                     }
@@ -579,12 +591,20 @@ fun SettingsDialog(
                                     enabled = billingReady && !purchaseInProgress
                                 )
                             }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = { viewModel.refreshBillingState() }) { Text("Billing aktualisieren", fontSize = 11.sp) }
-                                if (!billingReady) {
-                                    TextButton(onClick = { viewModel.setPremiumActiveForDebug(true) }) { Text("Premium-Test lokal", fontSize = 11.sp) }
-                                }
-                            }
+                            CompactTextActionRow(
+                                actions = listOfNotNull(
+                                    CompactTextAction(
+                                        label = "Billing aktualisieren",
+                                        onClick = { viewModel.refreshBillingState() }
+                                    ),
+                                    if (!billingReady) {
+                                        CompactTextAction(
+                                            label = "Premium-Test lokal",
+                                            onClick = { viewModel.setPremiumActiveForDebug(true) }
+                                        )
+                                    } else null
+                                )
+                            )
                         }
                     }
 
@@ -944,9 +964,14 @@ fun SettingsDialog(
 
                 SettingsSection("Datenschutz & Daten", expandedSection == "data", onClick = { expandedSection = if (expandedSection == "data") null else "data" }) {
                     SettingRow("Persona-Cloud-Sync", cloudSyncStatusText) {
-                        TextButton(onClick = { viewModel.refreshCloudSyncStatus() }) {
-                            Text("Aktualisieren")
-                        }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Aktualisieren",
+                                    onClick = { viewModel.refreshCloudSyncStatus() }
+                                )
+                            )
+                        )
                     }
                     SettingRow("Privacy Strict Mode", "Maskiert sensible Inhalte stärker in Logs/Status") {
                         Switch(
@@ -967,22 +992,41 @@ fun SettingsDialog(
                         )
                     }
                     SettingRow("Gast-/Prompt-Daten jetzt löschen", "Löscht nur lokale Session-, Prompt- und Lern-Daten") {
-                        TextButton(onClick = {
-                            viewModel.clearGuestPrivateData()
-                        }) { Text("Bereinigen", color = Color(0xFFE17055)) }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Bereinigen",
+                                    onClick = { viewModel.clearGuestPrivateData() },
+                                    color = Color(0xFFE17055)
+                                )
+                            )
+                        )
                     }
                     SettingRow("Alle Daten löschen", "Einstellungen und Chats zurücksetzen") {
-                        TextButton(onClick = {
-                            viewModel.clearAllData()
-                        }) { Text("Löschen", color = Color(0xFFD63031)) }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Löschen",
+                                    onClick = { viewModel.clearAllData() },
+                                    color = Color(0xFFD63031)
+                                )
+                            )
+                        )
                     }
                     SettingRow("App-Info öffnen", "Berechtigungen verwalten") {
-                        TextButton(onClick = {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = Uri.fromParts("package", context.packageName, null)
-                            }
-                            context.startActivity(intent)
-                        }) { Text("Öffnen") }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Öffnen",
+                                    onClick = {
+                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = Uri.fromParts("package", context.packageName, null)
+                                        }
+                                        context.startActivity(intent)
+                                    }
+                                )
+                            )
+                        )
                     }
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
                         Text("BamaChat v1.0 — made by Mamadou Dian Baldé w/AI", color = Color.Gray, fontSize = 10.sp)

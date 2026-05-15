@@ -82,6 +82,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.repository.ChatRepository
+import com.example.bamachat.ui.component.CompactTextAction
+import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.util.AutomationCatalog
 import com.example.bamachat.util.PhotoAiAction
 import com.example.bamachat.util.PhotoAiActionExecutor
@@ -2402,14 +2404,17 @@ private fun AutomationBoard(themeColor: Color) {
                     Text(template.title, color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(template.description, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                     Text(template.prompt, color = Color.White.copy(alpha = 0.82f), fontSize = 11.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = {
-                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(template.prompt))
-                            selectedId = template.id
-                        }) {
-                            Text("Prompt kopieren")
-                        }
-                    }
+                    CompactTextActionRow(
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "Prompt kopieren",
+                                onClick = {
+                                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(template.prompt))
+                                    selectedId = template.id
+                                }
+                            )
+                        )
+                    )
                 }
             }
         }
@@ -2650,37 +2655,35 @@ private fun PromptLabApp(themeColor: Color) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Generierter Prompt", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(generatedPrompt, color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(
-                            onClick = {
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(generatedPrompt))
-                                bannerMessage = "Prompt kopiert."
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = themeColor),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Kopieren")
-                        }
-                        Button(
-                            onClick = {
-                                val template = PromptLabTemplate(
-                                    id = System.currentTimeMillis().toString(),
-                                    title = saveTitle.ifBlank { "Prompt ${savedTemplates.size + 1}" },
-                                    prompt = generatedPrompt,
-                                    createdAt = System.currentTimeMillis()
-                                )
-                                savedTemplates = listOf(template) + savedTemplates.take(24)
-                                savePromptLabTemplates(prefs, savedTemplates)
-                                saveTitle = ""
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                bannerMessage = "Prompt gespeichert."
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Speichern")
-                        }
-                    }
+                    CompactTextActionRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "Kopieren",
+                                onClick = {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(generatedPrompt))
+                                    bannerMessage = "Prompt kopiert."
+                                }
+                            ),
+                            CompactTextAction(
+                                label = "Speichern",
+                                onClick = {
+                                    val template = PromptLabTemplate(
+                                        id = System.currentTimeMillis().toString(),
+                                        title = saveTitle.ifBlank { "Prompt ${savedTemplates.size + 1}" },
+                                        prompt = generatedPrompt,
+                                        createdAt = System.currentTimeMillis()
+                                    )
+                                    savedTemplates = listOf(template) + savedTemplates.take(24)
+                                    savePromptLabTemplates(prefs, savedTemplates)
+                                    saveTitle = ""
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    bannerMessage = "Prompt gespeichert."
+                                }
+                            )
+                        )
+                    )
                     OutlinedTextField(
                         value = saveTitle,
                         onValueChange = { saveTitle = it },
@@ -2704,29 +2707,40 @@ private fun PromptLabApp(themeColor: Color) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(template.title, color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(template.prompt.take(420), color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TextButton(onClick = {
-                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(template.prompt))
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                bannerMessage = "Template kopiert."
-                            }) { Text("Kopieren") }
-                            TextButton(onClick = {
-                                role = extractLineValue(template.prompt, "Rolle:")
-                                tone = extractLineValue(template.prompt, "Ton:")
-                                outputFormat = extractLineValue(template.prompt, "Ausgabeformat:")
-                                constraints = extractLineValue(template.prompt, "Regeln:")
-                                goal = extractLineValue(template.prompt, "Ziel:")
-                                contextText = extractBlockAfterHeader(template.prompt, "Kontext:")
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                bannerMessage = "Template geladen."
-                            }) { Text("Laden") }
-                            TextButton(onClick = {
-                                savedTemplates = savedTemplates.filterNot { it.id == template.id }
-                                savePromptLabTemplates(prefs, savedTemplates)
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                bannerMessage = "Template gelöscht."
-                            }) { Text("Löschen") }
-                        }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Kopieren",
+                                    onClick = {
+                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(template.prompt))
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        bannerMessage = "Template kopiert."
+                                    }
+                                ),
+                                CompactTextAction(
+                                    label = "Laden",
+                                    onClick = {
+                                        role = extractLineValue(template.prompt, "Rolle:")
+                                        tone = extractLineValue(template.prompt, "Ton:")
+                                        outputFormat = extractLineValue(template.prompt, "Ausgabeformat:")
+                                        constraints = extractLineValue(template.prompt, "Regeln:")
+                                        goal = extractLineValue(template.prompt, "Ziel:")
+                                        contextText = extractBlockAfterHeader(template.prompt, "Kontext:")
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        bannerMessage = "Template geladen."
+                                    }
+                                ),
+                                CompactTextAction(
+                                    label = "Löschen",
+                                    onClick = {
+                                        savedTemplates = savedTemplates.filterNot { it.id == template.id }
+                                        savePromptLabTemplates(prefs, savedTemplates)
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        bannerMessage = "Template gelöscht."
+                                    }
+                                )
+                            )
+                        )
                     }
                 }
             }
@@ -2908,20 +2922,28 @@ private fun VoiceNotesAiApp(themeColor: Color) {
                             Text("• $item", color = Color.White.copy(alpha = 0.84f), fontSize = 12.sp)
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = {
-                            clipboard.setText(
-                                androidx.compose.ui.text.AnnotatedString(
-                                    "Zusammenfassung:\n$summary\n\nToDos:\n${actionItems.joinToString("\n") { "- $it" }}"
-                                )
+                    CompactTextActionRow(
+                        actions = listOf(
+                            CompactTextAction(
+                                label = "Ergebnis kopieren",
+                                onClick = {
+                                    clipboard.setText(
+                                        androidx.compose.ui.text.AnnotatedString(
+                                            "Zusammenfassung:\n$summary\n\nToDos:\n${actionItems.joinToString("\n") { "- $it" }}"
+                                        )
+                                    )
+                                }
+                            ),
+                            CompactTextAction(
+                                label = "Alles löschen",
+                                onClick = {
+                                    notes = emptyList()
+                                    saveVoiceNotes(prefs, notes)
+                                    status = "Notizen geleert."
+                                }
                             )
-                        }) { Text("Ergebnis kopieren") }
-                        TextButton(onClick = {
-                            notes = emptyList()
-                            saveVoiceNotes(prefs, notes)
-                            status = "Notizen geleert."
-                        }) { Text("Alles löschen") }
-                    }
+                        )
+                    )
                 }
             }
         }
@@ -2931,17 +2953,25 @@ private fun VoiceNotesAiApp(themeColor: Color) {
                 Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF1A202D), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(entry.text, color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(onClick = {
-                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(entry.text))
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }) { Text("Kopieren") }
-                            TextButton(onClick = {
-                                notes = notes.filterNot { it.id == entry.id }
-                                saveVoiceNotes(prefs, notes)
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            }) { Text("Löschen") }
-                        }
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Kopieren",
+                                    onClick = {
+                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(entry.text))
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    }
+                                ),
+                                CompactTextAction(
+                                    label = "Löschen",
+                                    onClick = {
+                                        notes = notes.filterNot { it.id == entry.id }
+                                        saveVoiceNotes(prefs, notes)
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    }
+                                )
+                            )
+                        )
                     }
                 }
             }
@@ -3064,24 +3094,31 @@ private fun SmartWorkspaceApp(themeColor: Color) {
                         modifier = Modifier.padding(12.dp)
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    TextButton(
-                        onClick = {
-                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(outputText))
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            statusMessage = "Output kopiert."
-                            statusTone = MiniAppStatusTone.SUCCESS
-                        },
-                        enabled = outputText.isNotBlank()
-                    ) { Text("Output kopieren") }
-                    TextButton(onClick = {
-                        sourceText = ""
-                        outputText = ""
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        statusMessage = "Workspace zurückgesetzt."
-                        statusTone = MiniAppStatusTone.INFO
-                    }) { Text("Zurücksetzen") }
-                }
+                CompactTextActionRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    actions = listOf(
+                        CompactTextAction(
+                            label = "Output kopieren",
+                            onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(outputText))
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                statusMessage = "Output kopiert."
+                                statusTone = MiniAppStatusTone.SUCCESS
+                            },
+                            enabled = outputText.isNotBlank()
+                        ),
+                        CompactTextAction(
+                            label = "Zurücksetzen",
+                            onClick = {
+                                sourceText = ""
+                                outputText = ""
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                statusMessage = "Workspace zurückgesetzt."
+                                statusTone = MiniAppStatusTone.INFO
+                            }
+                        )
+                    )
+                )
             }
         }
 
