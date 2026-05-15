@@ -482,7 +482,7 @@ fun SettingsDialog(
                         )
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    SettingRow("Automations-Schnellaktionen", "Templates für ToDos, Briefings, Releases") {
+                    SettingRow("Schnellaktionen in Chat", "Zeigt Chips oder einen kompakten Smart-Selector") {
                         Switch(
                             checked = automationQuickActionsEnabled,
                             onCheckedChange = { viewModel.setAutomationQuickActionsEnabled(it) },

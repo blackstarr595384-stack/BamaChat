@@ -215,6 +215,7 @@ fun ChatScreen(
     val elevenLabsModelId by settingsViewModel.elevenLabsModelId.collectAsStateWithLifecycle()
     val voicePushToTalkEnabled by settingsViewModel.voicePushToTalkEnabled.collectAsStateWithLifecycle()
     val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
+    val automationQuickActionsEnabled by settingsViewModel.automationQuickActionsEnabled.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val workspaceChatFilterEnabled by settingsViewModel.workspaceChatFilterEnabled.collectAsStateWithLifecycle()
     val autoSendVoice by settingsViewModel.autoSendVoice.collectAsStateWithLifecycle()
@@ -677,6 +678,7 @@ fun ChatScreen(
             uiCornerRoundnessScale = uiCornerRoundnessScale,
             uiShadowIntensityScale = uiShadowIntensityScale,
             uiSurfaceOpacity = uiSurfaceOpacity,
+            automationQuickActionsEnabled = automationQuickActionsEnabled,
             activeExtensionNames = activeExtensionNames,
             lastAppliedExtensionNames = lastAppliedExtensionNames,
             selectedExtensionQuickAction = selectedExtensionQuickAction,
@@ -776,6 +778,7 @@ private fun ChatContent(
     uiCornerRoundnessScale: Float,
     uiShadowIntensityScale: Float,
     uiSurfaceOpacity: Float,
+    automationQuickActionsEnabled: Boolean,
     activeExtensionNames: List<String>,
     lastAppliedExtensionNames: List<String>,
     selectedExtensionQuickAction: ChatViewModel.ExtensionQuickAction,
@@ -1177,6 +1180,7 @@ private fun ChatContent(
                     uiCornerRoundnessScale = uiCornerScale,
                     uiShadowIntensityScale = uiShadowScale,
                     uiSurfaceOpacity = surfaceOpacity,
+                    automationQuickActionsEnabled = automationQuickActionsEnabled,
                     selectedExtensionQuickAction = selectedExtensionQuickAction,
                     onSelectExtensionQuickAction = onSelectExtensionQuickAction,
                     promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
@@ -1240,4 +1244,3 @@ private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor
         }
     }
 }
-

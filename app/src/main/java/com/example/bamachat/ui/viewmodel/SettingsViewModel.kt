@@ -145,7 +145,7 @@ class SettingsViewModel @Inject constructor(
     val developerRealtimeCollabTesting: StateFlow<Boolean> = _developerRealtimeCollabTesting.asStateFlow()
     private val _agentConfirmToolActions = MutableStateFlow(prefs.getBoolean("agent_confirm_tool_actions", true))
     val agentConfirmToolActions: StateFlow<Boolean> = _agentConfirmToolActions.asStateFlow()
-    private val _automationQuickActionsEnabled = MutableStateFlow(prefs.getBoolean("automation_quick_actions_enabled", true))
+    private val _automationQuickActionsEnabled = MutableStateFlow(prefs.getBoolean("automation_quick_actions_enabled", false))
     val automationQuickActionsEnabled: StateFlow<Boolean> = _automationQuickActionsEnabled.asStateFlow()
     private val _privacyStrictModeEnabled = MutableStateFlow(prefs.getBoolean("privacy_strict_mode_enabled", true))
     val privacyStrictModeEnabled: StateFlow<Boolean> = _privacyStrictModeEnabled.asStateFlow()

@@ -79,6 +79,7 @@ fun ChatInputBar(
     uiCornerRoundnessScale: Float,
     uiShadowIntensityScale: Float,
     uiSurfaceOpacity: Float,
+    automationQuickActionsEnabled: Boolean,
     selectedExtensionQuickAction: ChatViewModel.ExtensionQuickAction,
     onSelectExtensionQuickAction: (ChatViewModel.ExtensionQuickAction) -> Unit,
     promptTemplates: List<PromptTemplate> = emptyList(),
@@ -147,6 +148,7 @@ fun ChatInputBar(
                 )
             }
             var moreActionsExpanded by remember { mutableStateOf(false) }
+            var smartActionExpanded by remember { mutableStateOf(false) }
             val canSend = !isLoading && (localInputValue.text.trim().isNotEmpty() || selectedImageUri != null)
             val sendButtonColor by animateColorAsState(
                 targetValue = if (canSend) themeColor else Color(0xFF35383D),
@@ -159,33 +161,85 @@ fun ChatInputBar(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    quickActionOptions.forEach { action ->
-                        FilterChip(
-                            selected = selectedExtensionQuickAction == action,
-                            onClick = { onSelectExtensionQuickAction(action) },
-                            label = {
-                                Text(
-                                    text = action.label,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            },
-                            leadingIcon = if (selectedExtensionQuickAction == action) {
-                                {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
+                if (automationQuickActionsEnabled) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        quickActionOptions.forEach { action ->
+                            FilterChip(
+                                selected = selectedExtensionQuickAction == action,
+                                onClick = { onSelectExtensionQuickAction(action) },
+                                label = {
+                                    Text(
+                                        text = action.label,
+                                        style = MaterialTheme.typography.labelMedium
                                     )
+                                },
+                                leadingIcon = if (selectedExtensionQuickAction == action) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                } else null
+                            )
+                        }
+                    }
+                } else {
+                    AssistChip(
+                        onClick = { smartActionExpanded = true },
+                        label = {
+                            Text(
+                                text = "Smart: ${selectedExtensionQuickAction.label}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                    DropdownMenu(
+                        expanded = smartActionExpanded,
+                        onDismissRequest = { smartActionExpanded = false }
+                    ) {
+                        quickActionOptions.forEach { action ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        if (selectedExtensionQuickAction == action) {
+                                            Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp), tint = themeColor)
+                                        }
+                                        Column {
+                                            Text(action.label, fontSize = 12.sp)
+                                            Text(
+                                                text = when (action) {
+                                                    ChatViewModel.ExtensionQuickAction.AUTO -> "Automatisch anpassen"
+                                                    ChatViewModel.ExtensionQuickAction.RESEARCH -> "Quellen & Evidenz"
+                                                    ChatViewModel.ExtensionQuickAction.CODE_REVIEW -> "Bugs & Risiken"
+                                                    ChatViewModel.ExtensionQuickAction.PLAN -> "Prioritäten & Schritte"
+                                                },
+                                                fontSize = 10.sp,
+                                                color = Color.White.copy(alpha = 0.55f)
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    smartActionExpanded = false
+                                    onSelectExtensionQuickAction(action)
                                 }
-                            } else null
-                        )
+                            )
+                        }
                     }
                 }
                 val triggerSend: () -> Unit = send@{

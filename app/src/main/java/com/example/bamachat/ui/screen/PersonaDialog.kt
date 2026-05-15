@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bamachat.ui.component.ActionButtonRow
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 
 @Composable
@@ -84,15 +85,19 @@ fun PersonaDialog(viewModel: ChatViewModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                viewModel.personaViewModel.setPromptForPersona(selected, promptText)
-                onDismiss()
-            }) { Text("Speichern") }
-        },
-        dismissButton = {
-            TextButton(onClick = {
-                viewModel.personaViewModel.resetPromptForPersona(selected)
-            }) { Text("Zurücksetzen") }
+            ActionButtonRow(
+                primaryLabel = "Speichern",
+                onPrimary = {
+                    viewModel.personaViewModel.setPromptForPersona(selected, promptText)
+                    onDismiss()
+                },
+                secondaryLabel = "Zurücksetzen",
+                onSecondary = {
+                    viewModel.personaViewModel.resetPromptForPersona(selected)
+                },
+                primaryEnabled = true,
+                secondaryEnabled = true
+            )
         }
     )
 }

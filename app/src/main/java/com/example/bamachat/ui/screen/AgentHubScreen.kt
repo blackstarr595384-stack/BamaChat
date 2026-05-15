@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.ui.component.ActionButtonRow
 import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 
@@ -265,32 +266,30 @@ ${localTools.ifBlank { "Analyse, Problemlösung" }}
                         maxLines = 4
                     )
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            enabled = isDirty,
-                            onClick = {
-                                settingsViewModel.setAgentPreset(localPreset)
-                                settingsViewModel.setAgentName(localName)
-                                settingsViewModel.setAgentGoal(localGoal)
-                                settingsViewModel.setAgentRules(localRules)
-                                settingsViewModel.setAgentOutputStyle(localStyle)
-                                settingsViewModel.setAgentTools(localTools)
-                                savedHint = true
-                            }
-                        ) { Text("Speichern") }
-                        Button(
-                            enabled = isDirty,
-                            onClick = {
-                                localPreset = preset
-                                localName = name
-                                localGoal = goal
-                                localRules = rules
-                                localStyle = style
-                                localTools = tools
-                                savedHint = false
-                            }
-                        ) { Text("Zurücksetzen") }
-                    }
+                    ActionButtonRow(
+                        primaryLabel = "Speichern",
+                        onPrimary = {
+                            settingsViewModel.setAgentPreset(localPreset)
+                            settingsViewModel.setAgentName(localName)
+                            settingsViewModel.setAgentGoal(localGoal)
+                            settingsViewModel.setAgentRules(localRules)
+                            settingsViewModel.setAgentOutputStyle(localStyle)
+                            settingsViewModel.setAgentTools(localTools)
+                            savedHint = true
+                        },
+                        secondaryLabel = "Zurücksetzen",
+                        onSecondary = {
+                            localPreset = preset
+                            localName = name
+                            localGoal = goal
+                            localRules = rules
+                            localStyle = style
+                            localTools = tools
+                            savedHint = false
+                        },
+                        primaryEnabled = isDirty,
+                        secondaryEnabled = isDirty
+                    )
                     if (savedHint) {
                         Text("Gespeichert", fontSize = 11.sp, color = Color(0xFF0E9F6E))
                     }
