@@ -53,7 +53,7 @@ interface ChatDao {
     suspend fun insertMessage(message: ChatMessageEntity)
 
     // ===== FTS4 Message Search =====
-    @Query("SELECT rowid, message_id, conversation_id, text, is_user, timestamp, snippet(chat_messages_fts, '<b>', '</b>', '...', -1, 20) AS snippet FROM chat_messages_fts WHERE chat_messages_fts MATCH :query ORDER BY rank LIMIT :limit")
+    @Query("SELECT rowid, message_id, conversation_id, text, is_user, timestamp, snippet(chat_messages_fts, '<b>', '</b>', '...', -1, 20) AS snippet FROM chat_messages_fts WHERE chat_messages_fts MATCH :query ORDER BY rowid DESC LIMIT :limit")
     suspend fun searchMessagesFts(query: String, limit: Int = 30): List<MessageFtsResult>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
