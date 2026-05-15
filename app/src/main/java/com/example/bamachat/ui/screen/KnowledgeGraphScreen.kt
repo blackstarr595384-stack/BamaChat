@@ -4,8 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -22,10 +20,10 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,11 +35,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -51,8 +48,9 @@ import androidx.compose.ui.unit.sp
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.KnowledgeEdgeEntity
 import com.example.bamachat.data.repository.ChatRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.cos
-import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -83,10 +81,13 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
     var selectedNode by remember { mutableStateOf<GraphNode?>(null) }
     var selectedEdges by remember { mutableStateOf(listOf<Pair<String, String>>()) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(appContext) {
         loading = true
+        errorMsg = null
         try {
-            val rawEdges: List<KnowledgeEdgeEntity> = repo.getKnowledgeEdges(100)
+            val rawEdges: List<KnowledgeEdgeEntity> = withContext(Dispatchers.IO) {
+                repo.getKnowledgeEdges(100)
+            }
             val nodeSet = LinkedHashSet<String>()
             val edgeList = mutableListOf<Pair<String, String>>()
             rawEdges.forEach { e ->
@@ -109,11 +110,14 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
                 )
             })
 
-            animateForceDirected(nodes, edges, iterations = 120)
+            if (nodes.isNotEmpty()) {
+                animateForceDirected(nodes, edges, iterations = 120)
+            }
         } catch (e: Exception) {
-            errorMsg = e.message
+            errorMsg = e.message ?: "Unbekannter Fehler beim Laden des Wissensgraphen"
+        } finally {
+            loading = false
         }
-        loading = false
     }
 
     fun rerunLayout() {
@@ -122,9 +126,12 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
             val radius = 180f + Random.Default.nextFloat() * 40f
             n.x = 400f + radius * cos(i * angleStep).toFloat()
             n.y = 400f + radius * sin(i * angleStep).toFloat()
-            n.vx = 0f; n.vy = 0f
+            n.vx = 0f
+            n.vy = 0f
         }
-        animateForceDirected(nodes, edges, iterations = 120)
+        if (nodes.isNotEmpty()) {
+            animateForceDirected(nodes, edges, iterations = 120)
+        }
         selectedNode = null
         selectedEdges = emptyList()
     }
@@ -137,6 +144,7 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
     val textColor = Color(0xFFEDEEF0)
 
     Scaffold(
+        containerColor = canvasBg,
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Wissensgraph", fontWeight = FontWeight.Bold) },
@@ -159,144 +167,201 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
             )
         }
     ) { padding ->
-        if (loading) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                Text("Lade Wissensgraph...", color = textColor)
-            }
-        } else if (errorMsg != null || nodes.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    Text("Keine Daten gefunden", fontSize = 16.sp, color = textColor.copy(alpha = 0.6f))
-                    Spacer(Modifier.height(4.dp))
-                    Text("Chatte mit der KI, um Wissen aufzubauen.", fontSize = 12.sp, color = textColor.copy(alpha = 0.4f))
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(padding).background(canvasBg)
-            ) {
-                Canvas(
+        when {
+            loading -> {
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures { tapOffset ->
-                                val hit = nodes.minByOrNull { n ->
-                                    val sx = (n.x * scale + offsetX)
-                                    val sy = (n.y * scale + offsetY)
-                                    sqrt((sx - tapOffset.x).pow(2) + (sy - tapOffset.y).pow(2))
-                                }
-                                if (hit != null) {
-                                    val sx = (hit.x * scale + offsetX)
-                                    val sy = (hit.y * scale + offsetY)
-                                    val dist = sqrt((sx - tapOffset.x).pow(2) + (sy - tapOffset.y).pow(2))
-                                    if (dist < 28f) {
-                                        selectedNode = if (selectedNode == hit) null else hit
-                                        selectedEdges = if (selectedNode == null) {
-                                            emptyList()
-                                        } else {
-                                            edges.filter { (f, t) ->
-                                                f == selectedNode?.label || t == selectedNode?.label
-                                            }
-                                        }
-                                        return@detectTapGestures
-                                    }
-                                }
-                                selectedNode = null
-                                selectedEdges = emptyList()
-                            }
-                        }
-                        .pointerInput(Unit) {
-                            detectDragGestures { _, dragAmount ->
-                                offsetX += dragAmount.x
-                                offsetY += dragAmount.y
-                            }
-                        }
+                        .padding(padding)
+                        .background(canvasBg),
+                    contentAlignment = Alignment.Center
                 ) {
-                    val w = size.width
-                    val h = size.height
-
-                    val centerX = w / 2f
-                    val centerY = h / 2f
-
-                    edges.forEach { (from, to) ->
-                        val n1 = nodes.find { it.label == from }
-                        val n2 = nodes.find { it.label == to }
-                        if (n1 != null && n2 != null) {
-                            val sx = n1.x * scale + offsetX
-                            val sy = n1.y * scale + offsetY
-                            val ex = n2.x * scale + offsetX
-                            val ey = n2.y * scale + offsetY
-                            val isSelected = selectedNode?.let { s ->
-                                s.label == from || s.label == to
-                            } ?: false
-
-                            drawLine(
-                                color = if (isSelected) selectedEdgeColor else edgeColor,
-                                start = Offset(sx, sy),
-                                end = Offset(ex, ey),
-                                strokeWidth = if (isSelected) 2.5f else 1.5f
+                    Surface(
+                        color = Color(0xFF2A2D32).copy(alpha = 0.96f),
+                        shape = RoundedCornerShape(16.dp),
+                        tonalElevation = 4.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(color = selectedNodeColor)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Lade Wissensgraph...", color = textColor, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Falls noch keine Knoten existieren, bleibt die Ansicht leer.",
+                                color = textColor.copy(alpha = 0.72f),
+                                fontSize = 12.sp
                             )
                         }
                     }
-
-                    nodes.forEach { n ->
-                        val sx = n.x * scale + offsetX
-                        val sy = n.y * scale + offsetY
-                        val isSelected = selectedNode == n
-                        val r = if (isSelected) 14f else 10f
-
-                        drawCircle(
-                            color = if (isSelected) selectedNodeColor else nodeColor.copy(alpha = 0.85f),
-                            radius = r,
-                            center = Offset(sx, sy)
-                        )
-                        drawCircle(
-                            color = Color.White.copy(alpha = 0.2f),
-                            radius = r,
-                            center = Offset(sx + 2f, sy - 1f)
-                        )
-                        drawContext.canvas.nativeCanvas.apply {
-                            val paint = android.graphics.Paint().apply {
-                                color = android.graphics.Color.WHITE
-                                textSize = if (isSelected) 26f else 22f
-                                isAntiAlias = true
-                                setShadowLayer(3f, 0f, 1f, android.graphics.Color.argb(120, 0, 0, 0))
-                            }
-                            drawText(n.label, sx + r + 6f, sy + 6f, paint)
-                        }
-                    }
                 }
+            }
 
-                if (selectedNode != null) {
+            errorMsg != null || nodes.isEmpty() -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .background(canvasBg),
+                    contentAlignment = Alignment.Center
+                ) {
                     Surface(
-                        modifier = Modifier
-                            .align(androidx.compose.ui.Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF2A2D32).copy(alpha = 0.95f)
+                        color = Color(0xFF2A2D32).copy(alpha = 0.96f),
+                        shape = RoundedCornerShape(16.dp),
+                        tonalElevation = 4.dp
                     ) {
-                        Column(Modifier.padding(14.dp).verticalScroll(rememberScrollState())) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                             Text(
-                                selectedNode!!.label,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = selectedNodeColor
+                                if (errorMsg != null) "Fehler beim Laden" else "Noch keine Wissensdaten",
+                                fontSize = 16.sp,
+                                color = textColor,
+                                fontWeight = FontWeight.SemiBold
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Verbindungen (${selectedEdges.size}):",
+                                errorMsg ?: "Chatte mit der KI, damit Verbindungen im Wissensgraphen entstehen.",
                                 fontSize = 12.sp,
-                                color = textColor.copy(alpha = 0.7f)
+                                color = textColor.copy(alpha = 0.72f)
                             )
-                            Spacer(Modifier.height(4.dp))
-                            selectedEdges.forEach { (from, to) ->
-                                val rel = "→"
-                                Text(
-                                    "  $from $rel $to",
-                                    fontSize = 12.sp,
-                                    color = textColor.copy(alpha = 0.85f)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Tipp: Führe ein paar Chats oder Wissensaktionen aus und öffne den Graphen danach erneut.",
+                                fontSize = 11.sp,
+                                color = textColor.copy(alpha = 0.55f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .background(canvasBg)
+                ) {
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures { tapOffset ->
+                                    val hit = nodes.minByOrNull { n ->
+                                        val sx = (n.x * scale + offsetX)
+                                        val sy = (n.y * scale + offsetY)
+                                        sqrt((sx - tapOffset.x).pow(2) + (sy - tapOffset.y).pow(2))
+                                    }
+                                    if (hit != null) {
+                                        val sx = (hit.x * scale + offsetX)
+                                        val sy = (hit.y * scale + offsetY)
+                                        val dist = sqrt((sx - tapOffset.x).pow(2) + (sy - tapOffset.y).pow(2))
+                                        if (dist < 28f) {
+                                            selectedNode = if (selectedNode == hit) null else hit
+                                            selectedEdges = if (selectedNode == null) {
+                                                emptyList()
+                                            } else {
+                                                edges.filter { (f, t) ->
+                                                    f == selectedNode?.label || t == selectedNode?.label
+                                                }
+                                            }
+                                            return@detectTapGestures
+                                        }
+                                    }
+                                    selectedNode = null
+                                    selectedEdges = emptyList()
+                                }
+                            }
+                            .pointerInput(Unit) {
+                                detectDragGestures { _, dragAmount ->
+                                    offsetX += dragAmount.x
+                                    offsetY += dragAmount.y
+                                }
+                            }
+                    ) {
+                        edges.forEach { (from, to) ->
+                            val n1 = nodes.find { it.label == from }
+                            val n2 = nodes.find { it.label == to }
+                            if (n1 != null && n2 != null) {
+                                val sx = n1.x * scale + offsetX
+                                val sy = n1.y * scale + offsetY
+                                val ex = n2.x * scale + offsetX
+                                val ey = n2.y * scale + offsetY
+                                val isSelected = selectedNode?.let { s ->
+                                    s.label == from || s.label == to
+                                } ?: false
+
+                                drawLine(
+                                    color = if (isSelected) selectedEdgeColor else edgeColor,
+                                    start = Offset(sx, sy),
+                                    end = Offset(ex, ey),
+                                    strokeWidth = if (isSelected) 2.5f else 1.5f
                                 )
+                            }
+                        }
+
+                        nodes.forEach { n ->
+                            val sx = n.x * scale + offsetX
+                            val sy = n.y * scale + offsetY
+                            val isSelected = selectedNode == n
+                            val r = if (isSelected) 14f else 10f
+
+                            drawCircle(
+                                color = if (isSelected) selectedNodeColor else nodeColor.copy(alpha = 0.85f),
+                                radius = r,
+                                center = Offset(sx, sy)
+                            )
+                            drawCircle(
+                                color = Color.White.copy(alpha = 0.2f),
+                                radius = r,
+                                center = Offset(sx + 2f, sy - 1f)
+                            )
+                            drawContext.canvas.nativeCanvas.apply {
+                                val paint = android.graphics.Paint().apply {
+                                    color = android.graphics.Color.WHITE
+                                    textSize = if (isSelected) 26f else 22f
+                                    isAntiAlias = true
+                                    setShadowLayer(3f, 0f, 1f, android.graphics.Color.argb(120, 0, 0, 0))
+                                }
+                                drawText(n.label, sx + r + 6f, sy + 6f, paint)
+                            }
+                        }
+                    }
+
+                    if (selectedNode != null) {
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF2A2D32).copy(alpha = 0.95f)
+                        ) {
+                            Column(Modifier.padding(14.dp).verticalScroll(rememberScrollState())) {
+                                Text(
+                                    selectedNode!!.label,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = selectedNodeColor
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    "Verbindungen (${selectedEdges.size}):",
+                                    fontSize = 12.sp,
+                                    color = textColor.copy(alpha = 0.7f)
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                selectedEdges.forEach { (from, to) ->
+                                    Text(
+                                        "  $from → $to",
+                                        fontSize = 12.sp,
+                                        color = textColor.copy(alpha = 0.85f)
+                                    )
+                                }
                             }
                         }
                     }
@@ -318,7 +383,8 @@ private fun animateForceDirected(
 
     repeat(iterations) {
         nodes.forEach { n ->
-            n.vx = 0f; n.vy = 0f
+            n.vx = 0f
+            n.vy = 0f
             nodes.forEach { other ->
                 if (other != n) {
                     val dx = n.x - other.x
