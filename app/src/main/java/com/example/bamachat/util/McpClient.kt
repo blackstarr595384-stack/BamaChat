@@ -149,8 +149,20 @@ class McpClient(
             "clientInfo" to mapOf("name" to "bamachat", "version" to "1.0")
         ))
         initialized = response.has("capabilities")
-        sendRequest("notifications/initialized", null)
+        sendNotification("notifications/initialized")
         listTools()
+    }
+
+    private fun sendNotification(method: String, params: Any? = null) {
+        try {
+            val request = JSONObject().apply {
+                put("jsonrpc", "2.0")
+                put("method", method)
+                if (params != null) put("params", params)
+            }
+            writer?.write(request.toString() + "\n")
+            writer?.flush()
+        } catch (_: Exception) {}
     }
 
     private suspend fun sendRequest(method: String, params: Any? = null): JSONObject {

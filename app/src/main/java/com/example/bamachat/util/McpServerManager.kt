@@ -58,6 +58,10 @@ class McpServerManager(private val context: Context) {
     suspend fun refreshTools() {
         val all = clients.values.flatMap { it.listTools() }
         _allTools.value = all
+        refreshConnectionStates()
+    }
+
+    private fun refreshConnectionStates() {
         _connectionStates.value = clients.mapValues { it.value.connectionStatus.value }
     }
 
