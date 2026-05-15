@@ -23,6 +23,12 @@ object QuickActionInterpreter {
         "naechste schritte", "sprint", "milestone", "deadline", "release plan"
     )
 
+    private val optimizationKeywords = listOf(
+        "optimier", "optimierung", "vereinfach", "vereinfachen", "redundant",
+        "redundanz", "aufräum", "aufräumen", "cleanup", "refactor",
+        "konsolid", "duplikat", "self-config", "autonom", "autopilot"
+    )
+
     private val collabKeywords = listOf(
         "team", "meeting", "collab", "workspace", "stakeholder",
         "session", "abstimmung", "zusammen"
@@ -48,7 +54,12 @@ object QuickActionInterpreter {
 
     fun looksLikePlanningRequest(text: String): Boolean {
         val lower = text.trim().lowercase()
-        return planningKeywords.any { lower.contains(it) }
+        return planningKeywords.any { lower.contains(it) } || looksLikeOptimizationRequest(text)
+    }
+
+    fun looksLikeOptimizationRequest(text: String): Boolean {
+        val lower = text.trim().lowercase()
+        return optimizationKeywords.any { lower.contains(it) }
     }
 
     fun looksLikeCollabRequest(text: String): Boolean {

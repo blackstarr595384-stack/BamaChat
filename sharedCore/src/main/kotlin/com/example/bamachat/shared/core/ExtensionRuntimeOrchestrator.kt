@@ -20,6 +20,9 @@ object ExtensionRuntimeOrchestrator {
     const val EXT_WORKSPACE_ORCHESTRATOR = "ext-workspace-orchestrator"
     const val EXT_COLLAB_FACILITATOR = "ext-collab-facilitator"
     const val EXT_VOICE_BRIEFING = "ext-voice-briefing"
+    const val EXT_UI_SIMPLIFIER = "ext-ui-simplifier"
+    const val EXT_REPO_AUTOPILOT = "ext-repo-autopilot"
+    const val EXT_SYSTEMS_TUNER = "ext-systems-tuner"
     const val CAP_LIVE_WEB = "live_web"
 
     fun buildRuntimeContext(
@@ -93,6 +96,32 @@ object ExtensionRuntimeOrchestrator {
                     if (QuickActionInterpreter.looksLikeBriefingRequest(normalized)) {
                         appliedExtensions += extension.name
                         hints += "Voice Briefing: Gib zusätzlich eine kurze, gut vorlesbare 60-90s Zusammenfassung."
+                    }
+                }
+                EXT_UI_SIMPLIFIER -> {
+                    val shouldApply = quickAction == QuickActionSuggestion.PLAN ||
+                        QuickActionInterpreter.looksLikeOptimizationRequest(normalized) ||
+                        QuickActionInterpreter.looksLikePlanningRequest(normalized)
+                    if (shouldApply) {
+                        appliedExtensions += extension.name
+                        hints += "UI Simplifier: Suche nach doppelten Buttons, gleichen Aktionen und unnötigen Parallelwegen. Nutze bei Bedarf `project_inventory`, `ui_action_audit` und `config_audit`, bevor du Änderungen empfiehlst."
+                    }
+                }
+                EXT_REPO_AUTOPILOT -> {
+                    val shouldApply = quickAction == QuickActionSuggestion.PLAN ||
+                        QuickActionInterpreter.looksLikeOptimizationRequest(normalized) ||
+                        QuickActionInterpreter.looksLikeCodeRequest(normalized)
+                    if (shouldApply) {
+                        appliedExtensions += extension.name
+                        hints += "Repo Autopilot: Starte mit `project_inventory`, dann `ui_action_audit` und `config_audit`, bevor du einen schlanken Umsetzungsplan erstellst. Bevorzuge kleine, reversible Schritte und klare Rollout-Checks."
+                    }
+                }
+                EXT_SYSTEMS_TUNER -> {
+                    val shouldApply = quickAction == QuickActionSuggestion.PLAN ||
+                        QuickActionInterpreter.looksLikeOptimizationRequest(normalized)
+                    if (shouldApply) {
+                        appliedExtensions += extension.name
+                        hints += "Systems Tuner: Prüfe Einstellungen, Defaults, Feature-Flags und doppelte Pfade auf Konflikte. Nutze bei Bedarf `config_audit` und halte die Konfiguration zentral und konsistent."
                     }
                 }
             }

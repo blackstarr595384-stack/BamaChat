@@ -183,6 +183,57 @@ object ExtensionCatalog {
                 ExtensionCapability.CHAT_READ
             ),
             optionalCapabilities = setOf(ExtensionCapability.CHAT_WRITE)
+        ),
+        ExtensionManifest(
+            id = "ext-ui-simplifier",
+            name = "UI Simplifier",
+            description = "Findet doppelte Buttons, gleiche Aktionen und unnötige Parallelwege in der Oberfläche.",
+            version = "1.0.0",
+            author = "Bama Labs",
+            category = "UX",
+            requiredCapabilities = setOf(
+                ExtensionCapability.CHAT_READ,
+                ExtensionCapability.WORKSPACE_EDIT
+            ),
+            optionalCapabilities = setOf(
+                ExtensionCapability.AUTOMATION_RUN,
+                ExtensionCapability.FILE_IMPORT
+            ),
+            experimental = true
+        ),
+        ExtensionManifest(
+            id = "ext-repo-autopilot",
+            name = "Repo Autopilot",
+            description = "Inventarisiert das Repo, schlägt Audit-Schritte vor und priorisiert Self-Optimierung.",
+            version = "1.0.0",
+            author = "Bama Labs",
+            category = "Engineering",
+            requiredCapabilities = setOf(
+                ExtensionCapability.CHAT_READ,
+                ExtensionCapability.WORKSPACE_EDIT,
+                ExtensionCapability.AUTOMATION_RUN
+            ),
+            optionalCapabilities = setOf(
+                ExtensionCapability.FILE_IMPORT,
+                ExtensionCapability.LIVE_WEB
+            ),
+            experimental = true
+        ),
+        ExtensionManifest(
+            id = "ext-systems-tuner",
+            name = "Systems Tuner",
+            description = "Optimiert Settings, Defaults und Konfigurationen auf Konsistenz und Einfachheit.",
+            version = "1.0.0",
+            author = "Bama Labs",
+            category = "Operations",
+            requiredCapabilities = setOf(
+                ExtensionCapability.CHAT_READ,
+                ExtensionCapability.WORKSPACE_EDIT
+            ),
+            optionalCapabilities = setOf(
+                ExtensionCapability.AUTOMATION_RUN,
+                ExtensionCapability.LIVE_WEB
+            )
         )
     )
 

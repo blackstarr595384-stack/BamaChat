@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 
 private data class PersonaPack(
@@ -72,8 +73,8 @@ fun AgentHubScreen(
     var localTools by remember { mutableStateOf(tools) }
     var savedHint by remember { mutableStateOf(false) }
 
-    val presets = listOf("Generalist", "Recherche", "Entwickler", "Marketing", "Lager & Logistik")
-    val outputStyles = listOf("Klar und präzise", "Analytisch", "Schritt-für-Schritt", "Kreativ", "Kurz mit Bulletpoints")
+    val presets = AgentPresetLibrary.labels
+    val outputStyles = AgentPresetLibrary.outputStyles
     val personaPacks = listOf(
         PersonaPack(
             title = "Architect Pack",
@@ -101,6 +102,15 @@ fun AgentHubScreen(
             rules = "Jeder Plan enthält Owner, Risiko, Reihenfolge und Definition of Done.",
             style = "Schritt-für-Schritt",
             tools = "Roadmapping, Task-Breakdown, Risikoanalyse, Checklisten"
+        ),
+        PersonaPack(
+            title = "Autopilot Pack",
+            subtitle = "Selbst-Audit, Reduktion, Konfig-Tuning",
+            preset = "Optimierer",
+            goal = "Finde Redundanzen, schlage schlankere Oberflächen vor und optimiere Konfigurationen mit minimalem, robustem Aufwand.",
+            rules = "Zuerst Inventar und Audit, dann Konsolidierung. Doppelte Buttons, doppelte Settings und parallele Wege zuerst entfernen. Änderungen klein und reversibel halten.",
+            style = "Kurz mit Bulletpoints",
+            tools = "Projektinventar, UI-Audit, Konfig-Audit, Dedupe-Scan, Rollout-Check"
         )
     )
 

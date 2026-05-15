@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.theme.AppDesignPreset
+import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.util.LocalDataSanitizer
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PhotoAiCloudConfigResolver
@@ -287,33 +288,35 @@ class SettingsViewModel @Inject constructor(
     )
     val agentStudioEnabled: StateFlow<Boolean> = _agentStudioEnabled.asStateFlow()
 
+    private val defaultAgentPreset = AgentPresetLibrary.defaultPreset
+
     private val _agentPreset = MutableStateFlow(
-        prefs.getString("agent_preset", "Generalist") ?: "Generalist"
+        prefs.getString("agent_preset", defaultAgentPreset.label) ?: defaultAgentPreset.label
     )
     val agentPreset: StateFlow<String> = _agentPreset.asStateFlow()
 
     private val _agentName = MutableStateFlow(
-        prefs.getString("agent_name", "Bama Agent") ?: "Bama Agent"
+        prefs.getString("agent_name", defaultAgentPreset.name) ?: defaultAgentPreset.name
     )
     val agentName: StateFlow<String> = _agentName.asStateFlow()
 
     private val _agentGoal = MutableStateFlow(
-        prefs.getString("agent_goal", "") ?: ""
+        prefs.getString("agent_goal", defaultAgentPreset.goal) ?: defaultAgentPreset.goal
     )
     val agentGoal: StateFlow<String> = _agentGoal.asStateFlow()
 
     private val _agentRules = MutableStateFlow(
-        prefs.getString("agent_rules", "") ?: ""
+        prefs.getString("agent_rules", defaultAgentPreset.rules) ?: defaultAgentPreset.rules
     )
     val agentRules: StateFlow<String> = _agentRules.asStateFlow()
 
     private val _agentOutputStyle = MutableStateFlow(
-        prefs.getString("agent_output_style", "Klar und präzise") ?: "Klar und präzise"
+        prefs.getString("agent_output_style", defaultAgentPreset.outputStyle) ?: defaultAgentPreset.outputStyle
     )
     val agentOutputStyle: StateFlow<String> = _agentOutputStyle.asStateFlow()
 
     private val _agentTools = MutableStateFlow(
-        prefs.getString("agent_tools", "Recherche, Faktencheck, Strukturierung") ?: "Recherche, Faktencheck, Strukturierung"
+        prefs.getString("agent_tools", defaultAgentPreset.tools) ?: defaultAgentPreset.tools
     )
     val agentTools: StateFlow<String> = _agentTools.asStateFlow()
 
@@ -841,53 +844,21 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun applyAgentPreset(preset: String) {
-        setAgentPreset(preset)
-        when (preset) {
-            "Recherche" -> {
-                setAgentName("Research Intelligence Agent")
-                setAgentGoal("Liefere belastbare, aktuelle und entscheidungsrelevante Erkenntnisse aus mehreren Quellen mit klarer Einordnung.")
-                setAgentRules("Kein Raten. Fakten, Annahmen und Unsicherheiten strikt trennen. Bei zeitkritischen Themen Stand und Quelle explizit nennen.")
-                setAgentOutputStyle("Executive Summary zuerst, danach Evidenzblöcke mit Prioritäten, Risiken und offenen Fragen.")
-                setAgentTools("Live-Web-Recherche, Quellenabgleich, Gegenpositionen, Faktencheck, Kurzsynthese")
-            }
-            "Entwickler" -> {
-                setAgentName("Senior Engineering Agent")
-                setAgentGoal("Liefer robuste, wartbare und produktionsnahe Lösungen mit klaren Trade-offs.")
-                setAgentRules("Erst Problemrahmen, dann Lösung. Security, Fehlerfälle, Testbarkeit und Performance immer mitdenken. Keine Scheingenauigkeit bei Versionsfragen.")
-                setAgentOutputStyle("Technisch präzise, mit umsetzbaren Schritten, minimalem Overhead und klaren Code-Entscheidungen.")
-                setAgentTools("Code-Analyse, Refactoring, API-Debugging, Testdesign, Architekturbewertung")
-            }
-            "Marketing" -> {
-                setAgentName("Growth Strategy Agent")
-                setAgentGoal("Steigere qualifiziertes Wachstum mit messbaren Maßnahmen für Acquisition, Conversion und Retention.")
-                setAgentRules("Jede Maßnahme braucht Zielgruppe, Kanal, KPI, Aufwand und erwarteten Impact. Keine Buzzword-Listen ohne Priorisierung.")
-                setAgentOutputStyle("Klar priorisierte Growth-Playbooks mit Hypothese, Experimentdesign und Erfolgskriterium.")
-                setAgentTools("Positionierung, Messaging, Funnel-Analyse, Experimentplanung, KPI-Diagnostik")
-            }
-            "Lager & Logistik" -> {
-                setAgentName("Operations Excellence Agent")
-                setAgentGoal("Optimiere Lager- und Logistikprozesse sicher, stabil und kostenbewusst bei hoher Servicequalität.")
-                setAgentRules("Sicherheit und Compliance vor Tempo. Engpässe und Fehlerquellen benennen. Empfehlungen müssen operativ sofort umsetzbar sein.")
-                setAgentOutputStyle("Praxisnahe SOP-Struktur mit klaren Schritten, Kontrollpunkten und Eskalationspfaden.")
-                setAgentTools("Prozessmapping, SOP-Entwurf, Fehleranalyse, KPI-Tracking, Maßnahmenplanung")
-            }
-            else -> {
-                // Generalist / Standard
-                setAgentName("Bama Strategic Generalist")
-                setAgentGoal("Löse komplexe Nutzerfragen schnell, präzise und mit maximalem praktischen Nutzen.")
-                setAgentRules("Zuerst direkte Antwort, dann relevante Begründung. Unsicherheiten transparent markieren. Keine erfundenen Fakten oder Quellen.")
-                setAgentOutputStyle("Kompakt, strukturiert, entscheidungsorientiert mit konkreten nächsten Schritten.")
-                setAgentTools("Analyse, Strukturierung, Priorisierung, Optionenvergleich, Umsetzungsplanung")
-            }
-        }
+        val definition = AgentPresetLibrary.find(preset) ?: defaultAgentPreset
+        setAgentPreset(definition.label)
+        setAgentName(definition.name)
+        setAgentGoal(definition.goal)
+        setAgentRules(definition.rules)
+        setAgentOutputStyle(definition.outputStyle)
+        setAgentTools(definition.tools)
     }
 
     fun getAgentPromptPreview(): String {
-        val name = _agentName.value.ifBlank { "Bama Agent" }
-        val goal = _agentGoal.value.ifBlank { "Löse Nutzeranfragen zuverlässig." }
-        val rules = _agentRules.value.ifBlank { "Antworte korrekt und fokussiert." }
-        val style = _agentOutputStyle.value.ifBlank { "Klar und präzise" }
-        val tools = _agentTools.value.ifBlank { "Analyse, Problemlösung" }
+        val name = _agentName.value.ifBlank { defaultAgentPreset.name }
+        val goal = _agentGoal.value.ifBlank { defaultAgentPreset.goal }
+        val rules = _agentRules.value.ifBlank { defaultAgentPreset.rules }
+        val style = _agentOutputStyle.value.ifBlank { defaultAgentPreset.outputStyle }
+        val tools = _agentTools.value.ifBlank { defaultAgentPreset.tools }
         return """
 [Agent-Profil]
 Name: $name

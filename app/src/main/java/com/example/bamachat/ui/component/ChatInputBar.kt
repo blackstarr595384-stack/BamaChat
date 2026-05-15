@@ -146,6 +146,7 @@ fun ChatInputBar(
                     ChatViewModel.ExtensionQuickAction.PLAN
                 )
             }
+            var moreActionsExpanded by remember { mutableStateOf(false) }
             val canSend = !isLoading && (localInputValue.text.trim().isNotEmpty() || selectedImageUri != null)
             val sendButtonColor by animateColorAsState(
                 targetValue = if (canSend) themeColor else Color(0xFF35383D),
@@ -340,28 +341,33 @@ fun ChatInputBar(
                             .size(46.dp)
                             .semantics {
                                 role = Role.Button
-                                contentDescription = "Bild hochladen"
+                                contentDescription = "Mehr Aktionen"
                             }
                             .clip(CircleShape)
                             .background(surfaceColor.copy(alpha = 0.92f))
-                            .clickable { onUpload() },
+                            .clickable { moreActionsExpanded = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.AttachFile, "Hochladen", tint = Color.White.copy(alpha = 0.7f))
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .semantics {
-                                role = Role.Button
-                                contentDescription = "Bild generieren"
-                            }
-                            .clip(CircleShape)
-                            .background(surfaceColor.copy(alpha = 0.92f))
-                            .clickable { onImageGen() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.AutoFixHigh, "Bild generieren", tint = themeColor.copy(alpha = 0.85f))
+                        Icon(Icons.Default.MoreVert, "Mehr", tint = Color.White.copy(alpha = 0.7f))
+                        DropdownMenu(
+                            expanded = moreActionsExpanded,
+                            onDismissRequest = { moreActionsExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Bild hochladen", fontSize = 12.sp) },
+                                onClick = {
+                                    moreActionsExpanded = false
+                                    onUpload()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Bild generieren", fontSize = 12.sp) },
+                                onClick = {
+                                    moreActionsExpanded = false
+                                    onImageGen()
+                                }
+                            )
+                        }
                     }
                 }
             }

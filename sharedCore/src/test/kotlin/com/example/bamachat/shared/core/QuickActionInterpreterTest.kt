@@ -19,6 +19,12 @@ class QuickActionInterpreterTest {
     }
 
     @Test
+    fun suggestReturnsPlanForOptimizationRequest() {
+        val suggestion = QuickActionInterpreter.suggest("Bitte optimiere die App und entferne doppelte Buttons")
+        assertEquals(QuickActionSuggestion.PLAN, suggestion)
+    }
+
+    @Test
     fun researchDetectorFindsResearchTerms() {
         assertTrue(QuickActionInterpreter.isResearchCentricQuery("Was ist die aktuelle version?"))
     }

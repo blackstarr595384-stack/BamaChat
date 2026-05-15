@@ -242,6 +242,48 @@ object BuiltinTools {
         mapOf(
             "type" to "function",
             "function" to mapOf(
+                "name" to "project_inventory",
+                "description" to "Erstellt ein kompaktes Inventar des Projekts mit Dateitypen, Schwerpunktbereichen und großen Hotspots.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Optionaler Startpfad im Sandbox-Projekt", "default" to "."),
+                        "maxResults" to mapOf("type" to "number", "description" to "Maximale Anzahl der Hotspots", "default" to 10)
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "ui_action_audit",
+                "description" to "Analysiert Compose-UI-Dateien auf doppelte Buttons, Labels und andere visuelle Aktions-Hotspots.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Optionaler UI-Startpfad", "default" to "app/src/main/java/com/example/bamachat/ui"),
+                        "maxResults" to mapOf("type" to "number", "description" to "Maximale Anzahl der gemeldeten Treffer", "default" to 20)
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "config_audit",
+                "description" to "Sucht in Settings- und Preset-Dateien nach doppelten Konfigurationswerten, Defaults und mehrfach definierten UI-Listen.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Optionaler Startpfad", "default" to "app/src/main/java/com/example/bamachat"),
+                        "maxResults" to mapOf("type" to "number", "description" to "Maximale Anzahl der gemeldeten Treffer", "default" to 20)
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
                 "name" to "delete_file",
                 "description" to "Löscht eine Datei oder einen leeren Ordner im App-Sandbox.",
                 "parameters" to mapOf(
@@ -537,6 +579,175 @@ object BuiltinTools {
                             success = exitCode == 0,
                             content = listOf(McpContentItem(type = "text", text = text))
                         )
+                    }
+                    "project_inventory" -> {
+                        val path = args["path"]?.toString()?.trim().orEmpty().ifBlank { "." }
+                        val maxResults = (args["maxResults"] as? Number)?.toInt()?.coerceIn(1, 50) ?: 10
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val root = sandboxFile(basePath, path)
+                        if (!root.exists()) return@withContext error("Pfad nicht gefunden: $path")
+                        val files = if (root.isFile) listOf(root) else root.walkTopDown().filter { it.isFile }.toList()
+                        val allFilesCount = files.size
+                        val extensionCounts = files.groupingBy { it.extension.ifBlank { "[ohne]" } }
+                            .eachCount()
+                            .entries
+                            .sortedByDescending { it.value }
+                        val kotlinFiles = files.filter { it.extension == "kt" }
+                        val screenCount = kotlinFiles.count { it.name.endsWith("Screen.kt") }
+                        val viewModelCount = kotlinFiles.count { it.name.endsWith("ViewModel.kt") }
+                        val componentCount = kotlinFiles.count { it.name.endsWith("Component.kt") || it.name.endsWith("Components.kt") }
+                        val utilCount = kotlinFiles.count { it.path.contains("${File.separator}util${File.separator}") }
+                        val serviceCount = kotlinFiles.count { it.path.contains("${File.separator}service${File.separator}") }
+                        val topHotspots = files
+                            .sortedByDescending { it.length() }
+                            .take(maxResults)
+                        val output = buildString {
+                            appendLine("Projektinventar für '$path'")
+                            appendLine("- Dateien: $allFilesCount")
+                            appendLine("- Kotlin-Dateien: ${kotlinFiles.size}")
+                            appendLine("- Screens: $screenCount")
+                            appendLine("- ViewModels: $viewModelCount")
+                            appendLine("- Components: $componentCount")
+                            appendLine("- Utilities: $utilCount")
+                            appendLine("- Services: $serviceCount")
+                            if (extensionCounts.isNotEmpty()) {
+                                appendLine("- Dateitypen:")
+                                extensionCounts.take(8).forEach { (ext, count) ->
+                                    appendLine("  - .$ext: $count")
+                                }
+                            }
+                            if (topHotspots.isNotEmpty()) {
+                                appendLine("- Größte Hotspots:")
+                                topHotspots.forEachIndexed { index, file ->
+                                    appendLine("  ${index + 1}. ${file.relativeTo(File(basePath).normalize().absoluteFile).path} (${file.length()} B)")
+                                }
+                            }
+                        }.trim()
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = output)))
+                    }
+                    "ui_action_audit" -> {
+                        val path = args["path"]?.toString()?.trim().orEmpty().ifBlank { "app/src/main/java/com/example/bamachat/ui" }
+                        val maxResults = (args["maxResults"] as? Number)?.toInt()?.coerceIn(1, 50) ?: 20
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val root = sandboxFile(basePath, path)
+                        if (!root.exists()) return@withContext error("Pfad nicht gefunden: $path")
+                        val files = if (root.isFile) listOf(root) else root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+                        val base = File(basePath).normalize().absoluteFile
+                        val labelPatterns = listOf(
+                            Regex("Text\\(\"([^\"\\n]{2,120})\""),
+                            Regex("contentDescription\\s*=\\s*\"([^\"\\n]{2,120})\""),
+                            Regex("label\\s*=\\s*\\{\\s*Text\\(\"([^\"\\n]{2,120})\""),
+                            Regex("title\\s*=\\s*\\{\\s*Text\\(\"([^\"\\n]{2,120})\"")
+                        )
+                        val widgetPattern = Regex("\\b(Button|TextButton|OutlinedButton|IconButton|AssistChip|FilterChip|FilledIconButton|FilledTonalButton|DropdownMenuItem)\\b")
+                        val labelHits = linkedMapOf<String, MutableSet<String>>()
+                        val fileWidgetCounts = mutableListOf<Pair<String, Int>>()
+
+                        files.forEach { file ->
+                            val relative = file.relativeTo(base).path
+                            val text = runCatching { file.readText() }.getOrNull().orEmpty()
+                            if (text.isBlank()) return@forEach
+
+                            labelPatterns.forEach { pattern ->
+                                pattern.findAll(text).forEach { match ->
+                                    val label = match.groupValues.getOrNull(1)?.trim().orEmpty()
+                                    if (label.isNotBlank()) {
+                                        labelHits.getOrPut(label) { linkedSetOf() }.add(relative)
+                                    }
+                                }
+                            }
+
+                            val widgetCount = widgetPattern.findAll(text).count()
+                            fileWidgetCounts += relative to widgetCount
+                        }
+
+                        val duplicateLabels = labelHits.entries
+                            .filter { it.value.size > 1 }
+                            .sortedWith(compareByDescending<Map.Entry<String, MutableSet<String>>> { it.value.size }.thenBy { it.key.lowercase(Locale.ROOT) })
+                            .take(maxResults)
+                        val hotspotFiles = fileWidgetCounts
+                            .filter { it.second > 0 }
+                            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first.lowercase(Locale.ROOT) })
+                            .take(maxResults)
+                        val output = buildString {
+                            appendLine("UI-Audit für '$path'")
+                            appendLine("- Dateien gescannt: ${files.size}")
+                            appendLine("- Doppelte Labels:")
+                            if (duplicateLabels.isEmpty()) {
+                                appendLine("  - Keine offensichtlichen Label-Duplikate gefunden.")
+                            } else {
+                                duplicateLabels.forEach { (label, filesWithLabel) ->
+                                    appendLine("  - \"$label\" in ${filesWithLabel.size} Dateien")
+                                    filesWithLabel.take(5).forEach { file ->
+                                        appendLine("    - $file")
+                                    }
+                                }
+                            }
+                            appendLine("- Aktions-Hotspots:")
+                            if (hotspotFiles.isEmpty()) {
+                                appendLine("  - Keine Hotspots gefunden.")
+                            } else {
+                                hotspotFiles.forEach { (file, count) ->
+                                    appendLine("  - $file: $count sichtbare Aktions-Elemente")
+                                }
+                            }
+                        }.trim()
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = output)))
+                    }
+                    "config_audit" -> {
+                        val path = args["path"]?.toString()?.trim().orEmpty().ifBlank { "app/src/main/java/com/example/bamachat" }
+                        val maxResults = (args["maxResults"] as? Number)?.toInt()?.coerceIn(1, 50) ?: 20
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val root = sandboxFile(basePath, path)
+                        if (!root.exists()) return@withContext error("Pfad nicht gefunden: $path")
+                        val files = if (root.isFile) listOf(root) else root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+                        val trackedLabels = listOf(
+                            "Generalist",
+                            "Recherche",
+                            "Entwickler",
+                            "Marketing",
+                            "Lager & Logistik",
+                            "Optimierer",
+                            "Klar und präzise",
+                            "Analytisch",
+                            "Schritt-für-Schritt",
+                            "Kreativ",
+                            "Kurz mit Bulletpoints"
+                        )
+                        val hits = linkedMapOf<String, MutableSet<String>>()
+                        val base = File(basePath).normalize().absoluteFile
+                        files.forEach { file ->
+                            val relative = file.relativeTo(base).path
+                            val text = runCatching { file.readText() }.getOrNull().orEmpty()
+                            if (text.isBlank()) return@forEach
+                            trackedLabels.forEach { label ->
+                                if (text.contains(label)) {
+                                    hits.getOrPut(label) { linkedSetOf() }.add(relative)
+                                }
+                            }
+                        }
+                        val duplicateConfigs = hits.entries
+                            .filter { it.value.size > 1 }
+                            .sortedWith(compareByDescending<Map.Entry<String, MutableSet<String>>> { it.value.size }.thenBy { it.key.lowercase(Locale.ROOT) })
+                            .take(maxResults)
+                        val output = buildString {
+                            appendLine("Konfigurations-Audit für '$path'")
+                            appendLine("- Dateien gescannt: ${files.size}")
+                            appendLine("- Mehrfach verwendete Preset-/Style-Werte:")
+                            if (duplicateConfigs.isEmpty()) {
+                                appendLine("  - Keine mehrfach genutzten Werte gefunden.")
+                            } else {
+                                duplicateConfigs.forEach { (label, filesWithLabel) ->
+                                    appendLine("  - \"$label\" in ${filesWithLabel.size} Dateien")
+                                    filesWithLabel.take(5).forEach { file ->
+                                        appendLine("    - $file")
+                                    }
+                                }
+                            }
+                            appendLine("- Hinweis:")
+                            appendLine("  - Wenn dieselben Listen in mehreren Screens auftauchen, lohnt sich ein gemeinsames Catalog-/Library-Modell.")
+                        }.trim()
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = output)))
                     }
                     "delete_file" -> {
                         val path = args["path"]?.toString() ?: return@withContext error("path fehlt")

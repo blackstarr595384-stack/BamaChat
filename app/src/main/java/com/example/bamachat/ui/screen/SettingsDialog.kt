@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.MonetizationConfig
@@ -148,8 +149,8 @@ fun SettingsDialog(
         "tr" to "Türkçe",
         "ar" to "العربية"
     )
-    val agentPresets = listOf("Generalist", "Recherche", "Entwickler", "Marketing", "Lager & Logistik")
-    val outputStyles = listOf("Klar und präzise", "Analytisch", "Schritt-für-Schritt", "Kreativ", "Kurz mit Bulletpoints")
+    val agentPresets = AgentPresetLibrary.labels
+    val outputStyles = AgentPresetLibrary.outputStyles
     val designPresets = AppDesignPreset.labels
     val agentPreview = remember(
         agentStudioEnabled,
