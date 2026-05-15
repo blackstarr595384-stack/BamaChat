@@ -70,6 +70,7 @@ import com.example.bamachat.ui.component.ChatDrawer
 import com.example.bamachat.ui.component.ChatInputBar
 import com.example.bamachat.ui.component.EmptyChatState
 import com.example.bamachat.ui.component.PremiumPaywallDialog
+import com.example.bamachat.ui.component.TypingIndicator
 import com.example.bamachat.ui.component.compactLabel
 import com.example.bamachat.ui.component.designTokensFor
 import com.example.bamachat.ui.component.sanitizeForSpeech
@@ -597,6 +598,7 @@ fun ChatScreen(
             selectedPersona = selectedPersona,
             aiProvider = aiProvider,
             onPersonaClick = { showPersonaDialog = true },
+            onSearchClick = onSearchClick,
             onMenuClick = { scope.launch { drawerState.open() } },
             onSettingsClick = { showSettingsDialog = true },
             onMiniAppsClick = onOpenMiniApps,
@@ -701,6 +703,7 @@ private fun ChatContent(
     selectedPersona: ChatViewModel.Persona,
     aiProvider: String,
     onPersonaClick: () -> Unit,
+    onSearchClick: () -> Unit,
     onMenuClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onMiniAppsClick: () -> Unit,
@@ -838,15 +841,7 @@ private fun ChatContent(
                                     IconButton(onClick = onSearchClick) {
                                         Icon(Icons.Default.Search, "Suche", tint = Color.White)
                                     }
-                                    IconButton(onClick = {
-                                        val markdown = viewModel.formatConversationAsMarkdown()
-                                        val sendIntent = Intent().apply {
-                                            action = Intent.ACTION_SEND
-                                            putExtra(Intent.EXTRA_TEXT, markdown)
-                                            type = "text/plain"
-                                        }
-                                        startActivity(Intent.createChooser(sendIntent, "Chat exportieren"))
-                                    }) {
+                                    IconButton(onClick = onShareClick) {
                                         Icon(Icons.Default.Share, "Teilen", tint = Color.White)
                                     }
                                     Box {

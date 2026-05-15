@@ -50,7 +50,9 @@ class McpServerManager(private val context: Context) {
     fun stopAll() {
         clients.values.forEach { it.stop() }
         clients.clear()
-        refreshTools()
+        kotlinx.coroutines.runBlocking {
+            refreshTools()
+        }
     }
 
     suspend fun refreshTools() {

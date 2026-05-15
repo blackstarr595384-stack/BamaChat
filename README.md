@@ -8,6 +8,7 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
 - Shared Core: JVM-Modul `:sharedCore` fuer wiederverwendbare Business-Logik (Drafts, Workspace-Text-Tools, Quick-Action-Heuristiken, Send-Dedup, Workspace-Naming)
 - Sprache in der App: primär Deutsch
 - Build-Status: `stabilityCheck` erfolgreich (Assemble + Unit Tests + Lint)
+- Letzte Validierung (15.05.2026): `:app:assembleDebug` erfolgreich nach Compile-Fixes in UI/ViewModel; MCP-Agent-Loop/Workflow-Mechanik unverändert
 - Tablet-Layout: adaptive UI (u. a. Mini-Apps V2)
 - iPhone: erfordert separaten iOS-Client (nicht im Android-Projekt enthalten)
 

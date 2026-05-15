@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,8 +36,8 @@ fun ChatSearchScreen(
     onBack: () -> Unit,
     onOpenConversation: (conversationId: String) -> Unit
 ) {
-    val context = LocalContext.current as? Application ?: return
-    val repo = remember { ChatRepository(ChatDatabase.getDatabase(context).chatDao()) }
+    val app = LocalContext.current.applicationContext as? Application ?: return
+    val repo = remember { ChatRepository(ChatDatabase.getDatabase(app).chatDao()) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<MessageFtsResult>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }

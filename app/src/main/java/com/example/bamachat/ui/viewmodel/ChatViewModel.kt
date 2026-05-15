@@ -2,6 +2,7 @@ package com.example.bamachat.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -187,6 +188,10 @@ class ChatViewModel @Inject constructor(
         CUSTOM("Eigene Persona", "✨", "")
     }
 
+    private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == KEY_EXTENSION_STATES_JSON) refreshActiveExtensions()
+    }
+
     init {
         notificationService.createChannel()
         monetizationViewModel.refreshMonetizationState()
@@ -207,10 +212,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == KEY_EXTENSION_STATES_JSON) refreshActiveExtensions()
-    }
-
     // ===== Conversations =====
     fun newConversation() {
         viewModelScope.launch {
@@ -223,7 +224,9 @@ class ChatViewModel @Inject constructor(
 
     fun switchConversation(id: String) {
         _currentConversationId.value = id
-        conversationService.switchConversation(id)
+        viewModelScope.launch {
+            conversationService.switchConversation(id)
+        }
         _messages.value = emptyList()
         _visibleMessageLimit.value = currentInitialVisibleMessageLimit()
         _hasOlderMessages.value = false
@@ -487,12 +490,12 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
 """.trim()
         val fullSystemPrompt = "$systemPrompt\n\n$mcpToolHint"
 
-        var messages = chatEngine.buildOpenRouterHistory(
+        val messages = chatEngine.buildOpenRouterHistory(
             _messages.value, latestUserText = userText,
             liveWebContext = webContext?.promptContext,
             runtimeContext = null,
             historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
-        )
+        ).toMutableList()
 
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
@@ -506,7 +509,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         while (iteration < maxIter) {
             iteration++
             val request = OpenRouterChatRequest(
-                model = selectedModel,
+                model = selectedModel.value,
                 messages = messages,
                 stream = false,
                 tools = toolDefs,

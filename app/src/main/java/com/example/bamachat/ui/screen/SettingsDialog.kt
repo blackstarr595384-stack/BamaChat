@@ -33,8 +33,10 @@ import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PlayBillingManager
+import com.example.bamachat.util.McpConnectionStatus
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Suppress("UNUSED_VARIABLE", "UNUSED_PARAMETER")
@@ -1138,7 +1140,7 @@ private fun McpServersSection(
             }
             servers.forEach { config ->
                 val connState = connStates[config.id]
-                val isConnected = connState?.connected == true
+                val isConnected = connState == McpConnectionStatus.CONNECTED
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
