@@ -40,6 +40,15 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
+data class ToolCallProgress(
+    val toolName: String,
+    val arguments: String,
+    val status: ToolCallStatus = ToolCallStatus.RUNNING,
+    val result: String? = null
+)
+
+enum class ToolCallStatus { RUNNING, DONE, ERROR }
+
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     application: Application,
@@ -139,6 +148,9 @@ class ChatViewModel @Inject constructor(
 
     private val _messageFeedback = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val messageFeedback: StateFlow<Map<String, Boolean>> = _messageFeedback
+
+    private val _activeToolCalls = MutableStateFlow<List<ToolCallProgress>>(emptyList())
+    val activeToolCalls: StateFlow<List<ToolCallProgress>> = _activeToolCalls
 
     private val _isBiometricAuthenticated = MutableStateFlow(false)
     val isBiometricAuthenticated: StateFlow<Boolean> = _isBiometricAuthenticated
@@ -531,7 +543,12 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             val toolCalls = replyMsg.toolCalls
             if (toolCalls.isNullOrEmpty()) {
                 finalContent = replyMsg.content ?: ""
+                _activeToolCalls.value = emptyList()
                 break
+            }
+
+            _activeToolCalls.value = toolCalls.map { tc ->
+                ToolCallProgress(toolName = tc.function.name, arguments = tc.function.arguments)
             }
 
             for (toolCall in toolCalls) {
@@ -555,6 +572,13 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 }
                 val resultText = result.content.joinToString("\n") { it.text ?: it.data ?: "" }
 
+                _activeToolCalls.value = _activeToolCalls.value.map {
+                    if (it.toolName == toolCall.function.name) it.copy(
+                        status = if (result.success) ToolCallStatus.DONE else ToolCallStatus.ERROR,
+                        result = resultText.take(200)
+                    ) else it
+                }
+
                 messages.add(OpenRouterMessage(
                     role = "tool",
                     toolCallId = toolCall.id,
@@ -568,6 +592,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         val trimmedContent = finalContent.trim()
         repo.saveMessage(convId, assistantMsg.copy(text = trimmedContent, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso), touchConversation = true)
         notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
+        _activeToolCalls.value = emptyList()
         _isStreaming.value = false
     }
 

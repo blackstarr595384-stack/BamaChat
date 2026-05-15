@@ -62,6 +62,10 @@ class McpServerManager(private val context: Context) {
     }
 
     suspend fun callTool(name: String, arguments: Map<String, Any> = emptyMap()): McpToolResult {
+        val builtinNames = BuiltinTools.definitions.map { (it["function"] as? Map<*, *>)?.get("name")?.toString() }.filterNotNull()
+        if (name in builtinNames) {
+            return BuiltinTools.execute(name, arguments)
+        }
         for (client in clients.values) {
             val tool = client.tools.value.find { it.name == name } ?: continue
             return client.callTool(name, arguments)
@@ -74,7 +78,7 @@ class McpServerManager(private val context: Context) {
     }
 
     fun getToolDefinitionsOpenAI(): List<Map<String, Any>> {
-        return _allTools.value.map { tool ->
+        return BuiltinTools.definitions + _allTools.value.map { tool ->
             val properties = mutableMapOf<String, Any>()
             val required = mutableListOf<String>()
 
