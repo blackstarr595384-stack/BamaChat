@@ -18,7 +18,20 @@ Der Agent-Mode erlaubt BamaChat, Tools **automatisch** auszuführen – ohne das
 | `read_file` | Datei aus App-Sandbox lesen | "Lies meine Notizen" |
 | `write_file` | Neue Datei erstellen | "Schreibe eine Einkaufsliste" |
 | `edit_file` | Text in Datei ersetzen | "Ändere 'Milch' zu 'Hafermilch'" |
+| `list_files` | Ordnerinhalt anzeigen | "Was ist im Ordner notes?" |
+| `delete_file` | Datei/Ordner löschen | "Lösche die Datei test.txt" |
 | `run_terminal` | Shell-Befehl ausführen | "Was ist im aktuellen Ordner?" |
+
+## Continuous Voice Mode (NEU)
+
+Der **Sprachmodus** in den Einstellungen macht den Chat komplett **hands-free**:
+
+1. **Aktivieren**: Einstellungen → Sprache & Stimme → **Sprachmodus** einschalten
+2. **Sprechen**: Einmal Mikrofon antippen – dann läuft alles automatisch
+3. **Loop**: Du sprichst → Nachricht wird gesendet → KI antwortet → Mikro öffnet sich wieder → Du sprichst erneut
+4. **Stoppen**: Einfach Mikrofon antippen oder Sprachmodus ausschalten
+
+> **Tipp:** Kombiniere mit Auto-TTS (lässt sich Antworten vorlesen) für komplett freihändige Nutzung.
 
 ## Datei-Tools (read_file / write_file / edit_file)
 

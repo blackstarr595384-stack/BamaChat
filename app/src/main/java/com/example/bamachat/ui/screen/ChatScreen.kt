@@ -214,7 +214,7 @@ fun ChatScreen(
     val elevenLabsVoiceId by settingsViewModel.elevenLabsVoiceId.collectAsStateWithLifecycle()
     val elevenLabsModelId by settingsViewModel.elevenLabsModelId.collectAsStateWithLifecycle()
     val voicePushToTalkEnabled by settingsViewModel.voicePushToTalkEnabled.collectAsStateWithLifecycle()
-    @Suppress("UNUSED_VARIABLE") val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
+    val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val workspaceChatFilterEnabled by settingsViewModel.workspaceChatFilterEnabled.collectAsStateWithLifecycle()
     val autoSendVoice by settingsViewModel.autoSendVoice.collectAsStateWithLifecycle()
@@ -431,6 +431,7 @@ fun ChatScreen(
                             } else {
                                 viewModel.sendMessage(recognizedText)
                             }
+                            hasHadVoiceExchange = true
                         }
                     }
                 }
@@ -453,6 +454,15 @@ fun ChatScreen(
     }
     // Sync state back to Compose
     LaunchedEffect(isListeningState.value) { isListening = isListeningState.value }
+
+    // Continuous voice mode: re-trigger listening when AI finishes streaming
+    var hasHadVoiceExchange by remember { mutableStateOf(false) }
+    LaunchedEffect(isStreaming, voiceChatMode) {
+        if (voiceChatMode && !isStreaming && hasHadVoiceExchange) {
+            val audioOk = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            if (audioOk) speechRecognizer.startListening(recognizerIntent)
+        }
+    }
 
     // Theme colors
     val baseColor = Color(primaryColorInt)

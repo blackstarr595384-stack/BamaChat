@@ -121,6 +121,35 @@ object BuiltinTools {
                     "required" to listOf("command")
                 )
             )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "list_files",
+                "description" to "Listet Dateien und Ordner in einem Verzeichnis im App-Sandbox auf.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Relativer Pfad zum Ordner (z.B. '.' für Wurzel, 'notes' für Unterordner)"),
+                        "recursive" to mapOf("type" to "boolean", "description" to "Optional: Unterordner rekursiv durchsuchen", "default" to false)
+                    ),
+                    "required" to listOf("path")
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "delete_file",
+                "description" to "Löscht eine Datei oder einen leeren Ordner im App-Sandbox.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Relativer Pfad zur Datei oder zum Ordner")
+                    ),
+                    "required" to listOf("path")
+                )
+            )
         )
     )
 
@@ -206,6 +235,35 @@ object BuiltinTools {
                             success = exitCode == 0,
                             content = listOf(McpContentItem(type = "text", text = "Exit $exitCode:\n$truncated"))
                         )
+                    }
+                    "list_files" -> {
+                        val path = args["path"]?.toString() ?: return@withContext error("path fehlt")
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val dir = sandboxFile(basePath, path)
+                        if (!dir.exists()) return@withContext error("Ordner nicht gefunden: $path")
+                        if (!dir.isDirectory) return@withContext error("Kein Ordner: $path")
+                        val recursive = args["recursive"] == true
+                        val files = dir.listFiles()?.toList() ?: emptyList()
+                        val sb = StringBuilder()
+                        fun listRec(f: File, indent: String) {
+                            val prefix = if (f.isDirectory) "📁 " else "📄 "
+                            sb.appendLine("$indent$prefix${f.name}${if (f.isDirectory) "/" else "  (${f.length()} B)"}")
+                            if (recursive && f.isDirectory) {
+                                f.listFiles()?.sorted()?.forEach { listRec(it, "$indent  ") }
+                            }
+                        }
+                        files.sortedBy { it.name }.forEach { listRec(it, "") }
+                        if (sb.isEmpty()) sb.append("(leer)")
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = sb.toString().trim())))
+                    }
+                    "delete_file" -> {
+                        val path = args["path"]?.toString() ?: return@withContext error("path fehlt")
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val file = sandboxFile(basePath, path)
+                        if (!file.exists()) return@withContext error("Datei nicht gefunden: $path")
+                        val deleted = if (file.isDirectory) file.deleteRecursively() else file.delete()
+                        if (!deleted) return@withContext error("Konnte nicht löschen: $path")
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = "Gelöscht: $path")))
                     }
                     else -> error("Unbekanntes Builtin-Tool: $name")
                 }
