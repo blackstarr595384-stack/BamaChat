@@ -17,6 +17,7 @@ import com.example.bamachat.data.OpenRouterVisionContentPart
 import com.example.bamachat.data.OpenRouterVisionMessage
 import com.example.bamachat.ui.viewmodel.ApiManager
 import com.example.bamachat.util.AudioTranscriptionManager
+import com.example.bamachat.util.MultimodalAsset
 import com.example.bamachat.util.MultimodalProcessor
 import com.example.bamachat.util.VideoKeyframeExtractor
 import kotlinx.coroutines.Dispatchers
