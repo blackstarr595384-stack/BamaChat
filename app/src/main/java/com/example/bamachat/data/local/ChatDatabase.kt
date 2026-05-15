@@ -41,19 +41,20 @@ abstract class ChatDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): ChatDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    ChatDatabase::class.java,
-                    "chat_database"
-                )
-                    .addMigrations(MIGRATION_7_8)
-                    .fallbackToDestructiveMigration()
-                    .build()
-                INSTANCE = instance
+                var instance = INSTANCE
+                if (instance == null) {
+                    instance = Room.databaseBuilder(
+                        context.applicationContext,
+                        ChatDatabase::class.java,
+                        "chat_database"
+                    )
+                        .addMigrations(MIGRATION_7_8)
+                        .fallbackToDestructiveMigration(true)
+                        .build()
+                    INSTANCE = instance
+                }
+                instance
             }
-        }
-    }
-}
         }
     }
 }
