@@ -1,6 +1,5 @@
 package com.example.bamachat.ui.screen
 
-import android.app.Application
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -70,8 +69,8 @@ private data class GraphNode(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KnowledgeGraphScreen(onBack: () -> Unit) {
-    val context = LocalContext.current as? Application ?: return
-    val repo = remember { ChatRepository(ChatDatabase.getDatabase(context).chatDao()) }
+    val appContext = LocalContext.current.applicationContext
+    val repo = remember(appContext) { ChatRepository(ChatDatabase.getDatabase(appContext).chatDao()) }
 
     val nodes = remember { mutableStateListOf<GraphNode>() }
     val edges = remember { mutableStateListOf<Pair<String, String>>() }
