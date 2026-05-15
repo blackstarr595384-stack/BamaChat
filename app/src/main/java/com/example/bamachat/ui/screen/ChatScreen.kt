@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bamachat.data.model.ChatMessage
@@ -87,6 +88,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import java.io.File
 
 private data class PersonaMood(
     val gradientTop: Color,
@@ -175,6 +177,18 @@ private fun moodForPersona(
     }
 }
 
+private fun createChatCameraCaptureUri(context: android.content.Context): Pair<File, Uri>? {
+    return runCatching {
+        val imageFile = File.createTempFile("bamachat_chat_", ".jpg", context.cacheDir)
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            imageFile
+        )
+        imageFile to uri
+    }.getOrNull()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -242,6 +256,38 @@ fun ChatScreen(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         selectedImageUri = uri
+    }
+    var pendingCameraCaptureFile by remember { mutableStateOf<File?>(null) }
+    var pendingCameraCaptureUri by remember { mutableStateOf<Uri?>(null) }
+    val takePictureLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.TakePicture()
+    ) { success ->
+        val capturedUri = pendingCameraCaptureUri
+        val capturedFile = pendingCameraCaptureFile
+        pendingCameraCaptureUri = null
+        pendingCameraCaptureFile = null
+        if (success && capturedUri != null) {
+            selectedImageUri = capturedUri
+            Toast.makeText(context, "Foto aufgenommen.", Toast.LENGTH_SHORT).show()
+        } else {
+            capturedFile?.delete()
+        }
+    }
+    val cameraPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val capture = createChatCameraCaptureUri(context)
+            if (capture != null) {
+                pendingCameraCaptureFile = capture.first
+                pendingCameraCaptureUri = capture.second
+                takePictureLauncher.launch(capture.second)
+            } else {
+                Toast.makeText(context, "Kamera konnte nicht vorbereitet werden.", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Kamera-Berechtigung wurde abgelehnt.", Toast.LENGTH_SHORT).show()
+        }
     }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showPersonaDialog by remember { mutableStateOf(false) }
@@ -594,6 +640,24 @@ fun ChatScreen(
                     )
                 )
             },
+            onTakePhoto = {
+                if (ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    val capture = createChatCameraCaptureUri(context)
+                    if (capture != null) {
+                        pendingCameraCaptureFile = capture.first
+                        pendingCameraCaptureUri = capture.second
+                        takePictureLauncher.launch(capture.second)
+                    } else {
+                        Toast.makeText(context, "Kamera konnte nicht vorbereitet werden.", Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
+            },
             selectedImageUri = selectedImageUri,
             onClearImage = { selectedImageUri = null },
             isListening = isListening,
@@ -741,6 +805,7 @@ private fun ChatContent(
     onSend: (String) -> Boolean,
     onImageGen: () -> Unit,
     onUpload: () -> Unit,
+    onTakePhoto: () -> Unit,
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
     isListening: Boolean,
@@ -1164,6 +1229,7 @@ private fun ChatContent(
                     onSend = onSend,
                     onImageGen = onImageGen,
                     onUpload = onUpload,
+                    onTakePhoto = onTakePhoto,
                     selectedImageUri = selectedImageUri,
                     onClearImage = onClearImage,
                     isListening = isListening,

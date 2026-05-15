@@ -10,17 +10,34 @@ Der Agent-Mode erlaubt BamaChat, Tools **automatisch** auszuführen – ohne das
 
 ## Verfügbare Builtin-Tools (keine Installation nötig)
 
+Diese Tools sind der Autonomie-Kern der App. Sie machen BamaChat eher zu einem kleinen Arbeitsagenten als zu einem reinen Chatfenster.
+
 | Tool | Zweck | Beispiel-Prompt |
 |------|-------|----------------|
 | `web_fetch` | Webseiten-Inhalt abrufen | "Hol den Inhalt von https://example.com" |
-| `web_search` | DuckDuckGo-Suche | "Suche nach aktuellen KI-News" |
+| `web_search` | Websuche | "Suche nach aktuellen KI-News" |
 | `now` | Aktuelle Uhrzeit/Datum | "Wie spät ist es?" |
-| `read_file` | Datei aus App-Sandbox lesen | "Lies meine Notizen" |
+| `read_file` | Datei aus der App-Sandbox lesen | "Lies meine Notizen" |
 | `write_file` | Neue Datei erstellen | "Schreibe eine Einkaufsliste" |
 | `edit_file` | Text in Datei ersetzen | "Ändere 'Milch' zu 'Hafermilch'" |
 | `list_files` | Ordnerinhalt anzeigen | "Was ist im Ordner notes?" |
-| `delete_file` | Datei/Ordner löschen | "Lösche die Datei test.txt" |
+| `search_files` | Dateien nach Namen oder Inhalt durchsuchen | "Finde alle Dateien mit 'release' im Inhalt" |
+| `copy_file` | Datei oder Ordner kopieren | "Kopiere notes/todo.txt nach archive/todo.txt" |
+| `move_file` | Datei oder Ordner verschieben/umbenennen | "Verschiebe draft.txt nach done/draft.txt" |
+| `delete_file` | Datei oder Ordner löschen | "Lösche die Datei test.txt" |
 | `run_terminal` | Shell-Befehl ausführen | "Was ist im aktuellen Ordner?" |
+| `git_status` | Git-Status prüfen | "Zeig mir den aktuellen Git-Status" |
+| `git_diff` | Git-Diff anzeigen | "Welche Änderungen sind gerade offen?" |
+| `git_log` | Letzte Commits anzeigen | "Welche letzten Commits gab es?" |
+| `git_show` | Commit-Details anzeigen | "Zeig mir den letzten Commit im Detail" |
+| `project_inventory` | Projekt-Inventar und Hotspots erstellen | "Was ist das Wichtigste in diesem Repo?" |
+| `ui_action_audit` | UI auf doppelte Buttons/Hotspots prüfen | "Findet die App doppelte Aktionen in der Oberfläche?" |
+| `config_audit` | Konfigurationen auf Inkonsistenzen prüfen | "Prüfe, ob die Settings doppelt oder widersprüchlich sind" |
+
+### Warum das wichtig ist
+- Mit `search_files`, `git_*` und den Audit-Tools kann die App sich selbst analysieren und vereinfachen.
+- Genau diese Tools helfen dir später beim Release, die App als "autonom", "selbstprüfend" und "selbstoptimierend" zu erklären.
+- Für eine opencode/openclaw-ähnliche Story sind diese internen Werkzeuge wichtiger als noch mehr lose UI-Buttons.
 
 ## Continuous Voice Mode (NEU)
 

@@ -248,6 +248,7 @@ Verhalten:
     - Photo-Aktionsschicht: `PhotoAiActionExecutor.kt` kapselt lokale Bildaktionen, Permission-Gating, Risiko-Confirmation und Cloud-Aufrufe für `BackgroundRemove`/`UpscaleHd`
     - Cloud-Client: `PhotoAiCloudClient.kt` (Endpoint-Auflösung, Auth-Header, Base64 I/O, Fehler-Mapping)
     - Backend: Firebase Function `photoEdit` in `functions/index.js` (Cloud-Pipeline für Background Remove + Upscale)
+    - Chat-Komposer: Bild hochladen, Kamera-Foto aufnehmen und Bildgenerierung direkt aus dem Mehr-Menü
   - Bestehende Apps weiterhin aktiv: `AutomationBoard` + `KnowledgeVault`
   - Persona-Marketplace in `AgentHubScreen.kt`
 
@@ -263,6 +264,12 @@ Verhalten:
 - `persona_training_examples`
 
 Hinweis: DB-Version ist auf den aktuellen Stand angehoben, Migration aktuell destruktiv (`fallbackToDestructiveMigration`).
+
+## Release-/Feature-Kommunikation
+- Wenn du ein neues User-Feature einbaust, aktualisiere immer direkt `README.md` und diesen Developer Guide.
+- Für Release-Notizen nutze pro Feature immer dieselbe Kurzform: "Was ist neu?", "Warum ist es hilfreich?", "Wie nutze ich es?".
+- Die wichtigste Produktstory ist aktuell: autonomer Chat-Arbeitsraum, Foto/Kamera im Chat, MCP-/Builtin-Tools, Extensions und weniger unnötige Buttons.
+- Neue autonome Bausteine, Tool-Packs oder Skills gehören zusätzlich in `BUILTIN_TOOLS_GUIDE.md`, damit die Release-Erklärung nicht hinter dem Code zurückbleibt.
 
 ## 9. Entwickler-Workflow (empfohlen)
 1. Feature-Branch lokal.

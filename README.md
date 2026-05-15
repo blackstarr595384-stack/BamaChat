@@ -27,7 +27,7 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - optionale Cloud-Voice (ElevenLabs)
   - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
-  - Bild hochladen und analysieren
+  - Bild hochladen, Foto direkt aus dem Chat aufnehmen und analysieren
   - Bildgenerierung
 - Auth & Profil:
   - Registrierung/Anmeldung
@@ -94,6 +94,13 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - Automatische Tool-Registry und Konvertierung in OpenAI-Function-Calling-Format
   - Agent Loop: KI kann MCP-Tools autonom aufrufen und Ergebnisse verarbeiten
   - Default-Server: Dateisystem, Web-Suche, Knowledge Graph, Code-Ausführung
+
+## Release-Story / So kannst du die App erklären
+- BamaChat ist nicht nur ein Chatfenster, sondern ein autonomer Arbeitsraum fuer Sprache, Bild, Dateien, Web und Agenten-Workflows.
+- Im Chat kannst du direkt Text schreiben, Bilder hochladen oder per Kamera aufnehmen und die KI mit echtem Kontext fragen.
+- MCP, Builtin-Tools, Extensions und Workflows machen die App selbststaendiger: sie kann Kontext prüfen, Dateien analysieren, Git-Status lesen und Aufgaben strukturieren.
+- Mini-Apps und Agent Hub sind die Bedienoberfläche fuer Produktivität: weniger verstreute Buttons, mehr wiederverwendbare Bausteine und Presets.
+- Ziel der Roadmap: weniger manuelle Klicks, mehr Selbstorganisation, mehr Autonomie und klarere Feature-Erklärungen beim Release.
 - Workflow-Automation:
   - Mehrstufige Tool-Pipelines (z. B. Web-Recherche+Fetch, Code-Lint+Review)
   - Workflows werden als `workflow_<id>`-Tools im Agent-Kontext registriert

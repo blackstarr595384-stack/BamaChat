@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -51,7 +52,7 @@ val defaultPromptTemplates = listOf(
     PromptTemplate("grammar", "Grammatik", Icons.Default.Spellcheck, "Grammatik korrigieren", "Korrigiere die Grammatik und Rechtschreibung in:\n\n"),
     PromptTemplate("code_review", "Code Review", Icons.Default.Code, "Code überprüfen", "Führe einen Code Review durch. Analysiere:\n- Sicherheitslücken\n- Performance\n- Best Practices\n\nCode:\n"),
     PromptTemplate("brainstorm", "Brainstorming", Icons.Default.Cloud, "Ideen sammeln", "Brainstorme zum Thema:\n\n"),
-    PromptTemplate("outline", "Gliederung", Icons.Default.ListAlt, "Gliederung erstellen", "Erstelle eine detaillierte Gliederung für:\n\n"),
+    PromptTemplate("outline", "Gliederung", Icons.AutoMirrored.Filled.ListAlt, "Gliederung erstellen", "Erstelle eine detaillierte Gliederung für:\n\n"),
     PromptTemplate("email", "E-Mail", Icons.Default.Email, "E-Mail schreiben", "Schreibe eine professionelle E-Mail zum Thema:\n\n"),
 )
 
@@ -63,6 +64,7 @@ fun ChatInputBar(
     onSend: (String) -> Boolean,
     onImageGen: () -> Unit,
     onUpload: () -> Unit,
+    onTakePhoto: () -> Unit,
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
     isListening: Boolean,
@@ -402,7 +404,7 @@ fun ChatInputBar(
                             .clickable { moreActionsExpanded = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.MoreVert, "Mehr", tint = Color.White.copy(alpha = 0.7f))
+                        Icon(Icons.Default.Add, "Mehr", tint = Color.White.copy(alpha = 0.7f))
                         DropdownMenu(
                             expanded = moreActionsExpanded,
                             onDismissRequest = { moreActionsExpanded = false }
@@ -412,6 +414,13 @@ fun ChatInputBar(
                                 onClick = {
                                     moreActionsExpanded = false
                                     onUpload()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Foto aufnehmen", fontSize = 12.sp) },
+                                onClick = {
+                                    moreActionsExpanded = false
+                                    onTakePhoto()
                                 }
                             )
                             DropdownMenuItem(
