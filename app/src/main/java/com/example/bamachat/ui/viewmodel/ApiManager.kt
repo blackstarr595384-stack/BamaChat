@@ -23,6 +23,7 @@ import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.EmotionAnalyzer
 import com.example.bamachat.util.EmotionSignal
 import com.example.bamachat.util.MonetizationConfig
+import com.example.bamachat.util.SecureSettingsStore
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -39,8 +40,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
+import java.io.IOException
 import java.io.ByteArrayOutputStream
 import java.util.*
+import java.util.concurrent.CancellationException
 import kotlin.math.pow
 
 /**
@@ -73,7 +76,8 @@ class ApiManager(
         val sources: List<WebSource> = emptyList(),
         val provider: String = "unknown",
         val fetchedAtIso: String = "",
-        val error: String = ""
+        val error: String = "",
+        val retryable: Boolean = true
     )
 
     data class ProviderConfig(
@@ -86,12 +90,18 @@ class ApiManager(
         val success: Boolean,
         val content: String = "",
         val error: String = "",
-        val usedProvider: ApiClient.Provider? = null
+        val usedProvider: ApiClient.Provider? = null,
+        val retryable: Boolean = true
     )
 
     private data class CachedResearch(
         val cachedAtMs: Long,
         val value: WebResearchResult
+    )
+
+    private data class ChatCompletionAttempt(
+        val response: OpenRouterChatResponse? = null,
+        val retryable: Boolean = false
     )
 
     /**
@@ -107,7 +117,10 @@ class ApiManager(
         var lastError = ""
 
         for ((index, config) in providers.withIndex()) {
-            val result = retryWithBackoff(maxAttempts = 2) {
+            val result = retryWithBackoff(
+                maxAttempts = 2,
+                shouldRetryResult = { response -> !response.success && response.retryable }
+            ) {
                 streamFromProvider(config, systemPrompt, userMessages, onChunkReceived)
             }
 
@@ -135,7 +148,7 @@ class ApiManager(
         }
 
         onError("Alle Provider fehlgeschlagen. Letzer Fehler: $lastError")
-        return ApiResponse(success = false, error = lastError)
+        return ApiResponse(success = false, error = lastError, retryable = false)
     }
 
     /**
@@ -146,18 +159,28 @@ class ApiManager(
         userPrompt: String
     ): ApiResponse {
         val providers = buildProviderFallbackList()
+        var lastError = ""
 
         for (config in providers) {
-            val result = retryWithBackoff(maxAttempts = 2) {
+            val result = retryWithBackoff(
+                maxAttempts = 2,
+                shouldRetryResult = { response -> !response.success && response.retryable }
+            ) {
                 oneShootFromProvider(config, systemPrompt, userPrompt)
             }
 
             if (result.success) {
                 return result
             }
+
+            lastError = sanitizeSensitiveText(result.error)
         }
 
-        return ApiResponse(success = false, error = "Keine Provider verfügbar")
+        return ApiResponse(
+            success = false,
+            error = if (lastError.isNotBlank()) lastError else "Keine Provider verfügbar",
+            retryable = false
+        )
     }
 
     suspend fun oneShotChatCompletion(
@@ -166,13 +189,31 @@ class ApiManager(
     ): OpenRouterChatResponse? {
         val providers = buildProviderFallbackList()
         for (config in providers) {
-            try {
-                val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
-                val messagesWithSystem = listOf(OpenRouterMessage("system", systemPrompt)) + request.messages
-                val fullRequest = request.copy(messages = messagesWithSystem)
-                val response = service.chatCompletion(fullRequest)
-                if (response.choices?.isNotEmpty() == true) return response
-            } catch (_: Exception) {}
+            val attempt = retryWithBackoff(
+                maxAttempts = 2,
+                shouldRetryResult = { result -> result.retryable },
+                shouldRetryException = { exception -> isRetryableThrowable(exception) }
+            ) {
+                try {
+                    val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
+                    val messagesWithSystem = listOf(OpenRouterMessage("system", systemPrompt)) + request.messages
+                    val fullRequest = request.copy(messages = messagesWithSystem)
+                    val response = service.chatCompletion(fullRequest)
+                    if (response.choices?.isNotEmpty() == true) {
+                        ChatCompletionAttempt(response = response)
+                    } else {
+                        ChatCompletionAttempt(retryable = true)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    if (isRetryableThrowable(e)) {
+                        ChatCompletionAttempt(retryable = true)
+                    } else {
+                        throw e
+                    }
+                }
+            }
+            attempt.response?.let { return it }
         }
         return null
     }
@@ -186,11 +227,14 @@ class ApiManager(
         imageDataUrl: String
     ): ApiResponse {
         val openRouterKey = getApiKeyForProvider(ApiClient.Provider.OPENROUTER)
-        val geminiKey = prefs.getString("gemini_api_key", "")?.takeIf { it.isNotBlank() }
+        val geminiKey = secureString("gemini_api_key").takeIf { it.isNotBlank() }
 
         // Versuche OpenRouter Vision zuerst
         if (openRouterKey != null) {
-            val result = retryWithBackoff {
+            val result = retryWithBackoff(
+                maxAttempts = 2,
+                shouldRetryResult = { response -> !response.success && response.retryable }
+            ) {
                 visionViaOpenRouter(openRouterKey, systemPrompt, userText, imageDataUrl)
             }
             if (result.success) return result
@@ -201,7 +245,11 @@ class ApiManager(
             return visionViaGemini(geminiKey, systemPrompt, userText)
         }
 
-        return ApiResponse(success = false, error = "Kein Vision-Provider konfiguriert")
+        return ApiResponse(
+            success = false,
+            error = "Kein Vision-Provider konfiguriert",
+            retryable = false
+        )
     }
 
     fun shouldUseLiveWebResearch(userText: String): Boolean {
@@ -223,14 +271,16 @@ class ApiManager(
             return WebResearchResult(
                 success = false,
                 query = query,
-                error = "Leere Suchanfrage"
+                error = "Leere Suchanfrage",
+                retryable = false
             )
         }
         if (!prefs.getBoolean(KEY_LIVE_WEB_ENABLED, false)) {
             return WebResearchResult(
                 success = false,
                 query = cleanedQuery,
-                error = "Live-Web-Recherche ist deaktiviert."
+                error = "Live-Web-Recherche ist deaktiviert.",
+                retryable = false
             )
         }
 
@@ -247,7 +297,8 @@ class ApiManager(
             return WebResearchResult(
                 success = false,
                 query = cleanedQuery,
-                error = "Kein Live-Web-Endpunkt konfiguriert."
+                error = "Kein Live-Web-Endpunkt konfiguriert.",
+                retryable = false
             )
         }
 
@@ -275,7 +326,7 @@ class ApiManager(
             )
         }
 
-        val token = prefs.getString(KEY_LIVE_WEB_API_TOKEN, "")?.trim().orEmpty()
+        val token = secureString(KEY_LIVE_WEB_API_TOKEN).trim()
         val requestBuilder = Request.Builder()
             .url(endpoint)
             .addHeader("Content-Type", "application/json")
@@ -285,40 +336,50 @@ class ApiManager(
             requestBuilder.addHeader("Authorization", "Bearer $token")
         }
 
-        return withContext(Dispatchers.IO) {
-            try {
-                val response = webClient.newCall(requestBuilder.build()).execute()
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    val error = "Web-Recherche fehlgeschlagen (${response.code}): ${body.take(160)}"
-                    AppTelemetry.logEvent(
-                        "web_research_error",
-                        mapOf("code" to response.code.toString(), "error" to error.take(120))
-                    )
-                    return@withContext WebResearchResult(
+        return retryWithBackoff(
+            maxAttempts = 3,
+            initialDelayMs = 750,
+            shouldRetryResult = { result -> !result.success && result.retryable }
+        ) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val response = webClient.newCall(requestBuilder.build()).execute()
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        val retryable = isRetryableHttpCode(response.code)
+                        val error = "Web-Recherche fehlgeschlagen (${response.code}): ${body.take(160)}"
+                        AppTelemetry.logEvent(
+                            "web_research_error",
+                            mapOf("code" to response.code.toString(), "error" to error.take(120))
+                        )
+                        return@withContext WebResearchResult(
+                            success = false,
+                            query = cleanedQuery,
+                            error = error,
+                            retryable = retryable
+                        )
+                    }
+
+                    val parsed = parseWebResearchResponse(cleanedQuery, body)
+                    if (parsed.success) {
+                        AppTelemetry.logEvent(
+                            "web_research_success",
+                            mapOf("sources" to parsed.sources.size.toString(), "provider" to parsed.provider)
+                        )
+                        pruneResearchCache(now, ttlMs)
+                        researchCache[cleanedQuery] = CachedResearch(now, parsed)
+                    }
+                    parsed
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    AppTelemetry.logError("web_research_exception", e)
+                    WebResearchResult(
                         success = false,
                         query = cleanedQuery,
-                        error = error
+                        error = e.message ?: "Unbekannter Web-Fehler",
+                        retryable = isRetryableThrowable(e)
                     )
                 }
-
-                val parsed = parseWebResearchResponse(cleanedQuery, body)
-                if (parsed.success) {
-                    AppTelemetry.logEvent(
-                        "web_research_success",
-                        mapOf("sources" to parsed.sources.size.toString(), "provider" to parsed.provider)
-                    )
-                    pruneResearchCache(now, ttlMs)
-                    researchCache[cleanedQuery] = CachedResearch(now, parsed)
-                }
-                parsed
-            } catch (e: Exception) {
-                AppTelemetry.logError("web_research_exception", e)
-                WebResearchResult(
-                    success = false,
-                    query = cleanedQuery,
-                    error = e.message ?: "Unbekannter Web-Fehler"
-                )
             }
         }
     }
@@ -349,11 +410,17 @@ class ApiManager(
                 return ApiResponse(
                     success = false,
                     error = formatHttpError(code, sanitizeSensitiveText(body)),
-                    usedProvider = config.provider
+                    usedProvider = config.provider,
+                    retryable = isRetryableHttpCode(code)
                 )
             }
 
-            val body = response.body() ?: return ApiResponse(success = false, error = "Empty response body")
+            val body = response.body() ?: return ApiResponse(
+                success = false,
+                error = "Empty response body",
+                usedProvider = config.provider,
+                retryable = true
+            )
             val builder = StringBuilder()
             var persistCounter = 0
 
@@ -379,12 +446,19 @@ class ApiManager(
                 }
             }
 
-            ApiResponse(success = true, content = builder.toString(), usedProvider = config.provider)
+            ApiResponse(
+                success = true,
+                content = builder.toString(),
+                usedProvider = config.provider,
+                retryable = false
+            )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             ApiResponse(
                 success = false,
                 error = sanitizeSensitiveText(e.message ?: "Unknown error"),
-                usedProvider = config.provider
+                usedProvider = config.provider,
+                retryable = isRetryableThrowable(e)
             )
         }
     }
@@ -411,15 +485,27 @@ class ApiManager(
             val content = response.choices?.firstOrNull()?.message?.content?.trim().orEmpty()
 
             if (content.isBlank()) {
-                return ApiResponse(success = false, error = "Empty response", usedProvider = config.provider)
+                return ApiResponse(
+                    success = false,
+                    error = "Empty response",
+                    usedProvider = config.provider,
+                    retryable = true
+                )
             }
 
-            ApiResponse(success = true, content = content, usedProvider = config.provider)
+            ApiResponse(
+                success = true,
+                content = content,
+                usedProvider = config.provider,
+                retryable = false
+            )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             ApiResponse(
                 success = false,
                 error = sanitizeSensitiveText(e.message ?: "Unknown error"),
-                usedProvider = config.provider
+                usedProvider = config.provider,
+                retryable = isRetryableThrowable(e)
             )
         }
     }
@@ -462,12 +548,27 @@ class ApiManager(
             val content = response.choices?.firstOrNull()?.message?.content?.trim().orEmpty()
 
             if (content.isBlank()) {
-                return ApiResponse(success = false, error = "Empty vision response")
+                return ApiResponse(
+                    success = false,
+                    error = "Empty vision response",
+                    usedProvider = ApiClient.Provider.OPENROUTER,
+                    retryable = true
+                )
             }
 
-            ApiResponse(success = true, content = content, usedProvider = ApiClient.Provider.OPENROUTER)
+            ApiResponse(
+                success = true,
+                content = content,
+                usedProvider = ApiClient.Provider.OPENROUTER,
+                retryable = false
+            )
         } catch (e: Exception) {
-            ApiResponse(success = false, error = sanitizeSensitiveText(e.message ?: "Vision error"))
+            if (e is CancellationException) throw e
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Vision error"),
+                retryable = isRetryableThrowable(e)
+            )
         }
     }
 
@@ -477,7 +578,11 @@ class ApiManager(
         userText: String
     ): ApiResponse {
         // Placeholder: würde Bitmap benötigen
-        return ApiResponse(success = false, error = "Gemini Vision not implemented yet")
+        return ApiResponse(
+            success = false,
+            error = "Gemini Vision not implemented yet",
+            retryable = false
+        )
     }
 
     // ===== Hilfsfunktionen =====
@@ -519,7 +624,7 @@ class ApiManager(
             ApiClient.Provider.CEREBRAS -> "cerebras_api_key"
             ApiClient.Provider.TOGETHER -> "together_api_key"
         }
-        return prefs.getString(prefKey, null)?.takeIf { it.length > 10 }
+        return secureString(prefKey).takeIf { it.length > 10 }
     }
 
     /**
@@ -528,25 +633,32 @@ class ApiManager(
     private suspend inline fun <T> retryWithBackoff(
         maxAttempts: Int = 3,
         initialDelayMs: Long = 500,
+        shouldRetryResult: (T) -> Boolean = { false },
+        shouldRetryException: (Exception) -> Boolean = { true },
         block: suspend () -> T
     ): T {
-        var lastException: Exception? = null
+        val attempts = maxAttempts.coerceAtLeast(1)
         var attempt = 0
 
-        while (attempt < maxAttempts) {
+        while (attempt < attempts) {
             try {
-                return block()
+                val result = block()
+                if (attempt >= attempts - 1 || !shouldRetryResult(result)) {
+                    return result
+                }
             } catch (e: Exception) {
-                lastException = e
-                attempt++
-                if (attempt >= maxAttempts) break
-
-                val delayMs = (initialDelayMs * 2.0.pow(attempt - 1)).toLong()
-                delay(delayMs)
+                if (e is CancellationException) throw e
+                if (attempt >= attempts - 1 || !shouldRetryException(e)) {
+                    throw e
+                }
             }
+
+            attempt++
+            val delayMs = (initialDelayMs * 2.0.pow((attempt - 1).toDouble())).toLong()
+            delay(delayMs)
         }
 
-        throw lastException ?: Exception("Max retries exceeded")
+        throw Exception("Max retries exceeded")
     }
 
     private fun formatHttpError(code: Int, body: String?): String = when (code) {
@@ -576,6 +688,26 @@ class ApiManager(
             .take(140)
     }
 
+    private fun secureString(key: String, defaultValue: String = ""): String =
+        SecureSettingsStore.getString(context, prefs, key, defaultValue)
+
+    private fun isRetryableThrowable(throwable: Throwable): Boolean = when (throwable) {
+        is HttpException -> isRetryableHttpCode(throwable.code())
+        is IOException -> true
+        else -> {
+            val message = throwable.message.orEmpty().lowercase(Locale.getDefault())
+            message.contains("timeout") ||
+                message.contains("temporar") ||
+                message.contains("network") ||
+                message.contains("connection") ||
+                message.contains("429") ||
+                message.contains("5xx")
+        }
+    }
+
+    private fun isRetryableHttpCode(code: Int): Boolean =
+        code == 408 || code == 425 || code == 429 || code in 500..599
+
     private fun parseWebResearchResponse(query: String, body: String): WebResearchResult {
         return try {
             val root = gson.fromJson(body, JsonObject::class.java)
@@ -599,13 +731,15 @@ class ApiManager(
                 sources = sources,
                 provider = root.get("provider")?.asString ?: "unknown",
                 fetchedAtIso = root.get("fetchedAt")?.asString ?: "",
-                error = if (sources.isEmpty()) "Keine Treffer für Live-Recherche." else ""
+                error = if (sources.isEmpty()) "Keine Treffer für Live-Recherche." else "",
+                retryable = false
             )
         } catch (e: Exception) {
             WebResearchResult(
                 success = false,
                 query = query,
-                error = "Ungültige Web-Recherche-Antwort: ${e.message}"
+                error = "Ungültige Web-Recherche-Antwort: ${e.message}",
+                retryable = true
             )
         }
     }

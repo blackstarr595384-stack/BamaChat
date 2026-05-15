@@ -27,6 +27,7 @@ import com.example.bamachat.util.McpContentItem
 import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.McpWorkflowStatus
 import com.example.bamachat.util.MonetizationConfig
+import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -79,6 +80,7 @@ class ChatViewModel @Inject constructor(
     }
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val appContext = getApplication<Application>().applicationContext
 
     // Services from ServiceLocator
     private val conversationService: ConversationService
@@ -445,7 +447,7 @@ class ChatViewModel @Inject constructor(
     fun importAdvancedMultimodalAsset(uri: Uri) {
         viewModelScope.launch {
             try {
-                val groqKey = prefs.getString("groq_api_key", "") ?: ""
+                val groqKey = SecureSettingsStore.getString(appContext, prefs, "groq_api_key")
                 val result = mediaService.importMultimodal(uri, groqKey)
                 when {
                     result == "image" -> sendMessageWithImage("Analysiere dieses Bild.", uri)
@@ -518,82 +520,95 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         var iteration = 0
         val maxIter = 5
 
-        while (iteration < maxIter) {
-            iteration++
-            val request = OpenRouterChatRequest(
-                model = selectedModel.value,
-                messages = messages,
-                stream = false,
-                tools = toolDefs,
-                toolChoice = "auto",
-                maxTokens = 2048
-            )
+        try {
+            while (iteration < maxIter) {
+                iteration++
+                val request = OpenRouterChatRequest(
+                    model = selectedModel.value,
+                    messages = messages,
+                    stream = false,
+                    tools = toolDefs,
+                    toolChoice = "auto",
+                    maxTokens = 2048
+                )
 
-            val response = apiManager.oneShotChatCompletion(request, fullSystemPrompt)
-            if (response == null) {
-                _errorMessage.value = "Agent: Keine Antwort vom Provider"
-                _isStreaming.value = false
+                val response = apiManager.oneShotChatCompletion(request, fullSystemPrompt)
+                if (response == null) {
+                    _errorMessage.value = "Agent: Keine Antwort vom Provider"
+                    repo.deleteMessage(assistantMsg.id)
+                    return
+                }
+
+                val choice = response.choices?.firstOrNull() ?: break
+                val replyMsg = choice.message
+                messages.add(replyMsg)
+
+                val toolCalls = replyMsg.toolCalls
+                if (toolCalls.isNullOrEmpty()) {
+                    finalContent = replyMsg.content ?: ""
+                    _activeToolCalls.value = emptyList()
+                    break
+                }
+
+                _activeToolCalls.value = toolCalls.map { tc ->
+                    ToolCallProgress(toolName = tc.function.name, arguments = tc.function.arguments)
+                }
+
+                for (toolCall in toolCalls) {
+                    val jsonObj = try {
+                        org.json.JSONObject(toolCall.function.arguments)
+                    } catch (_: Exception) { null }
+                    val args = if (jsonObj != null) {
+                        jsonObj.keys().asSequence().associateWith { key ->
+                            jsonObj.get(key)
+                        }
+                    } else emptyMap<String, Any>()
+
+                    val result = if (toolCall.function.name.startsWith("workflow_")) {
+                        val wfId = toolCall.function.name.removePrefix("workflow_")
+                        val execResult = mcpWorkflowManager.executeWorkflow(wfId, args)
+                        McpToolResult(
+                            success = execResult.status == McpWorkflowStatus.COMPLETED,
+                            content = listOf(McpContentItem(type = "text", text = execResult.finalOutput ?: execResult.error ?: "")))
+                    } else {
+                        mcpServerManager.callTool(toolCall.function.name, args)
+                    }
+                    val resultText = result.content.joinToString("\n") { it.text ?: it.data ?: "" }
+
+                    _activeToolCalls.value = _activeToolCalls.value.map {
+                        if (it.toolName == toolCall.function.name) it.copy(
+                            status = if (result.success) ToolCallStatus.DONE else ToolCallStatus.ERROR,
+                            result = resultText.take(200)
+                        ) else it
+                    }
+
+                    messages.add(OpenRouterMessage(
+                        role = "tool",
+                        toolCallId = toolCall.id,
+                        content = resultText
+                    ))
+                }
+            }
+
+            if (finalContent == null) finalContent = "Agent: Maximale Iterationen erreicht."
+
+            val trimmedContent = finalContent.trim()
+            if (trimmedContent.isBlank()) {
+                _errorMessage.value = "Agent: Leere Antwort vom Provider"
+                repo.deleteMessage(assistantMsg.id)
                 return
             }
 
-            val choice = response.choices?.firstOrNull() ?: break
-            val replyMsg = choice.message
-            messages.add(replyMsg)
-
-            val toolCalls = replyMsg.toolCalls
-            if (toolCalls.isNullOrEmpty()) {
-                finalContent = replyMsg.content ?: ""
-                _activeToolCalls.value = emptyList()
-                break
-            }
-
-            _activeToolCalls.value = toolCalls.map { tc ->
-                ToolCallProgress(toolName = tc.function.name, arguments = tc.function.arguments)
-            }
-
-            for (toolCall in toolCalls) {
-                val jsonObj = try {
-                    org.json.JSONObject(toolCall.function.arguments)
-                } catch (_: Exception) { null }
-                val args = if (jsonObj != null) {
-                    jsonObj.keys().asSequence().associateWith { key ->
-                        jsonObj.get(key)
-                    }
-                } else emptyMap<String, Any>()
-
-                val result = if (toolCall.function.name.startsWith("workflow_")) {
-                    val wfId = toolCall.function.name.removePrefix("workflow_")
-                    val execResult = mcpWorkflowManager.executeWorkflow(wfId, args)
-                    McpToolResult(
-                        success = execResult.status == McpWorkflowStatus.COMPLETED,
-                        content = listOf(McpContentItem(type = "text", text = execResult.finalOutput ?: execResult.error ?: "")))
-                } else {
-                    mcpServerManager.callTool(toolCall.function.name, args)
-                }
-                val resultText = result.content.joinToString("\n") { it.text ?: it.data ?: "" }
-
-                _activeToolCalls.value = _activeToolCalls.value.map {
-                    if (it.toolName == toolCall.function.name) it.copy(
-                        status = if (result.success) ToolCallStatus.DONE else ToolCallStatus.ERROR,
-                        result = resultText.take(200)
-                    ) else it
-                }
-
-                messages.add(OpenRouterMessage(
-                    role = "tool",
-                    toolCallId = toolCall.id,
-                    content = resultText
-                ))
-            }
+            repo.saveMessage(convId, assistantMsg.copy(text = trimmedContent, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso), touchConversation = true)
+            notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
+        } catch (e: Exception) {
+            AppTelemetry.logError("chat_agent_error", e)
+            _errorMessage.value = "Agent-Fehler: ${e.message ?: "Unbekannt"}"
+            repo.deleteMessage(assistantMsg.id)
+        } finally {
+            _activeToolCalls.value = emptyList()
+            _isStreaming.value = false
         }
-
-        if (finalContent == null) finalContent = "Agent: Maximale Iterationen erreicht."
-
-        val trimmedContent = finalContent.trim()
-        repo.saveMessage(convId, assistantMsg.copy(text = trimmedContent, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso), touchConversation = true)
-        notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
-        _activeToolCalls.value = emptyList()
-        _isStreaming.value = false
     }
 
     private suspend fun runStreamingChat(
@@ -616,28 +631,36 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         val streamFlushInterval = 250L
         var lastFlushAt = System.currentTimeMillis()
 
-        val result = apiManager.streamChatResponse(
-            systemPrompt = systemPrompt, userMessages = messages,
-            onChunkReceived = { chunk ->
-                streamingBuffer.append(chunk)
-                val now = System.currentTimeMillis()
-                if (now - lastFlushAt >= streamFlushInterval) {
-                    lastFlushAt = now
-                    viewModelScope.launch {
-                        repo.saveMessage(convId, assistantMsg.copy(text = streamingBuffer.toString()), touchConversation = false)
+        try {
+            val result = apiManager.streamChatResponse(
+                systemPrompt = systemPrompt, userMessages = messages,
+                onChunkReceived = { chunk ->
+                    streamingBuffer.append(chunk)
+                    val now = System.currentTimeMillis()
+                    if (now - lastFlushAt >= streamFlushInterval) {
+                        lastFlushAt = now
+                        viewModelScope.launch {
+                            repo.saveMessage(convId, assistantMsg.copy(text = streamingBuffer.toString()), touchConversation = false)
+                        }
                     }
+                },
+                onError = { error ->
+                    _errorMessage.value = error
+                    AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
                 }
-            },
-            onError = { error ->
-                _errorMessage.value = error
-                AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
-            }
-        )
+            )
 
-        if (result.success && result.content.isNotBlank()) {
-            val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
-            repo.saveMessage(convId, finalized, touchConversation = true)
-            notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
+            if (result.success && result.content.isNotBlank()) {
+                val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
+                repo.saveMessage(convId, finalized, touchConversation = true)
+                notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
+            } else {
+                repo.deleteMessage(assistantMsg.id)
+            }
+        } catch (e: Exception) {
+            AppTelemetry.logError("chat_stream_exception", e)
+            _errorMessage.value = "Stream-Fehler: ${e.message ?: "Unbekannt"}"
+            repo.deleteMessage(assistantMsg.id)
         }
     }
 
@@ -654,6 +677,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         viewModelScope.launch {
             repo.savePersonaFeedback(persona.name, messageId, helpful)
             _messageFeedback.value = _messageFeedback.value.toMutableMap().apply { put(messageId, helpful) }
+            trimMessageFeedback()
             if (helpful && userContext.isNotBlank() && assistantMsg.text.isNotBlank()) {
                 personaViewModel.addManualTrainingExample(persona, userContext, assistantMsg.text)
             }
@@ -769,6 +793,16 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             }
         }
         if (changed) _messageFeedback.value = current
+        trimMessageFeedback()
+    }
+
+    private fun trimMessageFeedback(maxEntries: Int = 200) {
+        val current = _messageFeedback.value
+        if (current.size <= maxEntries) return
+        _messageFeedback.value = current.entries
+            .toList()
+            .takeLast(maxEntries)
+            .associate { it.toPair() }
     }
 
     private fun ExtensionQuickAction.toShared(): QuickActionSuggestion = when (this) {

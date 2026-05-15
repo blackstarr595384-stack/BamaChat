@@ -110,6 +110,11 @@ class ChatRepository(private val chatDao: ChatDao) {
         }
     }
 
+    suspend fun deleteMessage(messageId: String) {
+        chatDao.deleteMessage(messageId)
+        chatDao.deleteMessageFts(messageId)
+    }
+
     suspend fun clearMessages(conversationId: String) {
         chatDao.deleteMessagesForConversation(conversationId)
         chatDao.deleteMessagesFtsForConversation(conversationId)

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.example.bamachat.ui.screen
 
 import android.annotation.SuppressLint
@@ -49,6 +51,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.RotateLeft
+import androidx.compose.material.icons.automirrored.filled.RotateRight
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -143,8 +149,8 @@ private enum class MiniAppStatusTone {
 private fun MiniAppStatusBanner(
     message: String,
     tone: MiniAppStatusTone,
-    isLoading: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isLoading: Boolean = false
 ) {
     if (message.isBlank()) return
     val background = when (tone) {
@@ -1543,7 +1549,7 @@ private fun PhotoStudioApp(themeColor: Color) {
                                 enabled = controlsEnabled,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.RotateLeft, null)
+                                Icon(Icons.AutoMirrored.Filled.RotateLeft, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("Links")
                             }
@@ -1557,7 +1563,7 @@ private fun PhotoStudioApp(themeColor: Color) {
                                 enabled = controlsEnabled,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.RotateRight, null)
+                                Icon(Icons.AutoMirrored.Filled.RotateRight, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("Rechts")
                             }
@@ -1691,7 +1697,7 @@ private fun PhotoStudioApp(themeColor: Color) {
                                 enabled = historyIndex > 0 && controlsEnabled,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.Undo, null)
+                                Icon(Icons.AutoMirrored.Filled.Undo, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("Undo")
                             }
@@ -1702,7 +1708,7 @@ private fun PhotoStudioApp(themeColor: Color) {
                                 enabled = historyIndex >= 0 && historyIndex < history.lastIndex && controlsEnabled,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Default.Redo, null)
+                                Icon(Icons.AutoMirrored.Filled.Redo, null)
                                 Spacer(Modifier.width(6.dp))
                                 Text("Redo")
                             }
@@ -2060,7 +2066,7 @@ private fun DoodlePad(themeColor: Color) {
                         modifier = Modifier.background(Color.Yellow.copy(alpha = 0.2f), CircleShape)
                     ) {
                         @Suppress("DEPRECATION")
-                        Icon(Icons.Filled.Undo, "Rückgängig", tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.Undo, "Rückgängig", tint = Color.White)
                     }
                 }
             }

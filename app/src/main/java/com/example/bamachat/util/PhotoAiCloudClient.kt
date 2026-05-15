@@ -44,7 +44,7 @@ object PhotoAiCloudConfigResolver {
     fun resolve(context: Context): PhotoAiCloudConfig {
         val prefs = context.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
         val explicitEndpoint = prefs.getString(KEY_PHOTO_AI_CLOUD_ENDPOINT, "")?.trim().orEmpty()
-        val token = prefs.getString(KEY_PHOTO_AI_CLOUD_API_TOKEN, "")?.trim().orEmpty()
+        val token = SecureSettingsStore.getString(context, prefs, KEY_PHOTO_AI_CLOUD_API_TOKEN).trim()
         val liveWebEndpoint = prefs.getString(KEY_LIVE_WEB_ENDPOINT, "")?.trim().orEmpty()
         val resolvedEndpoint = explicitEndpoint.ifBlank { deriveFromLiveWebEndpoint(liveWebEndpoint) }
         return PhotoAiCloudConfig(

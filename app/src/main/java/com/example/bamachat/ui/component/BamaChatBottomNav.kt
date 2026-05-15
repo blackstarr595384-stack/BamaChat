@@ -40,12 +40,12 @@ data class BottomNavItem(
 fun BamaChatBottomNav(
     currentRoute: String?,
     designPreset: String,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier,
     attachedToComposer: Boolean = false,
     cornerRoundnessScale: Float = 1f,
     shadowIntensityScale: Float = 1f,
     surfaceOpacity: Float = 1f,
-    onNavigate: (String) -> Unit,
-    modifier: Modifier = Modifier
 ) {
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
     val navContainer = palette.chatComposerBg.copy(alpha = (0.96f * surfaceOpacity).coerceIn(0.55f, 1f))

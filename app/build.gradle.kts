@@ -35,7 +35,7 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.example.bamachat"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.example.bamachat"
@@ -116,17 +116,17 @@ dependencies {
     val credentialsVersion = "1.2.0-rc01"
 
     implementation(project(":sharedCore"))
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-    implementation("androidx.activity:activity-compose:1.10.1")
-    
-    implementation(platform("androidx.compose:compose-bom:2026.04.01"))
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.activity:activity-compose:1.9.3")
+
+    implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.9.7")
+    implementation("androidx.navigation:navigation-compose:2.8.5")
     
     // Lottie Animations
     implementation("com.airbnb.android:lottie-compose:6.4.1")
@@ -134,6 +134,7 @@ dependencies {
     // Material Design Icons (Icons für UI)
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     
     // Room Database
     val roomVersion = "2.8.4"
@@ -200,7 +201,7 @@ dependencies {
     implementation("com.google.firebase:firebase-crashlytics")
 
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2026.04.01"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
     androidTestImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

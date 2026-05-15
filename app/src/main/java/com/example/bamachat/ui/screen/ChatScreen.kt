@@ -352,6 +352,7 @@ fun ChatScreen(
     var lastPartialUpdateAt by remember { mutableLongStateOf(0L) }
     var lastVoiceAutoSendAt by remember { mutableLongStateOf(0L) }
     var lastVoiceAutoSendText by remember { mutableStateOf("") }
+    var hasHadVoiceExchange by remember { mutableStateOf(false) }
     val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
     val recognizerIntent = remember {
         val langCode = settingsViewModel.language.value
@@ -456,7 +457,6 @@ fun ChatScreen(
     LaunchedEffect(isListeningState.value) { isListening = isListeningState.value }
 
     // Continuous voice mode: re-trigger listening when AI finishes streaming
-    var hasHadVoiceExchange by remember { mutableStateOf(false) }
     LaunchedEffect(isStreaming, voiceChatMode) {
         if (voiceChatMode && !isStreaming && hasHadVoiceExchange) {
             val audioOk = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -1206,8 +1206,6 @@ private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor
         }
     }
 }
-
-
 
 
 

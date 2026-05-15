@@ -140,6 +140,108 @@ object BuiltinTools {
         mapOf(
             "type" to "function",
             "function" to mapOf(
+                "name" to "search_files",
+                "description" to "Sucht im App-Sandbox-Pfad nach Dateinamen oder Dateiinhalt und gibt Treffer mit kurzen Snippets zurück.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Relativer Startpfad (z.B. '.' oder 'notes')"),
+                        "query" to mapOf("type" to "string", "description" to "Suchtext"),
+                        "recursive" to mapOf("type" to "boolean", "description" to "Unterordner durchsuchen", "default" to true),
+                        "searchContents" to mapOf("type" to "boolean", "description" to "Auch den Dateiinhalt durchsuchen", "default" to true),
+                        "maxResults" to mapOf("type" to "number", "description" to "Maximale Anzahl an Treffern", "default" to 50)
+                    ),
+                    "required" to listOf("path", "query")
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "copy_file",
+                "description" to "Kopiert eine Datei oder ein Verzeichnis innerhalb des App-Sandboxes an einen neuen Ort.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "sourcePath" to mapOf("type" to "string", "description" to "Relativer Quellpfad"),
+                        "destinationPath" to mapOf("type" to "string", "description" to "Relativer Zielpfad")
+                    ),
+                    "required" to listOf("sourcePath", "destinationPath")
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "move_file",
+                "description" to "Verschiebt oder benennt eine Datei oder ein Verzeichnis innerhalb des App-Sandboxes um.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "sourcePath" to mapOf("type" to "string", "description" to "Relativer Quellpfad"),
+                        "destinationPath" to mapOf("type" to "string", "description" to "Relativer Zielpfad")
+                    ),
+                    "required" to listOf("sourcePath", "destinationPath")
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "git_status",
+                "description" to "Zeigt den Git-Status des aktuellen Projekts inklusive Branch und geänderten Dateien.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf<String, Any>()
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "git_diff",
+                "description" to "Zeigt den Git-Diff des aktuellen Projekts oder eines einzelnen Pfads.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "path" to mapOf("type" to "string", "description" to "Optionaler relativer Pfad zu einer Datei oder einem Ordner"),
+                        "cached" to mapOf("type" to "boolean", "description" to "Wenn true, wird der staged Diff angezeigt", "default" to false)
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "git_log",
+                "description" to "Zeigt die letzten Git-Commits des aktuellen Projekts.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "limit" to mapOf("type" to "number", "description" to "Maximale Anzahl Commits", "default" to 20),
+                        "path" to mapOf("type" to "string", "description" to "Optionaler relativer Pfad für gefilterte Historie")
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
+                "name" to "git_show",
+                "description" to "Zeigt Details zu einem Git-Commit oder eine Commit-Diff-Zusammenfassung.",
+                "parameters" to mapOf(
+                    "type" to "object",
+                    "properties" to mapOf(
+                        "rev" to mapOf("type" to "string", "description" to "Commit-Referenz oder HEAD", "default" to "HEAD"),
+                        "path" to mapOf("type" to "string", "description" to "Optionaler relativer Pfad"),
+                        "cached" to mapOf("type" to "boolean", "description" to "Nicht zutreffend, reserviert für Konsistenz", "default" to false)
+                    )
+                )
+            )
+        ),
+        mapOf(
+            "type" to "function",
+            "function" to mapOf(
                 "name" to "delete_file",
                 "description" to "Löscht eine Datei oder einen leeren Ordner im App-Sandbox.",
                 "parameters" to mapOf(
@@ -256,6 +358,186 @@ object BuiltinTools {
                         if (sb.isEmpty()) sb.append("(leer)")
                         McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = sb.toString().trim())))
                     }
+                    "search_files" -> {
+                        val path = args["path"]?.toString() ?: return@withContext error("path fehlt")
+                        val query = args["query"]?.toString()?.trim().orEmpty()
+                        if (query.isBlank()) return@withContext error("query fehlt")
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val start = sandboxFile(basePath, path)
+                        if (!start.exists()) return@withContext error("Pfad nicht gefunden: $path")
+                        val recursive = args["recursive"] != false
+                        val searchContents = args["searchContents"] != false
+                        val maxResults = (args["maxResults"] as? Number)?.toInt()?.coerceIn(1, 200) ?: 50
+                        val sandboxRoot = File(basePath).normalize().absoluteFile
+                        val queryLower = query.lowercase(Locale.ROOT)
+
+                        val candidates: Sequence<File> = when {
+                            start.isFile -> sequenceOf(start)
+                            recursive -> start.walkTopDown()
+                            else -> start.listFiles()?.asSequence() ?: emptySequence()
+                        }.filter { it.isFile }
+
+                        val matches = mutableListOf<String>()
+                        var skipped = 0
+
+                        for (file in candidates) {
+                            if (matches.size >= maxResults) {
+                                skipped++
+                                continue
+                            }
+
+                            val relativePath = file.relativeTo(sandboxRoot).path
+                            val nameMatch = file.name.contains(query, ignoreCase = true) ||
+                                relativePath.contains(query, ignoreCase = true)
+
+                            if (nameMatch) {
+                                matches += "📄 $relativePath"
+                                continue
+                            }
+
+                            if (!searchContents || file.length() > 512_000L) continue
+
+                            val text = runCatching { file.readText() }.getOrNull() ?: continue
+                            if (!text.contains(query, ignoreCase = true)) continue
+
+                            val lineMatch = text.lineSequence().withIndex().firstOrNull { it.value.contains(query, ignoreCase = true) }
+                            val snippet = lineMatch?.value?.trim()?.take(180).orEmpty()
+                            val lineInfo = lineMatch?.index?.plus(1)?.let { ":$it" }.orEmpty()
+                            matches += buildString {
+                                append("📄 ")
+                                append(relativePath)
+                                append(lineInfo)
+                                if (snippet.isNotBlank()) {
+                                    append("\n   ")
+                                    append(snippet.replace("\t", " ").replace(Regex("\\s+"), " "))
+                                }
+                            }
+                        }
+
+                        val output = buildString {
+                            if (matches.isEmpty()) {
+                                append("Keine Treffer für '$query' unter '$path'.")
+                            } else {
+                                appendLine("Treffer für '$query' unter '$path':")
+                                matches.forEachIndexed { index, item ->
+                                    appendLine("${index + 1}. $item")
+                                }
+                                if (skipped > 0) {
+                                    append("... +$skipped weitere Treffer")
+                                }
+                            }
+                        }
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = output.trim())))
+                    }
+                    "copy_file" -> {
+                        val sourcePath = args["sourcePath"]?.toString() ?: return@withContext error("sourcePath fehlt")
+                        val destinationPath = args["destinationPath"]?.toString() ?: return@withContext error("destinationPath fehlt")
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val source = sandboxFile(basePath, sourcePath)
+                        val destination = sandboxFile(basePath, destinationPath)
+                        if (!source.exists()) return@withContext error("Datei nicht gefunden: $sourcePath")
+                        if (destination.exists()) return@withContext error("Ziel existiert bereits: $destinationPath")
+                        destination.parentFile?.mkdirs()
+                        val copied = if (source.isDirectory) {
+                            source.copyRecursively(destination, overwrite = false)
+                        } else {
+                            source.copyTo(destination, overwrite = false)
+                            true
+                        }
+                        if (!copied) return@withContext error("Konnte nicht kopieren: $sourcePath")
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = "Kopiert: $sourcePath -> $destinationPath")))
+                    }
+                    "move_file" -> {
+                        val sourcePath = args["sourcePath"]?.toString() ?: return@withContext error("sourcePath fehlt")
+                        val destinationPath = args["destinationPath"]?.toString() ?: return@withContext error("destinationPath fehlt")
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val source = sandboxFile(basePath, sourcePath)
+                        val destination = sandboxFile(basePath, destinationPath)
+                        if (!source.exists()) return@withContext error("Datei nicht gefunden: $sourcePath")
+                        if (destination.exists()) return@withContext error("Ziel existiert bereits: $destinationPath")
+                        destination.parentFile?.mkdirs()
+                        val moved = if (source.renameTo(destination)) {
+                            true
+                        } else if (source.isDirectory) {
+                            source.copyRecursively(destination, overwrite = false) && source.deleteRecursively()
+                        } else {
+                            source.copyTo(destination, overwrite = false)
+                            source.delete()
+                        }
+                        if (!moved) return@withContext error("Konnte nicht verschieben: $sourcePath")
+                        McpToolResult(success = true, content = listOf(McpContentItem(type = "text", text = "Verschoben: $sourcePath -> $destinationPath")))
+                    }
+                    "git_status" -> {
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val (exitCode, output) = runGitCommand(
+                            basePath,
+                            listOf("status", "--short", "--branch", "--untracked-files=all")
+                        )
+                        val text = formatGitOutput(exitCode, output, 12000)
+                        McpToolResult(
+                            success = exitCode == 0,
+                            content = listOf(McpContentItem(type = "text", text = text))
+                        )
+                    }
+                    "git_diff" -> {
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val path = args["path"]?.toString()?.trim().orEmpty()
+                        val cached = args["cached"] == true
+                        val command = mutableListOf("diff", "--unified=3").apply {
+                            if (cached) add("--cached")
+                            if (path.isNotBlank()) {
+                                add("--")
+                                add(path)
+                            }
+                        }
+                        val (exitCode, output) = runGitCommand(basePath, command)
+                        val text = formatGitOutput(exitCode, output, 20000)
+                        McpToolResult(
+                            success = exitCode == 0,
+                            content = listOf(McpContentItem(type = "text", text = text))
+                        )
+                    }
+                    "git_log" -> {
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val limit = (args["limit"] as? Number)?.toInt()?.coerceIn(1, 200) ?: 20
+                        val path = args["path"]?.toString()?.trim().orEmpty()
+                        val command = mutableListOf(
+                            "log",
+                            "--oneline",
+                            "--decorate",
+                            "--graph",
+                            "-n",
+                            limit.toString()
+                        ).apply {
+                            if (path.isNotBlank()) {
+                                add("--")
+                                add(path)
+                            }
+                        }
+                        val (exitCode, output) = runGitCommand(basePath, command)
+                        val text = formatGitOutput(exitCode, output, 18000)
+                        McpToolResult(
+                            success = exitCode == 0,
+                            content = listOf(McpContentItem(type = "text", text = text))
+                        )
+                    }
+                    "git_show" -> {
+                        if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
+                        val rev = args["rev"]?.toString()?.trim().orEmpty().ifBlank { "HEAD" }
+                        val path = args["path"]?.toString()?.trim().orEmpty()
+                        val command = mutableListOf("show", "--stat", "--patch", "--format=medium", rev).apply {
+                            if (path.isNotBlank()) {
+                                add("--")
+                                add(path)
+                            }
+                        }
+                        val (exitCode, output) = runGitCommand(basePath, command)
+                        val text = formatGitOutput(exitCode, output, 22000)
+                        McpToolResult(
+                            success = exitCode == 0,
+                            content = listOf(McpContentItem(type = "text", text = text))
+                        )
+                    }
                     "delete_file" -> {
                         val path = args["path"]?.toString() ?: return@withContext error("path fehlt")
                         if (basePath.isBlank()) return@withContext error("Dateizugriff nicht verfügbar")
@@ -301,6 +583,26 @@ object BuiltinTools {
             throw SecurityException("Pfad außerhalb des Sandboxes: $relativePath")
         }
         return resolved
+    }
+
+    private fun runGitCommand(basePath: String, args: List<String>, timeoutSeconds: Long = 30L): Pair<Int, String> {
+        val command = listOf("git", "-C", basePath) + args
+        val proc = ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .start()
+        val finished = proc.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+        if (!finished) {
+            proc.destroyForcibly()
+            proc.waitFor()
+        }
+        val output = proc.inputStream.bufferedReader().readText()
+        return proc.exitValue() to output
+    }
+
+    private fun formatGitOutput(exitCode: Int, output: String, limit: Int): String {
+        val trimmed = output.trim().ifBlank { "(keine Ausgabe)" }
+        val text = if (trimmed.length > limit) trimmed.take(limit) + "\n\n[truncated]" else trimmed
+        return "Exit $exitCode:\n$text"
     }
 
     private fun error(msg: String) = McpToolResult(success = false, content = listOf(McpContentItem(type = "text", text = msg)), isError = true)

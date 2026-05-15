@@ -15,6 +15,7 @@ import com.example.bamachat.util.PhotoAiCloudConfigResolver
 import com.example.bamachat.util.PlayBillingManager
 import com.example.bamachat.util.ProjectWorkspace
 import com.example.bamachat.util.ProjectWorkspaceStore
+import com.example.bamachat.util.SecureSettingsStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +49,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val appContext = application.applicationContext
     private val chatDao = ChatDatabase.getDatabase(application).chatDao()
     private val dataSanitizer = LocalDataSanitizer(application.applicationContext)
     private val billingManager = PlayBillingManager(
@@ -119,7 +121,7 @@ class SettingsViewModel @Inject constructor(
     private val _cloudVoiceEnabled = MutableStateFlow(prefs.getBoolean("cloud_voice_enabled", false))
     val cloudVoiceEnabled: StateFlow<Boolean> = _cloudVoiceEnabled.asStateFlow()
 
-    private val _elevenLabsApiKey = MutableStateFlow(prefs.getString("elevenlabs_api_key", "") ?: "")
+    private val _elevenLabsApiKey = MutableStateFlow(secureString("elevenlabs_api_key"))
     val elevenLabsApiKey: StateFlow<String> = _elevenLabsApiKey.asStateFlow()
 
     private val _elevenLabsVoiceId = MutableStateFlow(
@@ -231,19 +233,19 @@ class SettingsViewModel @Inject constructor(
     )
     val guestAutoClearOnSignOut: StateFlow<Boolean> = _guestAutoClearOnSignOut.asStateFlow()
 
-    private val _openRouterApiKey = MutableStateFlow(prefs.getString("openrouter_api_key", "") ?: "")
+    private val _openRouterApiKey = MutableStateFlow(secureString("openrouter_api_key"))
     val openRouterApiKey: StateFlow<String> = _openRouterApiKey.asStateFlow()
 
-    private val _groqApiKey = MutableStateFlow(prefs.getString("groq_api_key", "") ?: "")
+    private val _groqApiKey = MutableStateFlow(secureString("groq_api_key"))
     val groqApiKey: StateFlow<String> = _groqApiKey.asStateFlow()
 
-    private val _cerebrasApiKey = MutableStateFlow(prefs.getString("cerebras_api_key", "") ?: "")
+    private val _cerebrasApiKey = MutableStateFlow(secureString("cerebras_api_key"))
     val cerebrasApiKey: StateFlow<String> = _cerebrasApiKey.asStateFlow()
 
-    private val _togetherApiKey = MutableStateFlow(prefs.getString("together_api_key", "") ?: "")
+    private val _togetherApiKey = MutableStateFlow(secureString("together_api_key"))
     val togetherApiKey: StateFlow<String> = _togetherApiKey.asStateFlow()
 
-    private val _geminiApiKey = MutableStateFlow(prefs.getString("gemini_api_key", "") ?: "")
+    private val _geminiApiKey = MutableStateFlow(secureString("gemini_api_key"))
     val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
 
     private val _ollamaUrl = MutableStateFlow(prefs.getString("ollama_url", "http://192.168.178.162:11434/") ?: "http://192.168.178.162:11434/")
@@ -252,7 +254,7 @@ class SettingsViewModel @Inject constructor(
     val liveWebEnabled: StateFlow<Boolean> = _liveWebEnabled.asStateFlow()
     private val _liveWebEndpoint = MutableStateFlow(prefs.getString("live_web_endpoint", "") ?: "")
     val liveWebEndpoint: StateFlow<String> = _liveWebEndpoint.asStateFlow()
-    private val _liveWebApiToken = MutableStateFlow(prefs.getString("live_web_api_token", "") ?: "")
+    private val _liveWebApiToken = MutableStateFlow(secureString("live_web_api_token"))
     val liveWebApiToken: StateFlow<String> = _liveWebApiToken.asStateFlow()
     private val _liveWebAllowedDomains = MutableStateFlow(
         prefs.getString("live_web_allowed_domains", DEFAULT_LIVE_WEB_ALLOWED_DOMAINS)
@@ -267,9 +269,7 @@ class SettingsViewModel @Inject constructor(
         prefs.getString(KEY_PHOTO_AI_CLOUD_ENDPOINT, "") ?: ""
     )
     val photoAiCloudEndpoint: StateFlow<String> = _photoAiCloudEndpoint.asStateFlow()
-    private val _photoAiCloudApiToken = MutableStateFlow(
-        prefs.getString(KEY_PHOTO_AI_CLOUD_API_TOKEN, "") ?: ""
-    )
+    private val _photoAiCloudApiToken = MutableStateFlow(secureString(KEY_PHOTO_AI_CLOUD_API_TOKEN))
     val photoAiCloudApiToken: StateFlow<String> = _photoAiCloudApiToken.asStateFlow()
 
     private val _selectedOpenRouterModel = MutableStateFlow(
@@ -368,6 +368,14 @@ class SettingsViewModel @Inject constructor(
         prefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
     }
 
+    private fun secureString(key: String, defaultValue: String = ""): String =
+        SecureSettingsStore.getString(appContext, prefs, key, defaultValue)
+
+    private fun persistSecret(key: String, value: String) {
+        SecureSettingsStore.putString(appContext, key, value)
+        prefs.edit().remove(key).apply()
+    }
+
     private fun ensureLiveWebAllowlistBaseline() {
         val current = prefs.getString("live_web_allowed_domains", "")?.trim().orEmpty()
         val baseline = DEFAULT_LIVE_WEB_ALLOWED_DOMAINS.split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -409,16 +417,16 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun ensurePhotoAiTokenBaseline() {
-        val current = prefs.getString(KEY_PHOTO_AI_CLOUD_API_TOKEN, "")?.trim().orEmpty()
+        val current = secureString(KEY_PHOTO_AI_CLOUD_API_TOKEN).trim()
         if (current.isNotBlank()) {
             _photoAiCloudApiToken.value = current
             return
         }
-        val liveWebToken = prefs.getString("live_web_api_token", "")?.trim().orEmpty()
+        val liveWebToken = secureString("live_web_api_token").trim()
         val resolved = liveWebToken.ifBlank { DEFAULT_PHOTO_AI_CLOUD_API_TOKEN }
         if (resolved.isBlank()) return
         _photoAiCloudApiToken.value = resolved
-        prefs.edit().putString(KEY_PHOTO_AI_CLOUD_API_TOKEN, resolved).apply()
+        persistSecret(KEY_PHOTO_AI_CLOUD_API_TOKEN, resolved)
     }
 
     private fun ensureAgentProfileBaseline() {
@@ -549,7 +557,7 @@ class SettingsViewModel @Inject constructor(
     fun setElevenLabsApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _elevenLabsApiKey.value = clean
-        prefs.edit().putString("elevenlabs_api_key", clean).apply()
+        persistSecret("elevenlabs_api_key", clean)
     }
 
     fun setElevenLabsVoiceId(voiceId: String) {
@@ -715,31 +723,31 @@ class SettingsViewModel @Inject constructor(
     fun setOpenRouterApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _openRouterApiKey.value = clean
-        prefs.edit().putString("openrouter_api_key", clean).apply()
+        persistSecret("openrouter_api_key", clean)
     }
 
     fun setGroqApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _groqApiKey.value = clean
-        prefs.edit().putString("groq_api_key", clean).apply()
+        persistSecret("groq_api_key", clean)
     }
 
     fun setCerebrasApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _cerebrasApiKey.value = clean
-        prefs.edit().putString("cerebras_api_key", clean).apply()
+        persistSecret("cerebras_api_key", clean)
     }
 
     fun setTogetherApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _togetherApiKey.value = clean
-        prefs.edit().putString("together_api_key", clean).apply()
+        persistSecret("together_api_key", clean)
     }
 
     fun setGeminiApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _geminiApiKey.value = clean
-        prefs.edit().putString("gemini_api_key", clean).apply()
+        persistSecret("gemini_api_key", clean)
     }
 
     fun setOllamaUrl(url: String) {
@@ -761,7 +769,7 @@ class SettingsViewModel @Inject constructor(
     fun setLiveWebApiToken(token: String) {
         val clean = token.trim().replace(Regex("[\\r\\n]+"), "")
         _liveWebApiToken.value = clean
-        prefs.edit().putString("live_web_api_token", clean).apply()
+        persistSecret("live_web_api_token", clean)
     }
 
     fun setLiveWebAllowedDomains(domains: String) {
@@ -784,7 +792,7 @@ class SettingsViewModel @Inject constructor(
     fun setPhotoAiCloudApiToken(token: String) {
         val clean = token.trim().replace(Regex("[\\r\\n]+"), "")
         _photoAiCloudApiToken.value = clean
-        prefs.edit().putString(KEY_PHOTO_AI_CLOUD_API_TOKEN, clean).apply()
+        persistSecret(KEY_PHOTO_AI_CLOUD_API_TOKEN, clean)
     }
 
     fun setSelectedOpenRouterModel(model: String) {

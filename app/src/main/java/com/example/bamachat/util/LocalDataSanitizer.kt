@@ -45,6 +45,7 @@ class LocalDataSanitizer(context: Context) {
         }
 
         if (clearApiKeys) {
+            SecureSettingsStore.clear(appContext)
             editor.remove("openrouter_api_key")
             editor.remove("groq_api_key")
             editor.remove("cerebras_api_key")
