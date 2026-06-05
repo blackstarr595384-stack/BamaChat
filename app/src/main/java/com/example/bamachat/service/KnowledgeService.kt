@@ -1,7 +1,7 @@
 package com.example.bamachat.service
 
+import android.app.Application
 import android.net.Uri
-import android.content.Context
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.util.KnowledgeGraphExtractor
 import com.example.bamachat.util.MemoryFactExtractor
@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 
 class KnowledgeService(
     private val repo: ChatRepository,
-    private val app: Context
+    private val app: Application
 ) {
     suspend fun extractAndSaveFacts(
         text: String,

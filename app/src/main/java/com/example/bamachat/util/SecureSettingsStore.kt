@@ -15,8 +15,10 @@ object SecureSettingsStore {
         "cerebras_api_key",
         "together_api_key",
         "gemini_api_key",
+        "opencode_api_key",
         "elevenlabs_api_key",
         "live_web_api_token",
+        "mcp_remote_token",
         "photo_ai_cloud_api_token"
     )
 

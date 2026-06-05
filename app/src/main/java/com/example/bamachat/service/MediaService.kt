@@ -27,7 +27,7 @@ import java.net.URLEncoder
 import java.util.Locale
 
 class MediaService(
-    private val context: Context,
+    private val app: Application,
     private val apiManager: ApiManager,
     private val knowledgeService: KnowledgeService
 ) {
@@ -37,10 +37,10 @@ class MediaService(
         imageUri: Uri,
         enableOcr: Boolean = true
     ): MediaAnalysisResult {
-        val app = context.applicationContext
+        val appContext = app.applicationContext
         val userInstruction = userText.ifBlank { "Beschreibe den Bildinhalt präzise und strukturiert." }
         val ocrContext = if (enableOcr) {
-            MultimodalProcessor.extractImageText(app, imageUri).takeIf { it.isNotBlank() }
+            MultimodalProcessor.extractImageText(appContext, imageUri).takeIf { it.isNotBlank() }
         } else null
 
         val analysisText = buildString {
@@ -68,12 +68,12 @@ class MediaService(
 
     suspend fun transcribeAudio(uri: Uri, groqApiKey: String): String? {
         if (groqApiKey.isBlank()) return null
-        val manager = AudioTranscriptionManager(context)
+        val manager = AudioTranscriptionManager(app)
         return manager.transcribeWithGroq(uri, groqApiKey)
     }
 
     suspend fun summarizeVideo(uri: Uri): String {
-        return VideoKeyframeExtractor.summarize(context, uri)
+        return VideoKeyframeExtractor.summarize(app, uri)
     }
 
     data class ImageGenerationRequest(
@@ -105,8 +105,8 @@ class MediaService(
     }
 
     suspend fun importMultimodal(uri: Uri, groqApiKey: String = ""): String? {
-        val app = context.applicationContext
-        val asset = MultimodalProcessor.parse(app, uri)
+        val appContext = app.applicationContext
+        val asset = MultimodalProcessor.parse(appContext, uri)
         return when (asset.category) {
             MultimodalAsset.Category.IMAGE -> "image"
             MultimodalAsset.Category.AUDIO -> {
@@ -171,7 +171,7 @@ class MediaService(
 
     private fun decodeBitmapFromUri(uri: Uri): Bitmap? {
         return try {
-            val contentResolver = context.applicationContext.contentResolver
+            val contentResolver = app.contentResolver
             val source = ImageDecoder.createSource(contentResolver, uri)
             val bitmap = ImageDecoder.decodeBitmap(source)
             val maxSide = 1600

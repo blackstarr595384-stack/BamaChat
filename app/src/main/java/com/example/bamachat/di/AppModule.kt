@@ -51,8 +51,8 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideApiManager(@ApplicationContext context: Context): ApiManager {
-        return ApiManager(context)
+    fun provideApiManager(app: Application): ApiManager {
+        return ApiManager(app)
     }
 
     @Provides
@@ -68,19 +68,19 @@ object AppModule {
     @Singleton
     fun provideKnowledgeService(
         repo: ChatRepository,
-        @ApplicationContext context: Context
+        app: Application
     ): KnowledgeService {
-        return KnowledgeService(repo, context)
+        return KnowledgeService(repo, app)
     }
 
     @Provides
     @Singleton
     fun provideMediaService(
-        @ApplicationContext context: Context,
+        app: Application,
         apiManager: ApiManager,
         knowledgeService: KnowledgeService
     ): MediaService {
-        return MediaService(context, apiManager, knowledgeService)
+        return MediaService(app, apiManager, knowledgeService)
     }
 
     @Provides
