@@ -10,8 +10,10 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class McpServerManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("mcp_servers", Context.MODE_PRIVATE)
+    private val settingsPrefs: SharedPreferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val gson = Gson()
     private val clients = mutableMapOf<String, McpClient>()
+    private val manualConnectionStates = mutableMapOf<String, McpConnectionStatus>()
 
     private val _servers = MutableStateFlow(loadServers())
     val servers: StateFlow<List<McpServerConfig>> = _servers.asStateFlow()
@@ -23,19 +25,35 @@ class McpServerManager(private val context: Context) {
     val connectionStates: StateFlow<Map<String, McpConnectionStatus>> = _connectionStates.asStateFlow()
 
     init {
-        if (_servers.value.isEmpty()) {
-            saveServers(defaultMcpServers)
-        }
+        ensureDefaultServersRegistered()
+        refreshConnectionStates()
     }
 
     fun getClient(serverId: String): McpClient? = clients[serverId]
 
     suspend fun startServer(serverId: String) {
-        val config = _servers.value.find { it.id == serverId } ?: return
-        if (clients.containsKey(serverId)) return
+        val existingClient = clients[serverId]
+        if (existingClient != null) {
+            val status = existingClient.connectionStatus.value
+            if (status == McpConnectionStatus.CONNECTED || status == McpConnectionStatus.CONNECTING) return
+            stopServer(serverId)
+        }
+
+        val baseConfig = _servers.value.find { it.id == serverId } ?: return
+        val config = resolveStartConfig(baseConfig)
+        if (config == null) {
+            manualConnectionStates[serverId] = McpConnectionStatus.ERROR
+            refreshConnectionStates()
+            return
+        }
+
+        manualConnectionStates.remove(serverId)
         val client = McpClient(serverId, config)
         clients[serverId] = client
         client.start()
+        if (client.connectionStatus.value == McpConnectionStatus.ERROR) {
+            manualConnectionStates[serverId] = McpConnectionStatus.ERROR
+        }
         refreshTools()
         _servers.value = _servers.value.toList()
     }
@@ -43,6 +61,7 @@ class McpServerManager(private val context: Context) {
     suspend fun stopServer(serverId: String) {
         clients[serverId]?.stop()
         clients.remove(serverId)
+        manualConnectionStates[serverId] = McpConnectionStatus.DISCONNECTED
         refreshTools()
         _servers.value = _servers.value.toList()
     }
@@ -62,7 +81,11 @@ class McpServerManager(private val context: Context) {
     }
 
     private fun refreshConnectionStates() {
-        _connectionStates.value = clients.mapValues { it.value.connectionStatus.value }
+        val states = _servers.value.associate { server ->
+            server.id to (clients[server.id]?.connectionStatus?.value ?: McpConnectionStatus.DISCONNECTED)
+        }.toMutableMap()
+        manualConnectionStates.forEach { (id, state) -> states[id] = state }
+        _connectionStates.value = states
     }
 
     suspend fun callTool(name: String, arguments: Map<String, Any> = emptyMap()): McpToolResult {
@@ -119,6 +142,40 @@ class McpServerManager(private val context: Context) {
             val type = object : TypeToken<List<McpServerConfig>>() {}.type
             gson.fromJson(json, type) ?: emptyList()
         } catch (_: Exception) { emptyList() }
+    }
+
+    private fun ensureDefaultServersRegistered() {
+        val loaded = _servers.value
+        if (loaded.isEmpty()) {
+            saveServers(defaultMcpServers)
+            _servers.value = defaultMcpServers
+            return
+        }
+
+        val merged = loaded.toMutableList()
+        val existingIds = loaded.map { it.id }.toHashSet()
+        var changed = false
+        for (defaultConfig in defaultMcpServers) {
+            if (!existingIds.contains(defaultConfig.id)) {
+                merged.add(defaultConfig)
+                changed = true
+            }
+        }
+        if (changed) {
+            saveServers(merged)
+            _servers.value = merged
+        }
+    }
+
+    private fun resolveStartConfig(config: McpServerConfig): McpServerConfig? {
+        if (config.id != "remote-bridge" && config.command != "remote_http") return config
+        val endpoint = settingsPrefs.getString("mcp_remote_url", "")?.trim().orEmpty()
+        if (endpoint.isBlank()) {
+            return null
+        }
+        val token = SecureSettingsStore.getString(context, settingsPrefs, "mcp_remote_token", "").trim()
+        val env = if (token.isBlank()) config.env else config.env + ("MCP_REMOTE_TOKEN" to token)
+        return config.copy(command = endpoint, args = emptyList(), env = env)
     }
 
     private fun saveServers(servers: List<McpServerConfig>) {

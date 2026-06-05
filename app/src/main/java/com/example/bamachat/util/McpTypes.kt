@@ -37,6 +37,12 @@ data class McpContentItem(
 
 val defaultMcpServers = listOf(
     McpServerConfig(
+        id = "remote-bridge",
+        name = "Remote MCP Bridge",
+        command = "remote_http",
+        autoStart = false
+    ),
+    McpServerConfig(
         id = "filesystem",
         name = "Dateisystem",
         command = "npx",
