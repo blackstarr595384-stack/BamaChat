@@ -837,7 +837,7 @@ private fun AppsHub(
                     )
                 }
             } else {
-                items(rows, key = { row -> row.joinToString(separator = "_") { it.name } }) { row ->
+                items(rows, key = { row -> "grid_" + row.joinToString(separator = "_") { it.name } }) { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                         row.forEach { app ->
                             MiniAppLiveCard(
@@ -873,7 +873,7 @@ private fun AppsHub(
                     }
                 }
             } else {
-                items(visibleApps, key = { it.name }) { app ->
+                items(visibleApps, key = { app -> "manage_${app.name}" }) { app ->
                     MiniAppManageSwipeRow(
                         app = app,
                         accent = themeColor,
