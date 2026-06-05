@@ -37,6 +37,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -73,8 +74,8 @@ fun ComposePlaygroundScreen(
     var email by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
 
-    var rememberCounter by remember { mutableStateOf(0) }
-    var saveableCounter by rememberSaveable { mutableStateOf(0) }
+    var rememberCounter by remember { mutableIntStateOf(0) }
+    var saveableCounter by rememberSaveable { mutableIntStateOf(0) }
     var effectKey by rememberSaveable { mutableStateOf("A") }
     val lifecycleLog = remember { mutableStateListOf<String>() }
 

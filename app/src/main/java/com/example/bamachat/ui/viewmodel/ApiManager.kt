@@ -8,8 +8,15 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.data.OpenCodeZenMessage
+import com.example.bamachat.data.OpenCodeZenRequest
+import com.example.bamachat.data.OpenCodeZenResponsesInputContent
+import com.example.bamachat.data.OpenCodeZenResponsesInputItem
+import com.example.bamachat.data.OpenCodeZenResponsesRequest
+import com.example.bamachat.data.OpenCodeZenResponsesResponse
 import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterChatResponse
+import com.example.bamachat.data.OpenRouterChoice
 import com.example.bamachat.data.OpenRouterImageUrl
 import com.example.bamachat.data.OpenRouterMessage
 import com.example.bamachat.data.OpenRouterStreamChunk
@@ -47,7 +54,7 @@ import java.util.concurrent.CancellationException
 import kotlin.math.pow
 
 /**
- * Zentraler API-Manager für alle Provider (OpenRouter, Groq, Cerebras, Together, Ollama, Gemini).
+ * Zentraler API-Manager für alle Provider (OpenRouter, OpenCode, Groq, Cerebras, Together, Ollama, Gemini).
  * Kümmert sich um:
  * - Multi-Provider Fallback-Logik
  * - Streaming & One-Shot Requests
@@ -56,10 +63,10 @@ import kotlin.math.pow
  * - Error-Recovery
  */
 class ApiManager(
-    private val context: Context,
+    private val app: Application,
     private val gson: Gson = Gson()
 ) {
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val webClient = OkHttpClient.Builder().build()
     private val researchCache = mutableMapOf<String, CachedResearch>()
 
@@ -83,7 +90,8 @@ class ApiManager(
     data class ProviderConfig(
         val provider: ApiClient.Provider,
         val apiKey: String,
-        val model: String
+        val model: String,
+        val baseUrlOverride: String? = null
     )
 
     data class ApiResponse(
@@ -188,6 +196,7 @@ class ApiManager(
         systemPrompt: String
     ): OpenRouterChatResponse? {
         val providers = buildProviderFallbackList()
+        var lastError: String? = null
         for (config in providers) {
             val attempt = retryWithBackoff(
                 maxAttempts = 2,
@@ -195,25 +204,62 @@ class ApiManager(
                 shouldRetryException = { exception -> isRetryableThrowable(exception) }
             ) {
                 try {
-                    val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
                     val messagesWithSystem = listOf(OpenRouterMessage("system", systemPrompt)) + request.messages
-                    val fullRequest = request.copy(messages = messagesWithSystem)
-                    val response = service.chatCompletion(fullRequest)
+                    val response = if (isOpenCodeZenConfig(config)) {
+                        if (isOpenCodeResponsesModel(config.model)) {
+                            chatCompletionViaOpenCodeResponses(
+                                config = config,
+                                messages = messagesWithSystem,
+                                maxTokens = request.maxTokens,
+                                temperature = request.temperature
+                            )
+                        } else {
+                            chatCompletionViaOpenCodeZen(
+                                config = config,
+                                messages = messagesWithSystem,
+                                maxTokens = request.maxTokens,
+                                temperature = request.temperature
+                            )
+                        }
+                    } else {
+                        val service = createServiceForProvider(config)
+                        val fullRequest = request.copy(
+                            model = config.model,
+                            messages = messagesWithSystem
+                        )
+                        service.chatCompletion(fullRequest)
+                    }
                     if (response.choices?.isNotEmpty() == true) {
                         ChatCompletionAttempt(response = response)
                     } else {
+                        lastError = "Leere Antwort von ${config.provider.id}"
                         ChatCompletionAttempt(retryable = true)
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
+                    if (e is HttpException) {
+                        val code = e.code()
+                        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                        lastError = formatHttpError(code, sanitizeSensitiveText(body ?: ""))
+                        if (!isRetryableHttpCode(code)) {
+                            ChatCompletionAttempt(retryable = false)
+                        } else {
+                            ChatCompletionAttempt(retryable = true)
+                        }
+                    } else {
+                        lastError = sanitizeSensitiveText(e.message ?: "Unknown error")
+                    }
                     if (isRetryableThrowable(e)) {
                         ChatCompletionAttempt(retryable = true)
                     } else {
-                        throw e
+                        ChatCompletionAttempt(retryable = false)
                     }
                 }
             }
             attempt.response?.let { return it }
+        }
+        if (!lastError.isNullOrBlank()) {
+            throw IllegalStateException(lastError)
         }
         return null
     }
@@ -392,6 +438,14 @@ class ApiManager(
         userMessages: List<OpenRouterMessage>,
         onChunkReceived: (String) -> Unit
     ): ApiResponse {
+        if (isOpenCodeZenConfig(config)) {
+            return if (isOpenCodeResponsesModel(config.model)) {
+                streamFromOpenCodeResponses(config, systemPrompt, userMessages, onChunkReceived)
+            } else {
+                streamFromOpenCodeZen(config, systemPrompt, userMessages, onChunkReceived)
+            }
+        }
+
         return try {
             val request = OpenRouterChatRequest(
                 model = config.model,
@@ -401,7 +455,7 @@ class ApiManager(
                 stream = true
             )
 
-            val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
+            val service = createServiceForProvider(config)
             val response = service.chatCompletionStream(request)
 
             if (!response.isSuccessful) {
@@ -468,8 +522,16 @@ class ApiManager(
         systemPrompt: String,
         userPrompt: String
     ): ApiResponse {
+        if (isOpenCodeZenConfig(config)) {
+            return if (isOpenCodeResponsesModel(config.model)) {
+                oneShotFromOpenCodeResponses(config, systemPrompt, userPrompt)
+            } else {
+                oneShotFromOpenCodeZen(config, systemPrompt, userPrompt)
+            }
+        }
+
         return try {
-            val service = ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
+            val service = createServiceForProvider(config)
             val request = OpenRouterChatRequest(
                 model = config.model,
                 messages = listOf(
@@ -508,6 +570,386 @@ class ApiManager(
                 retryable = isRetryableThrowable(e)
             )
         }
+    }
+
+    private suspend fun streamFromOpenCodeZen(
+        config: ProviderConfig,
+        systemPrompt: String,
+        userMessages: List<OpenRouterMessage>,
+        onChunkReceived: (String) -> Unit
+    ): ApiResponse {
+        return try {
+            val service = createOpenCodeZenServiceForProvider(config)
+            val request = buildOpenCodeZenRequest(
+                model = config.model,
+                messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
+                maxTokens = 1024,
+                temperature = 0.7f
+            )
+            val response = service.message(request)
+            val content = extractOpenCodeZenText(response)
+
+            if (content.isBlank()) {
+                return ApiResponse(
+                    success = false,
+                    error = response.error?.message?.takeIf { it.isNotBlank() } ?: "Empty response",
+                    usedProvider = config.provider,
+                    retryable = true
+                )
+            }
+
+            onChunkReceived(content)
+            ApiResponse(
+                success = true,
+                content = content,
+                usedProvider = config.provider,
+                retryable = false
+            )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is HttpException) {
+                val code = e.code()
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                return ApiResponse(
+                    success = false,
+                    error = formatHttpError(code, sanitizeSensitiveText(body ?: "")),
+                    usedProvider = config.provider,
+                    retryable = isRetryableHttpCode(code)
+                )
+            }
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Unknown error"),
+                usedProvider = config.provider,
+                retryable = isRetryableThrowable(e)
+            )
+        }
+    }
+
+    private suspend fun oneShotFromOpenCodeZen(
+        config: ProviderConfig,
+        systemPrompt: String,
+        userPrompt: String
+    ): ApiResponse {
+        return try {
+            val service = createOpenCodeZenServiceForProvider(config)
+            val request = buildOpenCodeZenRequest(
+                model = config.model,
+                messages = listOf(
+                    OpenRouterMessage("system", systemPrompt),
+                    OpenRouterMessage("user", userPrompt)
+                ),
+                maxTokens = 800,
+                temperature = 0.65f
+            )
+            val response = service.message(request)
+            val content = extractOpenCodeZenText(response)
+
+            if (content.isBlank()) {
+                return ApiResponse(
+                    success = false,
+                    error = response.error?.message?.takeIf { it.isNotBlank() } ?: "Empty response",
+                    usedProvider = config.provider,
+                    retryable = true
+                )
+            }
+
+            ApiResponse(
+                success = true,
+                content = content,
+                usedProvider = config.provider,
+                retryable = false
+            )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is HttpException) {
+                val code = e.code()
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                return ApiResponse(
+                    success = false,
+                    error = formatHttpError(code, sanitizeSensitiveText(body ?: "")),
+                    usedProvider = config.provider,
+                    retryable = isRetryableHttpCode(code)
+                )
+            }
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Unknown error"),
+                usedProvider = config.provider,
+                retryable = isRetryableThrowable(e)
+            )
+        }
+    }
+
+    private suspend fun streamFromOpenCodeResponses(
+        config: ProviderConfig,
+        systemPrompt: String,
+        userMessages: List<OpenRouterMessage>,
+        onChunkReceived: (String) -> Unit
+    ): ApiResponse {
+        return try {
+            val service = createOpenCodeResponsesServiceForProvider(config)
+            val request = buildOpenCodeResponsesRequest(
+                model = config.model,
+                messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
+                maxTokens = 1024,
+                temperature = 0.7f
+            )
+            val response = service.response(request)
+            val content = extractOpenCodeResponsesText(response)
+            if (content.isBlank()) {
+                return ApiResponse(
+                    success = false,
+                    error = response.error?.message?.takeIf { it.isNotBlank() } ?: "Empty response",
+                    usedProvider = config.provider,
+                    retryable = true
+                )
+            }
+            onChunkReceived(content)
+            ApiResponse(
+                success = true,
+                content = content,
+                usedProvider = config.provider,
+                retryable = false
+            )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is HttpException) {
+                val code = e.code()
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                return ApiResponse(
+                    success = false,
+                    error = formatHttpError(code, sanitizeSensitiveText(body ?: "")),
+                    usedProvider = config.provider,
+                    retryable = isRetryableHttpCode(code)
+                )
+            }
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Unknown error"),
+                usedProvider = config.provider,
+                retryable = isRetryableThrowable(e)
+            )
+        }
+    }
+
+    private suspend fun oneShotFromOpenCodeResponses(
+        config: ProviderConfig,
+        systemPrompt: String,
+        userPrompt: String
+    ): ApiResponse {
+        return try {
+            val service = createOpenCodeResponsesServiceForProvider(config)
+            val request = buildOpenCodeResponsesRequest(
+                model = config.model,
+                messages = listOf(
+                    OpenRouterMessage("system", systemPrompt),
+                    OpenRouterMessage("user", userPrompt)
+                ),
+                maxTokens = 800,
+                temperature = 0.65f
+            )
+            val response = service.response(request)
+            val content = extractOpenCodeResponsesText(response)
+            if (content.isBlank()) {
+                return ApiResponse(
+                    success = false,
+                    error = response.error?.message?.takeIf { it.isNotBlank() } ?: "Empty response",
+                    usedProvider = config.provider,
+                    retryable = true
+                )
+            }
+            ApiResponse(
+                success = true,
+                content = content,
+                usedProvider = config.provider,
+                retryable = false
+            )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            if (e is HttpException) {
+                val code = e.code()
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                return ApiResponse(
+                    success = false,
+                    error = formatHttpError(code, sanitizeSensitiveText(body ?: "")),
+                    usedProvider = config.provider,
+                    retryable = isRetryableHttpCode(code)
+                )
+            }
+            ApiResponse(
+                success = false,
+                error = sanitizeSensitiveText(e.message ?: "Unknown error"),
+                usedProvider = config.provider,
+                retryable = isRetryableThrowable(e)
+            )
+        }
+    }
+
+    private suspend fun chatCompletionViaOpenCodeResponses(
+        config: ProviderConfig,
+        messages: List<OpenRouterMessage>,
+        maxTokens: Int,
+        temperature: Float
+    ): OpenRouterChatResponse {
+        val service = createOpenCodeResponsesServiceForProvider(config)
+        val request = buildOpenCodeResponsesRequest(
+            model = config.model,
+            messages = messages,
+            maxTokens = maxTokens,
+            temperature = temperature
+        )
+        val response = service.response(request)
+        val content = extractOpenCodeResponsesText(response)
+        if (content.isBlank()) {
+            val reason = response.error?.message?.takeIf { it.isNotBlank() } ?: "Empty response"
+            throw IllegalStateException(reason)
+        }
+
+        return OpenRouterChatResponse(
+            choices = listOf(
+                OpenRouterChoice(
+                    message = OpenRouterMessage(role = "assistant", content = content)
+                )
+            )
+        )
+    }
+
+    private suspend fun chatCompletionViaOpenCodeZen(
+        config: ProviderConfig,
+        messages: List<OpenRouterMessage>,
+        maxTokens: Int,
+        temperature: Float
+    ): OpenRouterChatResponse {
+        val service = createOpenCodeZenServiceForProvider(config)
+        val request = buildOpenCodeZenRequest(
+            model = config.model,
+            messages = messages,
+            maxTokens = maxTokens,
+            temperature = temperature
+        )
+        val response = service.message(request)
+        val content = extractOpenCodeZenText(response)
+        if (content.isBlank()) {
+            val reason = response.error?.message?.takeIf { it.isNotBlank() } ?: "Empty response"
+            throw IllegalStateException(reason)
+        }
+
+        return OpenRouterChatResponse(
+            choices = listOf(
+                OpenRouterChoice(
+                    message = OpenRouterMessage(role = "assistant", content = content)
+                )
+            )
+        )
+    }
+
+    private fun buildOpenCodeZenRequest(
+        model: String,
+        messages: List<OpenRouterMessage>,
+        maxTokens: Int,
+        temperature: Float
+    ): OpenCodeZenRequest {
+        val system = messages
+            .filter { it.role.equals("system", ignoreCase = true) }
+            .mapNotNull { it.content?.trim()?.takeIf { value -> value.isNotBlank() } }
+            .joinToString("\n\n")
+
+        val mappedMessages = messages
+            .mapNotNull { mapOpenRouterMessageToOpenCodeZen(it) }
+            .ifEmpty {
+                listOf(OpenCodeZenMessage(role = "user", content = "Hi"))
+            }
+
+        return OpenCodeZenRequest(
+            model = model,
+            messages = mappedMessages,
+            maxTokens = maxTokens.coerceAtLeast(64),
+            system = system.ifBlank { null },
+            temperature = temperature
+        )
+    }
+
+    private fun buildOpenCodeResponsesRequest(
+        model: String,
+        messages: List<OpenRouterMessage>,
+        maxTokens: Int,
+        temperature: Float
+    ): OpenCodeZenResponsesRequest {
+        val mappedInput = messages
+            .mapNotNull { message ->
+                if (message.role.equals("system", ignoreCase = true)) return@mapNotNull null
+                val text = mapOpenRouterMessageToText(message) ?: return@mapNotNull null
+                val role = if (message.role.equals("assistant", ignoreCase = true)) "assistant" else "user"
+                OpenCodeZenResponsesInputItem(
+                    role = role,
+                    content = listOf(OpenCodeZenResponsesInputContent(text = text))
+                )
+            }
+            .ifEmpty {
+                listOf(
+                    OpenCodeZenResponsesInputItem(
+                        role = "user",
+                        content = listOf(OpenCodeZenResponsesInputContent(text = "Hi"))
+                    )
+                )
+            }
+
+        return OpenCodeZenResponsesRequest(
+            model = model,
+            input = mappedInput,
+            maxOutputTokens = maxTokens.coerceAtLeast(64),
+            temperature = temperature,
+            stream = false
+        )
+    }
+
+    private fun mapOpenRouterMessageToOpenCodeZen(message: OpenRouterMessage): OpenCodeZenMessage? {
+        if (message.role.equals("system", ignoreCase = true)) return null
+
+        val role = if (message.role.equals("assistant", ignoreCase = true)) "assistant" else "user"
+        val content = mapOpenRouterMessageToText(message)
+
+        if (content.isNullOrBlank()) return null
+        return OpenCodeZenMessage(role = role, content = content)
+    }
+
+    private fun mapOpenRouterMessageToText(message: OpenRouterMessage): String? {
+        return message.content
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: message.toolCalls
+                ?.joinToString(separator = "\n") { call ->
+                    "${call.function.name}: ${call.function.arguments}"
+                }
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun extractOpenCodeZenText(response: com.example.bamachat.data.OpenCodeZenResponse): String {
+        return response.content
+            .orEmpty()
+            .mapNotNull { part ->
+                if (part.type == null || part.type == "text") part.text?.trim() else null
+            }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .trim()
+    }
+
+    private fun extractOpenCodeResponsesText(response: OpenCodeZenResponsesResponse): String {
+        val direct = response.outputText?.trim().orEmpty()
+        if (direct.isNotBlank()) return direct
+
+        return response.output
+            .orEmpty()
+            .flatMap { it.content.orEmpty() }
+            .mapNotNull { content ->
+                if (content.type == null || content.type == "output_text") content.text?.trim() else null
+            }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+            .trim()
     }
 
     private suspend fun visionViaOpenRouter(
@@ -593,23 +1035,51 @@ class ApiManager(
         val cerebrasKey = getApiKeyForProvider(ApiClient.Provider.CEREBRAS)
         val groqKey = getApiKeyForProvider(ApiClient.Provider.GROQ)
         val openRouterKey = getApiKeyForProvider(ApiClient.Provider.OPENROUTER)
+        val openCodeKey = getApiKeyForProvider(ApiClient.Provider.OPENCODE)
         val togetherKey = getApiKeyForProvider(ApiClient.Provider.TOGETHER)
         val openRouterModel = prefs.getString("openrouter_model", "google/gemma-3-27b-it:free") ?: "google/gemma-3-27b-it:free"
+        val openCodeEndpoint = prefs.getString("opencode_endpoint", "")?.trim().orEmpty()
+        val resolvedOpenCodeEndpoint = if (openCodeEndpoint.isBlank()) {
+            ApiClient.Provider.OPENCODE.baseUrl
+        } else {
+            openCodeEndpoint
+        }
+        val openCodeModel = prefs.getString("opencode_model", ApiClient.OPENCODE_DEFAULT_MODEL)
+            ?: ApiClient.OPENCODE_DEFAULT_MODEL
 
         return if (multiEnabled) {
             listOfNotNull(
+                openCodeKey?.let {
+                    ProviderConfig(
+                        provider = ApiClient.Provider.OPENCODE,
+                        apiKey = it,
+                        model = openCodeModel,
+                        baseUrlOverride = resolvedOpenCodeEndpoint
+                    )
+                },
                 cerebrasKey?.let { ProviderConfig(ApiClient.Provider.CEREBRAS, it, ApiClient.CEREBRAS_DEFAULT) },
                 groqKey?.let { ProviderConfig(ApiClient.Provider.GROQ, it, ApiClient.GROQ_DEFAULT) },
                 openRouterKey?.let { ProviderConfig(ApiClient.Provider.OPENROUTER, it, openRouterModel) },
                 togetherKey?.let { ProviderConfig(ApiClient.Provider.TOGETHER, it, ApiClient.TOGETHER_DEFAULT) }
             )
         } else {
-            val explicit = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
+            val explicitDefault = if (openCodeKey != null) "OpenCode" else "OpenRouter"
+            val explicit = prefs.getString("ai_provider", explicitDefault) ?: explicitDefault
             listOfNotNull(
                 when (explicit) {
                     "OpenRouter" -> openRouterKey?.let { ProviderConfig(ApiClient.Provider.OPENROUTER, it, openRouterModel) }
                     "Groq" -> groqKey?.let { ProviderConfig(ApiClient.Provider.GROQ, it, ApiClient.GROQ_DEFAULT) }
                     "Cerebras" -> cerebrasKey?.let { ProviderConfig(ApiClient.Provider.CEREBRAS, it, ApiClient.CEREBRAS_DEFAULT) }
+                    "OpenCode" -> {
+                        openCodeKey?.let {
+                            ProviderConfig(
+                                provider = ApiClient.Provider.OPENCODE,
+                                apiKey = it,
+                                model = openCodeModel,
+                                baseUrlOverride = resolvedOpenCodeEndpoint
+                            )
+                        }
+                    }
                     "Together" -> togetherKey?.let { ProviderConfig(ApiClient.Provider.TOGETHER, it, ApiClient.TOGETHER_DEFAULT) }
                     else -> null
                 }
@@ -617,12 +1087,52 @@ class ApiManager(
         }
     }
 
+    private fun isOpenCodeZenConfig(config: ProviderConfig): Boolean {
+        if (config.provider != ApiClient.Provider.OPENCODE) return false
+        val baseUrl = config.baseUrlOverride?.trim().orEmpty().ifBlank { ApiClient.Provider.OPENCODE.baseUrl }
+        val normalized = baseUrl.lowercase(Locale.getDefault())
+        if (normalized.contains("/zen/")) return true
+        return normalized.contains("opencode.ai")
+    }
+
+    private fun isOpenCodeResponsesModel(model: String): Boolean {
+        val normalized = model.trim().lowercase(Locale.getDefault())
+        if (normalized.isBlank()) return false
+        return normalized.startsWith("gpt-") ||
+            normalized.contains("codex") ||
+            normalized.startsWith("openai/")
+    }
+
+    private fun createOpenCodeZenServiceForProvider(config: ProviderConfig) =
+        ApiClient.createOpenCodeZenService(
+            baseUrl = config.baseUrlOverride?.takeIf { it.isNotBlank() } ?: ApiClient.Provider.OPENCODE.baseUrl,
+            apiKey = config.apiKey
+        )
+
+    private fun createOpenCodeResponsesServiceForProvider(config: ProviderConfig) =
+        ApiClient.createOpenCodeZenResponsesService(
+            baseUrl = config.baseUrlOverride?.takeIf { it.isNotBlank() } ?: ApiClient.Provider.OPENCODE.baseUrl,
+            apiKey = config.apiKey
+        )
+
+    private fun createServiceForProvider(config: ProviderConfig) =
+        if (!config.baseUrlOverride.isNullOrBlank()) {
+            ApiClient.createOpenAICompatibleService(
+                baseUrl = config.baseUrlOverride,
+                apiKey = config.apiKey,
+                includeOpenRouterHeaders = false
+            )
+        } else {
+            ApiClient.createOpenAICompatibleService(config.provider, config.apiKey)
+        }
+
     private fun getApiKeyForProvider(provider: ApiClient.Provider): String? {
         val prefKey = when (provider) {
             ApiClient.Provider.OPENROUTER -> "openrouter_api_key"
             ApiClient.Provider.GROQ -> "groq_api_key"
             ApiClient.Provider.CEREBRAS -> "cerebras_api_key"
             ApiClient.Provider.TOGETHER -> "together_api_key"
+            ApiClient.Provider.OPENCODE -> "opencode_api_key"
         }
         return secureString(prefKey).takeIf { it.length > 10 }
     }
@@ -676,8 +1186,10 @@ class ApiManager(
         val masked = raw
             .replace(Regex("Bearer\\s+[A-Za-z0-9._\\-]+", RegexOption.IGNORE_CASE), "Bearer ***")
             .replace(Regex("sk-or-[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "sk-or-***")
+            .replace(Regex("sk-[A-Za-z0-9_\\-]{16,}", RegexOption.IGNORE_CASE), "sk-***")
             .replace(Regex("gsk_[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "gsk_***")
             .replace(Regex("csk-[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "csk-***")
+            .replace(Regex("oc_[A-Za-z0-9_\\-]+", RegexOption.IGNORE_CASE), "oc_***")
             .replace(Regex("\"api[_-]?key\"\\s*:\\s*\"[^\"]+\"", RegexOption.IGNORE_CASE), "\"apiKey\":\"***\"")
         if (!prefs.getBoolean("privacy_strict_mode_enabled", true)) {
             return masked
@@ -689,7 +1201,7 @@ class ApiManager(
     }
 
     private fun secureString(key: String, defaultValue: String = ""): String =
-        SecureSettingsStore.getString(context, prefs, key, defaultValue)
+        SecureSettingsStore.getString(app, prefs, key, defaultValue)
 
     private fun isRetryableThrowable(throwable: Throwable): Boolean = when (throwable) {
         is HttpException -> isRetryableHttpCode(throwable.code())

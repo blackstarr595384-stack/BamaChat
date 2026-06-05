@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -130,14 +131,14 @@ fun RealtimeCollabScreen(
     var workspaceDraft by remember { mutableStateOf("") }
     var showSetup by remember { mutableStateOf(true) }
     var showDebug by remember { mutableStateOf(false) }
-    var sendLatchUntilMs by remember { mutableStateOf(0L) }
+    var sendLatchUntilMs by remember { mutableLongStateOf(0L) }
     var localAiStatus by remember { mutableStateOf<String?>(null) }
     var lastAiFailedRequest by remember { mutableStateOf<AiRetryRequest?>(null) }
     var pendingToolTemplate by remember { mutableStateOf<AutomationTemplate?>(null) }
     var workspaceSyncJob by remember { mutableStateOf<Job?>(null) }
     var localWorkspaceDirty by remember { mutableStateOf(false) }
     var remoteWorkspaceAheadMessage by remember { mutableStateOf<String?>(null) }
-    var lastWorkspaceRevisionSeen by remember { mutableStateOf(0L) }
+    var lastWorkspaceRevisionSeen by remember { mutableLongStateOf(0L) }
 
     val selectedAgents = remember { mutableStateListOf<ChatViewModel.Persona>() }
     val isOwner = session?.ownerId == myUserId

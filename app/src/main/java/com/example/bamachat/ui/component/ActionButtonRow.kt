@@ -12,18 +12,22 @@ import androidx.compose.ui.unit.dp
 fun ActionButtonRow(
     primaryLabel: String,
     onPrimary: () -> Unit,
+    modifier: Modifier = Modifier,
     secondaryLabel: String? = null,
     onSecondary: (() -> Unit)? = null,
     primaryEnabled: Boolean = true,
     secondaryEnabled: Boolean = true,
-    primaryModifier: Modifier = Modifier,
-    secondaryModifier: Modifier = Modifier
+    primaryButtonModifier: Modifier = Modifier,
+    secondaryButtonModifier: Modifier = Modifier
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         Button(
             enabled = primaryEnabled,
             onClick = onPrimary,
-            modifier = primaryModifier
+            modifier = primaryButtonModifier
         ) {
             Text(primaryLabel)
         }
@@ -31,7 +35,7 @@ fun ActionButtonRow(
             Button(
                 enabled = secondaryEnabled,
                 onClick = onSecondary,
-                modifier = secondaryModifier
+                modifier = secondaryButtonModifier
             ) {
                 Text(secondaryLabel)
             }

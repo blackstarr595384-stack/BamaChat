@@ -84,18 +84,19 @@ fun ChatInputBar(
     automationQuickActionsEnabled: Boolean,
     selectedExtensionQuickAction: ChatViewModel.ExtensionQuickAction,
     onSelectExtensionQuickAction: (ChatViewModel.ExtensionQuickAction) -> Unit,
+    compactMode: Boolean = false,
     promptTemplates: List<PromptTemplate> = emptyList(),
     onSelectPromptTemplate: (PromptTemplate) -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current
     val topRadius = (24f * uiCornerRoundnessScale).coerceIn(14f, 34f).dp
     val bottomRadius = (if (connectChatBottomBars) 0f else 14f * uiCornerRoundnessScale).coerceAtLeast(0f).dp
+    val horizontalInset = if (connectChatBottomBars) 0.dp else 10.dp
     val baseAlpha = if (glassEffectsEnabled) 0.74f else 0.9f
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 10.dp)
-            .navigationBarsPadding()
+            .padding(horizontal = horizontalInset)
             .imePadding()
             .animateContentSize(animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing)),
         color = surfaceColor.copy(alpha = (baseAlpha * uiSurfaceOpacity).coerceIn(0.55f, 1f)),
@@ -114,7 +115,7 @@ fun ChatInputBar(
                     )
                 }
             }
-            if (selectedImageUri != null) {
+            if (!compactMode && selectedImageUri != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -163,6 +164,16 @@ fun ChatInputBar(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (compactMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .padding(horizontal = 140.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.22f))
+                    )
+                }
                 if (automationQuickActionsEnabled) {
                     Row(
                         modifier = Modifier
@@ -244,6 +255,7 @@ fun ChatInputBar(
                         }
                     }
                 }
+                if (compactMode) return@Column
                 val triggerSend: () -> Unit = send@{
                     val now = System.currentTimeMillis()
                     if (now < sendLatchUntil) return@send
@@ -272,6 +284,7 @@ fun ChatInputBar(
                         },
                         modifier = Modifier
                             .weight(1f)
+                            .widthIn(min = 0.dp)
                             .heightIn(min = 46.dp),
                         placeholder = { Text("Schreib was... ( / für Befehle)", color = Color.White.copy(alpha = 0.4f)) },
                         label = { Text("Nachricht", color = Color.White.copy(alpha = 0.7f)) },
@@ -304,9 +317,11 @@ fun ChatInputBar(
                             }
                         ) {
                             if (filteredTemplates.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("Keine Befehle gefunden", fontSize = 12.sp) },
-                                    onClick = {}
+                                Text(
+                                    text = "Keine Befehle gefunden",
+                                    fontSize = 12.sp,
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                                 )
                             } else {
                                 filteredTemplates.forEach { template ->

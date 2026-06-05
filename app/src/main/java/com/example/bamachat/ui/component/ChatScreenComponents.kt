@@ -2,6 +2,9 @@ package com.example.bamachat.ui.component
 
 import android.content.Intent
 import android.net.Uri
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -20,10 +23,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.ClipboardManager as ComposeClipboardManager
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -31,6 +38,7 @@ import com.example.bamachat.data.model.ChatMessage
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import java.text.SimpleDateFormat
 import java.util.*
+import android.widget.Toast
 
 @Composable
 fun ChatBubble(
@@ -40,13 +48,20 @@ fun ChatBubble(
     surfaceColor: Color,
     fontSize: Float,
     showTimestamps: Boolean = true,
+    showLiveSources: Boolean = true,
     animateIn: Boolean = true,
     animationDelayMs: Int = 0,
     designPreset: ChatDesignPreset,
     designTokens: ChatDesignTokens
 ) {
     val isUser = message.isUser
+    val composeClipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    var showMessageActions by remember(message.id) { mutableStateOf(false) }
+    var sourcesExpandedByUser by remember(message.id) { mutableStateOf(false) }
     var visible by remember(message.id) { mutableStateOf(!animateIn) }
+    val hasLiveSources = message.sources.isNotEmpty()
+    val showSourcesSection = hasLiveSources && (showLiveSources || sourcesExpandedByUser)
     LaunchedEffect(message.id, animateIn) {
         if (animateIn) kotlinx.coroutines.delay(animationDelayMs.toLong())
         visible = true
@@ -66,6 +81,8 @@ fun ChatBubble(
         when (designPreset) {
             ChatDesignPreset.GLASS -> Brush.horizontalGradient(listOf(Color(0xFF4F8CFF), Color(0xFF7F7FD5), Color(0xFF43C6AC)))
             ChatDesignPreset.EDITORIAL -> Brush.horizontalGradient(listOf(Color(0xFFB35134), Color(0xFF8E3D30)))
+            ChatDesignPreset.NOIR -> Brush.horizontalGradient(listOf(Color(0xFF315A9F), Color(0xFF5B7CC0)))
+            ChatDesignPreset.SOLAR -> Brush.horizontalGradient(listOf(Color(0xFFE07A2F), Color(0xFFF4AE62)))
             ChatDesignPreset.DASHBOARD -> Brush.horizontalGradient(listOf(Color(0xFF0E7490), Color(0xFF2563EB)))
             ChatDesignPreset.CURRENT -> Brush.horizontalGradient(listOf(themeColor, themeColor.copy(alpha = 0.75f)))
         }
@@ -73,13 +90,17 @@ fun ChatBubble(
         when (designPreset) {
             ChatDesignPreset.GLASS -> Brush.verticalGradient(listOf(surfaceColor.copy(alpha = 0.72f), surfaceColor.copy(alpha = 0.56f)))
             ChatDesignPreset.EDITORIAL -> Brush.verticalGradient(listOf(surfaceColor.copy(alpha = 0.98f), surfaceColor.copy(alpha = 0.92f)))
+            ChatDesignPreset.NOIR -> Brush.verticalGradient(listOf(surfaceColor.copy(alpha = 0.84f), surfaceColor.copy(alpha = 0.72f)))
+            ChatDesignPreset.SOLAR -> Brush.verticalGradient(listOf(surfaceColor.copy(alpha = 0.92f), surfaceColor.copy(alpha = 0.8f)))
             ChatDesignPreset.DASHBOARD -> Brush.verticalGradient(listOf(surfaceColor.copy(alpha = 0.9f), surfaceColor.copy(alpha = 0.82f)))
             ChatDesignPreset.CURRENT -> Brush.verticalGradient(listOf(surfaceColor.copy(alpha = 0.98f), surfaceColor.copy(alpha = 0.8f)))
         }
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth().offset(y = bubbleShift),
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset { IntOffset(x = 0, y = bubbleShift.roundToPx()) },
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
@@ -89,6 +110,8 @@ fun ChatBubble(
                     when (designPreset) {
                         ChatDesignPreset.GLASS -> Brush.radialGradient(listOf(Color(0xFF8BB7FF), Color(0xFF4F8CFF)))
                         ChatDesignPreset.EDITORIAL -> Brush.radialGradient(listOf(Color(0xFFD17A52), Color(0xFF8E3D30)))
+                        ChatDesignPreset.NOIR -> Brush.radialGradient(listOf(Color(0xFF7292D6), Color(0xFF315A9F)))
+                        ChatDesignPreset.SOLAR -> Brush.radialGradient(listOf(Color(0xFFFFC387), Color(0xFFE07A2F)))
                         ChatDesignPreset.DASHBOARD -> Brush.radialGradient(listOf(Color(0xFF22D3EE), Color(0xFF0E7490)))
                         ChatDesignPreset.CURRENT -> Brush.radialGradient(listOf(themeColor, themeColor.copy(alpha = 0.5f)))
                     }
@@ -120,27 +143,110 @@ fun ChatBubble(
                     } else {
                         if (message.text.isBlank()) BlinkingDot(themeColor)
                         else {
-                            SelectionContainer {
-                                MarkdownText(
-                                    markdown = message.text,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        color = Color(0xFFEDEEF0),
-                                        fontSize = fontSize.sp,
-                                        lineHeight = (fontSize * 1.5f).sp
-                                    )
-                                )
-                            }
-                            if (message.sources.isNotEmpty()) {
+                            MarkdownText(
+                                markdown = message.text,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = Color(0xFFEDEEF0),
+                                    fontSize = fontSize.sp,
+                                    lineHeight = (fontSize * 1.5f).sp
+                                ),
+                                isTextSelectable = true
+                            )
+                            if (showSourcesSection) {
                                 Spacer(Modifier.height(10.dp))
                                 BubbleSourcesSection(message.sources, message.webFetchedAtIso, themeColor)
+                            }
+                            if (hasLiveSources && !showLiveSources) {
+                                Spacer(Modifier.height(6.dp))
+                                AssistChip(
+                                    onClick = { sourcesExpandedByUser = !sourcesExpandedByUser },
+                                    label = {
+                                        Text(
+                                            text = if (sourcesExpandedByUser) "Quellen" else "Quellen (${message.sources.size})",
+                                            fontSize = 10.sp,
+                                            color = Color.White.copy(alpha = 0.85f)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Public,
+                                            contentDescription = null,
+                                            tint = themeColor,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Icon(
+                                            if (sourcesExpandedByUser) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = null,
+                                            tint = Color.White.copy(alpha = 0.72f),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = Color.White.copy(alpha = 0.08f)
+                                    ),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        Color.White.copy(alpha = 0.16f)
+                                    ),
+                                    modifier = Modifier.height(28.dp)
+                                )
                             }
                         }
                         if (message.text.isNotBlank()) {
                             Spacer(Modifier.height(6.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = {
+                                        val copied = copyMessageText(context, composeClipboard, message.text)
+                                        Toast.makeText(
+                                            context,
+                                            if (copied) "Nachricht kopiert" else "Kopieren fehlgeschlagen",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, "Kopieren", tint = Color.White.copy(alpha = 0.75f), modifier = Modifier.size(16.dp))
+                                }
                                 IconButton(onClick = { onSpeak(message.text) }, modifier = Modifier.size(28.dp)) {
                                     @Suppress("DEPRECATION")
                                     Icon(Icons.Default.VolumeUp, "Vorlesen", tint = themeColor, modifier = Modifier.size(16.dp))
+                                }
+                                Box {
+                                    IconButton(onClick = { showMessageActions = true }, modifier = Modifier.size(28.dp)) {
+                                        Icon(Icons.Default.MoreVert, "Mehr", tint = Color.White.copy(alpha = 0.72f), modifier = Modifier.size(16.dp))
+                                    }
+                                    DropdownMenu(
+                                        expanded = showMessageActions,
+                                        onDismissRequest = { showMessageActions = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Nachricht kopieren") },
+                                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                            onClick = {
+                                                showMessageActions = false
+                                                val copied = copyMessageText(context, composeClipboard, message.text)
+                                                Toast.makeText(
+                                                    context,
+                                                    if (copied) "Nachricht kopiert" else "Kopieren fehlgeschlagen",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Vorlesen") },
+                                            leadingIcon = {
+                                                @Suppress("DEPRECATION")
+                                                Icon(Icons.Default.VolumeUp, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showMessageActions = false
+                                                onSpeak(message.text)
+                                            }
+                                        )
+                                    }
                                 }
                                 if (showTimestamps) {
                                     Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
@@ -238,4 +344,27 @@ fun BubbleSourcesSection(
             }
         }
     }
+}
+
+private fun copyMessageText(
+    context: Context,
+    composeClipboard: ComposeClipboardManager,
+    text: String
+): Boolean {
+    if (text.isBlank()) return false
+    val clipboardCopied = runCatching {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (clipboard == null) return@runCatching false
+        clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
+        val clip = clipboard.primaryClip
+        val copiedText = clip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+        copiedText.isNotBlank()
+    }.getOrDefault(false)
+
+    val composeCopied = runCatching {
+        composeClipboard.setText(AnnotatedString(text))
+        true
+    }.getOrDefault(false)
+
+    return clipboardCopied || composeCopied
 }

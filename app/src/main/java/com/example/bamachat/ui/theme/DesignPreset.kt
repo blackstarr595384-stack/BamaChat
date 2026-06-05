@@ -5,7 +5,9 @@ import androidx.compose.ui.graphics.Color
 enum class AppDesignPreset(val label: String) {
     PROFESSIONAL("Professional"),
     BOLD("Bold"),
-    MINIMAL("Minimal");
+    MINIMAL("Minimal"),
+    NOIR("Noir"),
+    SOLAR("Solar");
 
     companion object {
         val labels: List<String> = entries.map { it.label }
@@ -16,6 +18,8 @@ enum class AppDesignPreset(val label: String) {
                 "professional", "aktuell", "neo dashboard", "dashboard" -> PROFESSIONAL
                 "bold", "glassmorphism pro", "glass" -> BOLD
                 "minimal", "editorial bold", "editorial" -> MINIMAL
+                "noir", "midnight noir" -> NOIR
+                "solar", "sunset solar" -> SOLAR
                 else -> PROFESSIONAL
             }
         }
@@ -156,6 +160,70 @@ object AppDesignSystem {
             chatUserBubbleEnd = Color(0xFF8EA6DB),
             chatAssistantSurface = Color(0xFF2E425E),
             chatUserAvatarBg = Color(0xFF324863)
+        )
+        AppDesignPreset.NOIR -> AppDesignPalette(
+            screenBgTop = Color(0xFF1A111D),
+            screenBgMid = Color(0xFF141B2A),
+            screenBgBottom = Color(0xFF0C111E),
+            heroBg = Color(0xFF121B2A),
+            heroBorder = Color(0xFF2A3C55),
+            heroTitle = Color(0xFFF2F5FB),
+            heroSubtitle = Color(0xFFB8C6DC),
+            heroOverline = Color(0xFF90A5C4),
+            surface = Color(0xFF161F2F),
+            surfaceBorder = Color(0xFF2A3A53),
+            textPrimary = Color(0xFFEAF0FA),
+            textSecondary = Color(0xFFAEBED7),
+            accent = Color(0xFF7BA3FF),
+            accentStrong = Color(0xFF4E7DE8),
+            navContainer = Color(0xFFEAF0FC),
+            navIndicator = Color(0xFFC4D4F7),
+            navUnselected = Color(0xFF5A687D),
+            chatBgTop = Color(0xFF181322),
+            chatBgMid = Color(0xFF172235),
+            chatBgBottom = Color(0xFF101A2A),
+            chatHeaderStart = Color(0xFF2A1631),
+            chatHeaderMid = Color(0xFF1B2740),
+            chatHeaderEnd = Color(0xFF16345A),
+            chatComposerBg = Color(0xFF101827),
+            chatComposerFieldBg = Color(0xFF18263E),
+            chatNeutralControlBg = Color(0xFF1E3554),
+            chatUserBubbleStart = Color(0xFF4E7DE8),
+            chatUserBubbleEnd = Color(0xFF7BA3FF),
+            chatAssistantSurface = Color(0xFF1C2E49),
+            chatUserAvatarBg = Color(0xFF223A5A)
+        )
+        AppDesignPreset.SOLAR -> AppDesignPalette(
+            screenBgTop = Color(0xFF8B3A1E),
+            screenBgMid = Color(0xFF69313F),
+            screenBgBottom = Color(0xFF1E2D46),
+            heroBg = Color(0xFF1B2A40),
+            heroBorder = Color(0xFF3F5C82),
+            heroTitle = Color(0xFFF8F5EF),
+            heroSubtitle = Color(0xFFDCCCB9),
+            heroOverline = Color(0xFFC1B59D),
+            surface = Color(0xFF22324A),
+            surfaceBorder = Color(0xFF456286),
+            textPrimary = Color(0xFFF7F3EA),
+            textSecondary = Color(0xFFD3C6B4),
+            accent = Color(0xFFFFB66A),
+            accentStrong = Color(0xFFF08A3D),
+            navContainer = Color(0xFFFFF2E0),
+            navIndicator = Color(0xFFFFD9B0),
+            navUnselected = Color(0xFF77624A),
+            chatBgTop = Color(0xFF40211E),
+            chatBgMid = Color(0xFF4A2C3F),
+            chatBgBottom = Color(0xFF213754),
+            chatHeaderStart = Color(0xFF8B3A1E),
+            chatHeaderMid = Color(0xFF69313F),
+            chatHeaderEnd = Color(0xFF2D5480),
+            chatComposerBg = Color(0xFF1E2E44),
+            chatComposerFieldBg = Color(0xFF2A3E5E),
+            chatNeutralControlBg = Color(0xFF355174),
+            chatUserBubbleStart = Color(0xFFF08A3D),
+            chatUserBubbleEnd = Color(0xFFFFB66A),
+            chatAssistantSurface = Color(0xFF324B6D),
+            chatUserAvatarBg = Color(0xFF3A5981)
         )
     }
 }

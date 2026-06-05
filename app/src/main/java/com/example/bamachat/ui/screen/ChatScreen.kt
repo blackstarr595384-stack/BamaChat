@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -76,6 +77,7 @@ import com.example.bamachat.ui.component.TypingIndicator
 import com.example.bamachat.ui.component.compactLabel
 import com.example.bamachat.ui.component.designTokensFor
 import com.example.bamachat.ui.component.sanitizeForSpeech
+import com.example.bamachat.ui.component.splitSpeechChunks
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
@@ -85,6 +87,7 @@ import com.example.bamachat.ui.viewmodel.ToolCallStatus
 import com.example.bamachat.util.CloudVoiceManager
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -206,6 +209,8 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val isStreaming by viewModel.isStreaming.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val errorActionLabel by viewModel.errorActionLabel.collectAsStateWithLifecycle()
+    val isErrorRetryable by viewModel.isErrorRetryable.collectAsStateWithLifecycle()
     val hasOlderMessages by viewModel.hasOlderMessages.collectAsStateWithLifecycle()
     val chatSentiment by viewModel.chatSentiment.collectAsStateWithLifecycle()
     val usageStatus by viewModel.usageStatus.collectAsStateWithLifecycle()
@@ -219,9 +224,17 @@ fun ChatScreen(
     val primaryColorInt by settingsViewModel.primaryColorInt.collectAsStateWithLifecycle()
     val fontSize by settingsViewModel.fontSize.collectAsStateWithLifecycle()
     val aiProvider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
+    val multiProviderEnabled by settingsViewModel.multiProviderEnabled.collectAsStateWithLifecycle()
+    val openRouterApiKey by settingsViewModel.openRouterApiKey.collectAsStateWithLifecycle()
+    val groqApiKey by settingsViewModel.groqApiKey.collectAsStateWithLifecycle()
+    val cerebrasApiKey by settingsViewModel.cerebrasApiKey.collectAsStateWithLifecycle()
+    val togetherApiKey by settingsViewModel.togetherApiKey.collectAsStateWithLifecycle()
+    val openCodeApiKey by settingsViewModel.openCodeApiKey.collectAsStateWithLifecycle()
+    val openCodeEndpoint by settingsViewModel.openCodeEndpoint.collectAsStateWithLifecycle()
     val ttsEnabled by settingsViewModel.ttsEnabled.collectAsStateWithLifecycle()
     val ttsSpeed by settingsViewModel.ttsSpeed.collectAsStateWithLifecycle()
     val ttsPitch by settingsViewModel.ttsPitch.collectAsStateWithLifecycle()
+    val ttsVoiceStyle by settingsViewModel.ttsVoiceStyle.collectAsStateWithLifecycle()
     val ttsProVoiceEnabled by settingsViewModel.ttsProVoiceEnabled.collectAsStateWithLifecycle()
     val cloudVoiceEnabled by settingsViewModel.cloudVoiceEnabled.collectAsStateWithLifecycle()
     val elevenLabsApiKey by settingsViewModel.elevenLabsApiKey.collectAsStateWithLifecycle()
@@ -234,6 +247,7 @@ fun ChatScreen(
     val workspaceChatFilterEnabled by settingsViewModel.workspaceChatFilterEnabled.collectAsStateWithLifecycle()
     val autoSendVoice by settingsViewModel.autoSendVoice.collectAsStateWithLifecycle()
     val showTimestamps by settingsViewModel.showTimestamps.collectAsStateWithLifecycle()
+    val liveSourcesVisible by settingsViewModel.showLiveSources.collectAsStateWithLifecycle()
     val bubbleAnimations by settingsViewModel.bubbleAnimations.collectAsStateWithLifecycle()
     val uiDesignPreset by settingsViewModel.uiDesignPreset.collectAsStateWithLifecycle()
     val compactChatHeader by settingsViewModel.compactChatHeader.collectAsStateWithLifecycle()
@@ -242,6 +256,7 @@ fun ChatScreen(
     val uiCornerRoundnessScale by settingsViewModel.uiCornerRoundnessScale.collectAsStateWithLifecycle()
     val uiShadowIntensityScale by settingsViewModel.uiShadowIntensityScale.collectAsStateWithLifecycle()
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsStateWithLifecycle()
+    val language by settingsViewModel.language.collectAsStateWithLifecycle()
     val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
     @Suppress("UNUSED_VARIABLE") val notificationsEnabled by settingsViewModel.notificationsEnabled.collectAsStateWithLifecycle()
 
@@ -294,9 +309,17 @@ fun ChatScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(errorMessage) {
+    LaunchedEffect(errorMessage, isErrorRetryable, errorActionLabel) {
         errorMessage?.let {
-            snackbarHostState.showSnackbar(it)
+            val result = snackbarHostState.showSnackbar(
+                message = it,
+                actionLabel = if (isErrorRetryable) (errorActionLabel ?: "Erneut") else null,
+                withDismissAction = true,
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed && isErrorRetryable) {
+                viewModel.retryLastFailedMessage()
+            }
             viewModel.dismissError()
         }
     }
@@ -320,20 +343,23 @@ fun ChatScreen(
 
     // TTS
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    val stopActiveDictation = remember { mutableStateOf<() -> Unit>({}) }
+    val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
+    val ttsLocale = remember(language) {
+        when (language) {
+            "en" -> Locale.ENGLISH
+            "fr" -> Locale.FRENCH
+            "es" -> Locale("es")
+            "tr" -> Locale("tr")
+            "ar" -> Locale("ar")
+            else -> Locale.GERMAN
+        }
+    }
     DisposableEffect(Unit) {
         lateinit var ttsInstance: TextToSpeech
         ttsInstance = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                val langCode = settingsViewModel.language.value
-                val locale = when (langCode) {
-                    "en" -> Locale.ENGLISH
-                    "fr" -> Locale.FRENCH
-                    "es" -> Locale("es")
-                    "tr" -> Locale("tr")
-                    "ar" -> Locale("ar")
-                    else -> Locale.GERMAN
-                }
-                ttsInstance.language = locale
+                ttsInstance.language = ttsLocale
                 ttsInstance.setSpeechRate(ttsSpeed)
                 ttsInstance.setPitch(ttsPitch)
             }
@@ -345,13 +371,39 @@ fun ChatScreen(
             cloudVoiceManager.release()
         }
     }
-    LaunchedEffect(ttsSpeed, ttsPitch) {
+    LaunchedEffect(ttsSpeed, ttsPitch, ttsLocale) {
+        tts?.language = ttsLocale
         tts?.setSpeechRate(ttsSpeed)
         tts?.setPitch(ttsPitch)
+    }
+    val speakWithLocalTts: (String) -> Unit = localSpeak@{ speakText ->
+        val engine = tts ?: return@localSpeak
+        val maxChunkChars = if (useClearVoiceStyle) 170 else 220
+        val pauseMs = if (useClearVoiceStyle) 80L else 140L
+        val chunks = splitSpeechChunks(speakText, maxChunkChars = maxChunkChars)
+        if (chunks.isEmpty()) return@localSpeak
+        runCatching { engine.stop() }
+        chunks.forEachIndexed { index, chunk ->
+            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            engine.speak(
+                chunk,
+                queueMode,
+                null,
+                "bamachat_tts_${System.currentTimeMillis()}_$index"
+            )
+            if (index < chunks.lastIndex) {
+                engine.playSilentUtterance(
+                    pauseMs,
+                    TextToSpeech.QUEUE_ADD,
+                    "bamachat_tts_pause_$index"
+                )
+            }
+        }
     }
     val onSpeak: (String) -> Unit = { text ->
         val speakText = sanitizeForSpeech(text)
         scope.launch {
+            stopActiveDictation.value.invoke()
             val useCloudVoice = ttsProVoiceEnabled &&
                 cloudVoiceEnabled &&
                 elevenLabsApiKey.isNotBlank() &&
@@ -362,13 +414,14 @@ fun ChatScreen(
                         text = speakText,
                         apiKey = elevenLabsApiKey,
                         voiceId = elevenLabsVoiceId,
-                        modelId = elevenLabsModelId
+                        modelId = elevenLabsModelId,
+                        voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
                     )
                 }.getOrDefault(false)
                 if (cloudOk) return@launch
             }
             if (ttsEnabled) {
-                tts?.speak(speakText, TextToSpeech.QUEUE_FLUSH, null, null)
+                speakWithLocalTts(speakText)
             }
         }
     }
@@ -402,29 +455,37 @@ fun ChatScreen(
     var hasHadVoiceExchange by remember { mutableStateOf(false) }
     val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
     val speechRecognitionAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
-    val recognizerIntent = remember {
-        val langCode = settingsViewModel.language.value
-        val locale = when (langCode) {
-            "en" -> Locale.ENGLISH
-            "fr" -> Locale.FRENCH
-            "es" -> Locale("es")
-            "tr" -> Locale("tr")
-            "ar" -> Locale("ar")
-            else -> Locale.GERMAN
-        }
+    val recognizerIntent = remember(ttsLocale, voiceChatMode) {
+        val completeSilenceMs = if (voiceChatMode) 850L else 1400L
+        val possiblyCompleteSilenceMs = if (voiceChatMode) 550L else 1000L
+        val minimumSpeechMs = if (voiceChatMode) 450L else 900L
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale.toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, ttsLocale)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, ttsLocale.toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possiblyCompleteSilenceMs)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minimumSpeechMs)
+        }
+    }
+    val latestAutoSendVoice by rememberUpdatedState(autoSendVoice)
+    val latestVoiceChatMode by rememberUpdatedState(voiceChatMode)
+    val latestIsStreaming by rememberUpdatedState(isStreaming)
+    stopActiveDictation.value = {
+        if (isListeningState.value) {
+            runCatching { speechRecognizer.stopListening() }
+            isListeningState.value = false
         }
     }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
+            runCatching { tts?.stop() }
+            scope.launch { cloudVoiceManager.stop() }
             speechRecognizer.startListening(recognizerIntent)
         } else {
             Toast.makeText(
@@ -443,6 +504,26 @@ fun ChatScreen(
             override fun onEndOfSpeech() { isListeningState.value = false }
             override fun onError(error: Int) {
                 isListeningState.value = false
+                val isSoftSpeechError =
+                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+                        error == SpeechRecognizer.ERROR_NO_MATCH
+
+                if (latestVoiceChatMode && hasHadVoiceExchange && isSoftSpeechError) {
+                    scope.launch {
+                        delay(250)
+                        val audioOk = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        val localSpeaking = tts?.isSpeaking == true
+                        val cloudSpeaking = cloudVoiceManager.isSpeaking()
+                        if (audioOk && !latestIsStreaming && !localSpeaking && !cloudSpeaking && !isListeningState.value) {
+                            speechRecognizer.startListening(recognizerIntent)
+                        }
+                    }
+                    return
+                }
+
                 val errorMsg = when (error) {
                     SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Netzwerk-Zeitüberschreitung"
                     SpeechRecognizer.ERROR_NETWORK -> "Netzwerkfehler"
@@ -462,7 +543,7 @@ fun ChatScreen(
                 if (!data.isNullOrEmpty()) {
                     val recognizedText = data[0].trim()
                     inputText = recognizedText
-                    if (autoSendVoice) {
+                    if (latestAutoSendVoice) {
                         if (recognizedText.isNotBlank()) {
                             val now = System.currentTimeMillis()
                             val isDuplicateAutoSend =
@@ -520,11 +601,23 @@ fun ChatScreen(
     // Sync state back to Compose
     LaunchedEffect(isListeningState.value) { isListening = isListeningState.value }
 
-    // Continuous voice mode: re-trigger listening when AI finishes streaming
-    LaunchedEffect(isStreaming, voiceChatMode) {
-        if (voiceChatMode && !isStreaming && hasHadVoiceExchange) {
-            val audioOk = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-            if (audioOk) speechRecognizer.startListening(recognizerIntent)
+    // Continuous voice mode: re-trigger listening when AI and TTS playback are both finished
+    LaunchedEffect(isStreaming, voiceChatMode, hasHadVoiceExchange, messages.lastOrNull()?.id) {
+        if (!voiceChatMode || isStreaming || !hasHadVoiceExchange) return@LaunchedEffect
+
+        var waitedMs = 0L
+        while ((tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()) && waitedMs < 6000L) {
+            delay(120)
+            waitedMs += 120L
+        }
+        if (tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()) return@LaunchedEffect
+
+        val audioOk = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (audioOk && !isListeningState.value) {
+            speechRecognizer.startListening(recognizerIntent)
         }
     }
 
@@ -576,6 +669,25 @@ fun ChatScreen(
             activeWorkspaceName = activeWorkspaceName,
             onlyActiveWorkspace = workspaceChatFilterEnabled
         )
+    }
+    val selectableProviders = remember(
+        aiProvider,
+        openRouterApiKey,
+        groqApiKey,
+        cerebrasApiKey,
+        togetherApiKey,
+        openCodeApiKey,
+        openCodeEndpoint
+    ) {
+        buildList {
+            if (openRouterApiKey.isNotBlank()) add("OpenRouter")
+            if (openCodeApiKey.isNotBlank() && openCodeEndpoint.isNotBlank()) add("OpenCode")
+            if (groqApiKey.isNotBlank()) add("Groq")
+            if (cerebrasApiKey.isNotBlank()) add("Cerebras")
+            if (togetherApiKey.isNotBlank()) add("Together")
+            add("Ollama")
+            if (aiProvider.isNotBlank()) add(aiProvider)
+        }.distinct()
     }
 
     ModalNavigationDrawer(
@@ -676,6 +788,8 @@ fun ChatScreen(
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
+                    runCatching { tts?.stop() }
+                    scope.launch { cloudVoiceManager.stop() }
                     Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
                     speechRecognizer.startListening(recognizerIntent)
                 } else {
@@ -695,6 +809,8 @@ fun ChatScreen(
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
                     if (!isListening) {
+                        runCatching { tts?.stop() }
+                        scope.launch { cloudVoiceManager.stop() }
                         Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
                         speechRecognizer.startListening(recognizerIntent)
                     }
@@ -710,6 +826,15 @@ fun ChatScreen(
             fontSize = fontSize,
             selectedPersona = selectedPersona,
             aiProvider = aiProvider,
+            selectableProviders = selectableProviders,
+            multiProviderEnabled = multiProviderEnabled,
+            onSelectProvider = { selected ->
+                settingsViewModel.setAiProvider(selected)
+                if (multiProviderEnabled) {
+                    settingsViewModel.setMultiProviderEnabled(false)
+                    Toast.makeText(context, "Auto-Fallback deaktiviert: Provider manuell gesetzt.", Toast.LENGTH_SHORT).show()
+                }
+            },
             onPersonaClick = { showPersonaDialog = true },
             onSearchClick = onSearchClick,
             onMenuClick = { scope.launch { drawerState.open() } },
@@ -730,6 +855,7 @@ fun ChatScreen(
             listState = listState,
             snackbarHostState = snackbarHostState,
             showTimestamps = showTimestamps,
+            showLiveSources = liveSourcesVisible,
             bubbleAnimations = bubbleAnimations,
             usageStatus = usageStatus,
             onUpgradeClick = { viewModel.openPaywall() },
@@ -818,6 +944,9 @@ private fun ChatContent(
     fontSize: Float,
     selectedPersona: ChatViewModel.Persona,
     aiProvider: String,
+    selectableProviders: List<String>,
+    multiProviderEnabled: Boolean,
+    onSelectProvider: (String) -> Unit,
     onPersonaClick: () -> Unit,
     onSearchClick: () -> Unit,
     onMenuClick: () -> Unit,
@@ -831,6 +960,7 @@ private fun ChatContent(
     listState: androidx.compose.foundation.lazy.LazyListState,
     snackbarHostState: SnackbarHostState,
     showTimestamps: Boolean,
+    showLiveSources: Boolean,
     bubbleAnimations: Boolean,
     usageStatus: MonetizationViewModel.UsageStatus,
     onUpgradeClick: () -> Unit,
@@ -858,6 +988,8 @@ private fun ChatContent(
             ChatDesignPreset.CURRENT -> "Aktuell"
             ChatDesignPreset.GLASS -> "Glass"
             ChatDesignPreset.EDITORIAL -> "Editorial"
+            ChatDesignPreset.NOIR -> "Noir"
+            ChatDesignPreset.SOLAR -> "Solar"
             ChatDesignPreset.DASHBOARD -> "Dashboard"
         }
     }
@@ -868,9 +1000,16 @@ private fun ChatContent(
     val surfaceOpacity = uiSurfaceOpacity.coerceIn(0.55f, 1.0f)
     val density = LocalDensity.current
     val isKeyboardOpen = WindowInsets.ime.getBottom(density) > 0
-    val headerVerticalPadding = if (compactChatHeader) 4.dp else 8.dp
-    val headerBottomSpacer = if (compactChatHeader) 1.dp else 6.dp
+    var inputBarHeightPx by remember { mutableIntStateOf(0) }
+    val headerVerticalPadding = if (compactChatHeader) 2.dp else 5.dp
+    val headerBottomSpacer = if (compactChatHeader) 0.dp else 2.dp
     val headerTitleStyle = if (compactChatHeader) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge
+    val compactInputBarWhileScrolling = !isKeyboardOpen && listState.isScrollInProgress && messages.isNotEmpty()
+    val inputBarOffsetY by animateDpAsState(
+        targetValue = if (compactInputBarWhileScrolling) 18.dp else 0.dp,
+        animationSpec = tween(durationMillis = 260, easing = LinearOutSlowInEasing),
+        label = "inputBarOffset"
+    )
 
     val backgroundGradient = remember(designPalette) {
         Brush.verticalGradient(
@@ -907,7 +1046,9 @@ private fun ChatContent(
         animationSpec = tween(durationMillis = 120, easing = LinearOutSlowInEasing),
         label = "messageOverlayAlpha"
     )
+    val chatListBottomPadding = with(density) { inputBarHeightPx.toDp() } + 18.dp
     var topMenuExpanded by remember { mutableStateOf(false) }
+    var providerMenuExpanded by remember { mutableStateOf(false) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -1022,19 +1163,59 @@ private fun ChatContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                    color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                                ) {
-                                    Text(
-                                        text = "Provider: $aiProvider",
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                    )
+                                Box {
+                                    Surface(
+                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
+                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                                        modifier = Modifier.clickable { providerMenuExpanded = true }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Provider: $aiProvider",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                            Spacer(Modifier.width(4.dp))
+                                            Icon(
+                                                Icons.Default.ArrowDropDown,
+                                                contentDescription = "Provider wählen",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = providerMenuExpanded,
+                                        onDismissRequest = { providerMenuExpanded = false }
+                                    ) {
+                                        selectableProviders.forEach { providerOption ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = if (providerOption == aiProvider) "✓ $providerOption" else providerOption
+                                                    )
+                                                },
+                                                onClick = {
+                                                    providerMenuExpanded = false
+                                                    onSelectProvider(providerOption)
+                                                }
+                                            )
+                                        }
+                                        if (multiProviderEnabled) {
+                                            HorizontalDivider()
+                                            DropdownMenuItem(
+                                                text = { Text("Auto-Fallback ist aktiv") },
+                                                leadingIcon = { Icon(Icons.Default.Info, null) },
+                                                onClick = { providerMenuExpanded = false }
+                                            )
+                                        }
+                                    }
                                 }
                                 Surface(
                                     shape = RoundedCornerShape(designTokens.chipCornerRadius),
@@ -1044,6 +1225,8 @@ private fun ChatContent(
                                         when (designPreset) {
                                             ChatDesignPreset.GLASS -> Color(0xFF9FCBFF).copy(alpha = 0.7f)
                                             ChatDesignPreset.EDITORIAL -> Color(0xFFFFB08A).copy(alpha = 0.7f)
+                                            ChatDesignPreset.NOIR -> Color(0xFF86A8FF).copy(alpha = 0.7f)
+                                            ChatDesignPreset.SOLAR -> Color(0xFFFFC386).copy(alpha = 0.7f)
                                             ChatDesignPreset.DASHBOARD -> Color(0xFF7DD3FC).copy(alpha = 0.7f)
                                             ChatDesignPreset.CURRENT -> Color.White.copy(alpha = 0.35f)
                                         }
@@ -1168,7 +1351,12 @@ private fun ChatContent(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer(alpha = messageContentAlpha),
-                            contentPadding = PaddingValues(horizontal = designTokens.listHorizontalPadding, vertical = 12.dp),
+                            contentPadding = PaddingValues(
+                                start = designTokens.listHorizontalPadding,
+                                top = 5.dp,
+                                end = designTokens.listHorizontalPadding,
+                                bottom = chatListBottomPadding
+                            ),
                             verticalArrangement = Arrangement.spacedBy(designTokens.listVerticalSpacing)
                         ) {
                             if (hasOlderMessages) {
@@ -1199,6 +1387,7 @@ private fun ChatContent(
                                     surfaceColor = personaMood.cardSurface,
                                     fontSize = fontSize,
                                     showTimestamps = showTimestamps,
+                                    showLiveSources = showLiveSources,
                                     animateIn = bubbleAnimations && isRecentMessage,
                                     animationDelayMs = (index.coerceAtMost(8) * 22),
                                     designPreset = designPreset,
@@ -1222,36 +1411,45 @@ private fun ChatContent(
                     }
                 }
 
-                // Input bar
-                ChatInputBar(
-                    inputText = inputText,
-                    onInputChange = onInputChange,
-                    onSend = onSend,
-                    onImageGen = onImageGen,
-                    onUpload = onUpload,
-                    onTakePhoto = onTakePhoto,
-                    selectedImageUri = selectedImageUri,
-                    onClearImage = onClearImage,
-                    isListening = isListening,
-                    voicePushToTalkEnabled = voicePushToTalkEnabled,
-                    onMicClick = onMicClick,
-                    onMicPressStart = onMicPressStart,
-                    onMicPressEnd = onMicPressEnd,
-                    themeColor = themeColor,
-                    surfaceColor = personaMood.cardSurface,
-                    isLoading = isLoading,
-                    designTokens = designTokens,
-                    connectChatBottomBars = connectChatBottomBars,
-                    glassEffectsEnabled = glassEffectsEnabled,
-                    uiCornerRoundnessScale = uiCornerScale,
-                    uiShadowIntensityScale = uiShadowScale,
-                    uiSurfaceOpacity = surfaceOpacity,
-                    automationQuickActionsEnabled = automationQuickActionsEnabled,
-                    selectedExtensionQuickAction = selectedExtensionQuickAction,
-                    onSelectExtensionQuickAction = onSelectExtensionQuickAction,
-                    promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
-                    onSelectPromptTemplate = {}
-                )
+                // Input bar: schrumpft beim Scrollen auf Quick-Actions und gleitet nach unten.
+                Box(
+                    modifier = Modifier
+                        .onSizeChanged { inputBarHeightPx = it.height }
+                        .graphicsLayer {
+                        translationY = with(density) { inputBarOffsetY.toPx() }
+                    }
+                ) {
+                    ChatInputBar(
+                        inputText = inputText,
+                        onInputChange = onInputChange,
+                        onSend = onSend,
+                        onImageGen = onImageGen,
+                        onUpload = onUpload,
+                        onTakePhoto = onTakePhoto,
+                        selectedImageUri = selectedImageUri,
+                        onClearImage = onClearImage,
+                        isListening = isListening,
+                        voicePushToTalkEnabled = voicePushToTalkEnabled,
+                        onMicClick = onMicClick,
+                        onMicPressStart = onMicPressStart,
+                        onMicPressEnd = onMicPressEnd,
+                        themeColor = themeColor,
+                        surfaceColor = personaMood.cardSurface,
+                        isLoading = isLoading,
+                        designTokens = designTokens,
+                        connectChatBottomBars = connectChatBottomBars,
+                        glassEffectsEnabled = glassEffectsEnabled,
+                        uiCornerRoundnessScale = uiCornerScale,
+                        uiShadowIntensityScale = uiShadowScale,
+                        uiSurfaceOpacity = surfaceOpacity,
+                        automationQuickActionsEnabled = automationQuickActionsEnabled,
+                        selectedExtensionQuickAction = selectedExtensionQuickAction,
+                        onSelectExtensionQuickAction = onSelectExtensionQuickAction,
+                        compactMode = compactInputBarWhileScrolling,
+                        promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
+                        onSelectPromptTemplate = {}
+                    )
+                }
             }
         }
     }

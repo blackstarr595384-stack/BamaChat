@@ -3,6 +3,8 @@ package com.example.bamachat.ui.viewmodel
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -28,6 +30,7 @@ import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.McpWorkflowStatus
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.SecureSettingsStore
+import com.example.bamachat.util.UserErrorMessage
 import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,14 +60,17 @@ class ChatViewModel @Inject constructor(
     val mcpWorkflowManager: McpWorkflowManager
 ) : AndroidViewModel(application) {
     companion object {
+        // Pagination: only display last 100 messages max (50 for context during loading)
         private const val INITIAL_VISIBLE_MESSAGE_LIMIT = 100
-        private const val LOAD_MORE_STEP = 70
-        private const val DEV_INITIAL_VISIBLE_MESSAGE_LIMIT = 280
-        private const val DEV_LOAD_MORE_STEP = 160
+        private const val LOAD_MORE_STEP = 50
+        private const val DEV_INITIAL_VISIBLE_MESSAGE_LIMIT = 200
+        private const val DEV_LOAD_MORE_STEP = 100
         private const val DEFAULT_HISTORY_LIMIT = 10
         private const val DEV_HISTORY_LIMIT = 40
         private const val KEY_EXTENSION_STATES_JSON = "workspace_extension_states_json"
         private const val KEY_EXTENSION_QUICK_ACTION = "extension_quick_action"
+        // Cache system prompts for 5 minutes to reduce API load
+        private const val SYSTEM_PROMPT_CACHE_TTL_MS = 5 * 60 * 1000L
 
         internal fun computeWindowedMessages(all: List<ChatMessage>, limit: Int): List<ChatMessage> {
             if (all.isEmpty()) return emptyList()
@@ -131,6 +137,11 @@ class ChatViewModel @Inject constructor(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
+    private val _errorActionLabel = MutableStateFlow<String?>(null)
+    val errorActionLabel: StateFlow<String?> = _errorActionLabel
+    private val _isErrorRetryable = MutableStateFlow(false)
+    val isErrorRetryable: StateFlow<Boolean> = _isErrorRetryable
+    private val _lastRetryableUserMessage = MutableStateFlow<String?>(null)
 
     private val _availableModels = MutableStateFlow<List<ModelInfo>>(emptyList())
     val availableModels: StateFlow<List<ModelInfo>> = _availableModels
@@ -178,6 +189,11 @@ class ChatViewModel @Inject constructor(
     private var lastAcceptedTextSend: String? = null
     private var lastAcceptedConversationId: String? = null
     private var lastAcceptedTextSendAtMs: Long = 0L
+    private var pendingUserMessageForRetry: String? = null
+
+    // System prompt cache: 5-min TTL to reduce repeated API calls
+    private var systemPromptCache: String? = null
+    private var systemPromptCacheExpireAt: Long = 0L
 
     enum class ExtensionQuickAction(val key: String, val label: String) {
         AUTO("auto", "Auto"), RESEARCH("research", "Research"),
@@ -307,6 +323,7 @@ class ChatViewModel @Inject constructor(
         lastAcceptedTextSend = normalizedText
         lastAcceptedConversationId = convId
         lastAcceptedTextSendAtMs = now
+        pendingUserMessageForRetry = trimmedText
 
         if (convId == null) {
             viewModelScope.launch {
@@ -383,7 +400,7 @@ class ChatViewModel @Inject constructor(
                 repo.renameConversation(convId, text.take(40).ifBlank { "Bild-Chat" })
             }
             try {
-                val systemPrompt = personaViewModel.getSystemPromptCached(personaViewModel.selectedPersona.value)
+                val systemPrompt = getSystemPromptWithCache(personaViewModel.selectedPersona.value)
                 val result = mediaService.analyzeImage(systemPrompt, text, imageUri,
                     enableOcr = prefs.getBoolean("local_ocr_enabled", true))
                 if (result.success) {
@@ -471,8 +488,19 @@ class ChatViewModel @Inject constructor(
         runtimeContext: String? = null,
         extensionRuntime: ChatEngine.ExtensionRuntime? = null
     ) {
+        if (!hasActiveInternetConnection()) {
+            val networkError = com.example.bamachat.util.ErrorRecoveryManager
+                .mapErrorToUserMessage(java.io.IOException("No network"))
+            publishError(
+                message = buildErrorDisplayText(networkError),
+                retryable = networkError.isRetryable,
+                actionLabel = networkError.actionLabel
+            )
+            return
+        }
+
         val startedAt = System.currentTimeMillis()
-        val systemPrompt = personaViewModel.getSystemPromptCached(personaViewModel.selectedPersona.value)
+        val systemPrompt = getSystemPromptWithCache(personaViewModel.selectedPersona.value)
         val mergedRuntimeContext = listOfNotNull(runtimeContext, extensionRuntime?.promptContext)
             .filter { it.isNotBlank() }.joinToString("\n\n").takeIf { it.isNotBlank() }
         val forceWebResearch = extensionRuntime?.forceWebResearch == true
@@ -534,7 +562,11 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
 
                 val response = apiManager.oneShotChatCompletion(request, fullSystemPrompt)
                 if (response == null) {
-                    _errorMessage.value = "Agent: Keine Antwort vom Provider"
+                    publishError(
+                        message = "Agent: Keine Antwort vom Provider",
+                        retryable = true,
+                        actionLabel = "Erneut versuchen"
+                    )
                     repo.deleteMessage(assistantMsg.id)
                     return
                 }
@@ -594,16 +626,20 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
 
             val trimmedContent = finalContent.trim()
             if (trimmedContent.isBlank()) {
-                _errorMessage.value = "Agent: Leere Antwort vom Provider"
+                publishError(
+                    message = "Agent: Leere Antwort vom Provider",
+                    retryable = true,
+                    actionLabel = "Erneut versuchen"
+                )
                 repo.deleteMessage(assistantMsg.id)
                 return
             }
 
             repo.saveMessage(convId, assistantMsg.copy(text = trimmedContent, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso), touchConversation = true)
+            clearRetryContext()
             notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
         } catch (e: Exception) {
-            AppTelemetry.logError("chat_agent_error", e)
-            _errorMessage.value = "Agent-Fehler: ${e.message ?: "Unbekannt"}"
+            handleError(e)
             repo.deleteMessage(assistantMsg.id)
         } finally {
             _activeToolCalls.value = emptyList()
@@ -645,7 +681,11 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                     }
                 },
                 onError = { error ->
-                    _errorMessage.value = error
+                    publishError(
+                        message = error,
+                        retryable = true,
+                        actionLabel = "Erneut versuchen"
+                    )
                     AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
                 }
             )
@@ -653,13 +693,20 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             if (result.success && result.content.isNotBlank()) {
                 val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
                 repo.saveMessage(convId, finalized, touchConversation = true)
+                clearRetryContext()
                 notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
             } else {
+                if (result.error.isNotBlank()) {
+                    publishError(
+                        message = result.error,
+                        retryable = result.retryable,
+                        actionLabel = if (result.retryable) "Erneut versuchen" else null
+                    )
+                }
                 repo.deleteMessage(assistantMsg.id)
             }
         } catch (e: Exception) {
-            AppTelemetry.logError("chat_stream_exception", e)
-            _errorMessage.value = "Stream-Fehler: ${e.message ?: "Unbekannt"}"
+            handleError(e)
             repo.deleteMessage(assistantMsg.id)
         }
     }
@@ -715,7 +762,22 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     }
 
     fun setBiometricAuthenticated(authenticated: Boolean) { _isBiometricAuthenticated.value = authenticated }
-    fun dismissError() { _errorMessage.value = null }
+    fun dismissError() {
+        _errorMessage.value = null
+        _errorActionLabel.value = null
+        _isErrorRetryable.value = false
+    }
+
+    fun retryLastFailedMessage(): Boolean {
+        val retryText = _lastRetryableUserMessage.value?.takeIf { it.isNotBlank() } ?: return false
+        lastAcceptedTextSend = null
+        lastAcceptedConversationId = null
+        lastAcceptedTextSendAtMs = 0L
+        _errorMessage.value = null
+        _errorActionLabel.value = null
+        _isErrorRetryable.value = false
+        return sendMessage(retryText)
+    }
 
     fun addManualTrainingExample(persona: Persona, userInput: String, idealResponse: String) {
         personaViewModel.addManualTrainingExample(persona, userInput, idealResponse)
@@ -745,7 +807,18 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     val usageStatus: StateFlow<MonetizationViewModel.UsageStatus> get() = monetizationViewModel.usageStatus
     val showPaywall: StateFlow<Boolean> get() = monetizationViewModel.showPaywall
 
-    // ===== Privat =====
+    // ===== Private/Utilities =====
+    private fun getSystemPromptWithCache(persona: Persona): String {
+        val now = System.currentTimeMillis()
+        if (systemPromptCache != null && now < systemPromptCacheExpireAt) {
+            return systemPromptCache!!
+        }
+        val prompt = personaViewModel.getSystemPromptCached(persona)
+        systemPromptCache = prompt
+        systemPromptCacheExpireAt = now + SYSTEM_PROMPT_CACHE_TTL_MS
+        return prompt
+    }
+
     private fun refreshActiveExtensions() {
         val raw = prefs.getString(KEY_EXTENSION_STATES_JSON, "")
         val list = chatEngine.resolveActiveExtensions(raw)
@@ -759,11 +832,47 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
 
     private fun handleError(e: Exception) {
         AppTelemetry.logError("chat_error", e)
-        _errorMessage.value = when {
-            e.message?.contains("timeout", ignoreCase = true) == true -> "Zeitüberschreitung. Internet prüfen."
-            e.message?.contains("Unable to resolve host", ignoreCase = true) == true -> "Keine Internetverbindung."
-            else -> "Fehler: ${e.message ?: "Unbekannt"}"
+        val userErrorMessage = com.example.bamachat.util.ErrorRecoveryManager.mapErrorToUserMessage(e)
+        publishError(
+            message = buildErrorDisplayText(userErrorMessage),
+            retryable = userErrorMessage.isRetryable,
+            actionLabel = userErrorMessage.actionLabel
+        )
+    }
+
+    private fun buildErrorDisplayText(msg: UserErrorMessage): String {
+        return "${msg.title}: ${msg.description}\n\n💡 ${msg.suggestion}"
+    }
+
+    private fun publishError(message: String, retryable: Boolean, actionLabel: String?) {
+        val candidate = pendingUserMessageForRetry?.takeIf { it.isNotBlank() }
+        val canRetry = retryable && !candidate.isNullOrBlank()
+        if (canRetry) {
+            _lastRetryableUserMessage.value = candidate
+            _isErrorRetryable.value = true
+            _errorActionLabel.value = actionLabel?.takeIf { it.isNotBlank() } ?: "Erneut versuchen"
+        } else {
+            _isErrorRetryable.value = false
+            _errorActionLabel.value = null
         }
+        _errorMessage.value = message
+    }
+
+    private fun clearRetryContext() {
+        pendingUserMessageForRetry = null
+        _lastRetryableUserMessage.value = null
+        _isErrorRetryable.value = false
+        _errorActionLabel.value = null
+    }
+
+    private fun hasActiveInternetConnection(): Boolean {
+        val connectivityManager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        val hasInternetCapability = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val isValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return hasInternetCapability && isValidated
     }
 
     private fun publishVisibleMessages() {
@@ -812,7 +921,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         ExtensionQuickAction.PLAN -> QuickActionSuggestion.PLAN
     }
 
-    // ===== Persona Character & Autonomy Profile (für Screen-Dialog) =====
+    // ===== Persona Character & Autonomy Profile =====
     fun getPersonaCharacterProfile(persona: Persona): PersonaCharacterProfile {
         val profile = personaViewModel.getPersonaProfile(persona)
         return PersonaCharacterProfile(empathy = profile.empathy, creativity = profile.creativity, directness = profile.directness)
@@ -825,6 +934,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             .putInt("persona_character_${persona.name.lowercase()}_directness", profile.directness)
             .apply()
         personaViewModel.systemPromptCache.clear()
+        systemPromptCache = null
     }
 
     fun getPersonaAutonomyProfile(persona: Persona): AutonomyProfile {
@@ -844,9 +954,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             .putInt("autonomy_self_correction_${persona.name.lowercase()}", profile.selfCorrectionStrictness)
             .apply()
         personaViewModel.systemPromptCache.clear()
+        systemPromptCache = null
     }
 
-    fun resetPromptForPersona(persona: Persona) { personaViewModel.resetPromptForPersona(persona) }
+    fun resetPromptForPersona(persona: Persona) { personaViewModel.resetPromptForPersona(persona); systemPromptCache = null }
     fun getPersonaProfile(persona: Persona): PersonaCharacterProfile = getPersonaCharacterProfile(persona)
 
     data class PersonaCharacterProfile(val empathy: Int = 50, val creativity: Int = 50, val directness: Int = 50)
@@ -855,6 +966,9 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     override fun onCleared() {
         messagesJob?.cancel()
         prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
+        allMessagesBuffer.clear()
+        _messageFeedback.value = emptyMap()
+        systemPromptCache = null
         super.onCleared()
     }
 }
