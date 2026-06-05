@@ -3,11 +3,19 @@
     <!-- Toolchain-bound: newer versions require AGP 8.9.1+ / compileSdk 36. -->
     <issue id="GradleDependency" severity="ignore" />
 
+    <!-- Intentional pin: AGP 8.7.3 is our validated baseline for compileSdk/targetSdk 35. -->
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+
     <!-- Emitted by external lint checks compiled against a newer lint API. -->
     <issue id="ObsoleteLintCustomCheck" severity="ignore" />
 
     <!-- Adaptive icons are intentionally kept in -v26 resources. -->
     <issue id="ObsoleteSdkInt">
         <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+
+    <!-- Reported in BouncyCastle internals pulled by pdfbox; not app trust manager code. -->
+    <issue id="TrustAllX509TrustManager">
+        <ignore regexp=".*/org\.bouncycastle/bcpkix-jdk15to18/.*/bcpkix-jdk15to18-.*\.jar" />
     </issue>
 </lint>
