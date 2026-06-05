@@ -1,0 +1,20 @@
+{
+  "name": "bamachat-secure-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local secure backend proxy for /api/chat",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2"
+  }
+}

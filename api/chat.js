@@ -1,51 +1,32 @@
-require("dotenv").config();
-const express = require("express");
 const axios = require("axios");
-const cors = require("cors");
 const crypto = require("crypto");
 
-const app = express();
-const PORT = Number(process.env.PORT || 5173);
 const HF_TOKEN = String(process.env.HF_TOKEN || "").trim();
 const HF_MODEL = String(process.env.HF_MODEL || "meta-llama/Llama-2-7b-chat-hf").trim();
-const ALLOWED_ORIGIN = String(process.env.ALLOWED_ORIGIN || "*").trim();
+const ALLOWED_ORIGIN = String(process.env.ALLOWED_ORIGIN || "").trim();
 const PROXY_AUTH_TOKEN = String(process.env.PROXY_AUTH_TOKEN || "").trim();
 const ALLOW_MISSING_ORIGIN = String(process.env.ALLOW_MISSING_ORIGIN || "true").toLowerCase() !== "false";
-const IS_PRODUCTION = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS || 30);
 
 const rateLimitStore = new Map();
 
-if (IS_PRODUCTION && (ALLOWED_ORIGIN === "*" || !ALLOWED_ORIGIN)) {
-  throw new Error("ALLOWED_ORIGIN must be set to a concrete origin in production.");
-}
-
-app.use(
-  cors({
-    origin: ALLOWED_ORIGIN === "*" ? true : ALLOWED_ORIGIN,
-    methods: ["POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
-app.use(express.json({ limit: "1mb" }));
-
 function isOriginAllowed(originHeader) {
-  if (ALLOWED_ORIGIN === "*") return true;
   if (!originHeader) return ALLOW_MISSING_ORIGIN;
+  if (!ALLOWED_ORIGIN) return false;
   return originHeader === ALLOWED_ORIGIN;
 }
 
 function isProxyTokenValid(req) {
   if (!PROXY_AUTH_TOKEN) return true;
-  const headerToken = String(req.get("x-proxy-token") || "").trim();
+  const headerToken = String(req.headers["x-proxy-token"] || "").trim();
   return headerToken.length > 0 && headerToken === PROXY_AUTH_TOKEN;
 }
 
 function buildRateLimitKey(req) {
-  const forwardedFor = String(req.get("x-forwarded-for") || "").split(",")[0].trim();
-  const ip = forwardedFor || req.ip || "unknown";
-  const token = String(req.get("x-proxy-token") || "").trim();
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const ip = forwardedFor || "unknown";
+  const token = String(req.headers["x-proxy-token"] || "").trim();
   const tokenHash = token
     ? crypto.createHash("sha256").update(token).digest("hex").slice(0, 16)
     : "anon";
@@ -79,42 +60,47 @@ function consumeRateLimit(key) {
   };
 }
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true });
-});
+module.exports = async (req, res) => {
+  const origin = String(req.headers.origin || "").trim();
+  if (isOriginAllowed(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,x-proxy-token");
 
-app.post("/api/chat", async (req, res) => {
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "method not allowed" });
+  }
+  if (!isOriginAllowed(origin)) {
+    return res.status(403).json({ error: "origin not allowed" });
+  }
+  if (!isProxyTokenValid(req)) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  const limit = consumeRateLimit(buildRateLimitKey(req));
+  res.setHeader("X-RateLimit-Limit", String(RATE_LIMIT_MAX_REQUESTS));
+  res.setHeader("X-RateLimit-Remaining", String(limit.remaining));
+  if (!limit.allowed) {
+    res.setHeader("Retry-After", String(limit.retryAfterSeconds));
+    return res.status(429).json({ error: "rate limit exceeded" });
+  }
+  if (!HF_TOKEN) {
+    return res.status(500).json({ error: "Server is not configured (missing HF_TOKEN)." });
+  }
+
   try {
-    const origin = String(req.get("origin") || "").trim();
-    if (!isOriginAllowed(origin)) {
-      return res.status(403).json({ error: "origin not allowed" });
-    }
-    if (!isProxyTokenValid(req)) {
-      return res.status(401).json({ error: "unauthorized" });
-    }
-
-    const limit = consumeRateLimit(buildRateLimitKey(req));
-    res.setHeader("X-RateLimit-Limit", String(RATE_LIMIT_MAX_REQUESTS));
-    res.setHeader("X-RateLimit-Remaining", String(limit.remaining));
-    if (!limit.allowed) {
-      res.setHeader("Retry-After", String(limit.retryAfterSeconds));
-      return res.status(429).json({ error: "rate limit exceeded" });
-    }
-
-    if (!HF_TOKEN) {
-      return res.status(500).json({ error: "Server is not configured (missing HF_TOKEN)." });
-    }
-
-    const { message } = req.body || {};
-    const text = String(message || "").trim();
-
-    if (!text) {
+    const message = String(req.body?.message || "").trim();
+    if (!message) {
       return res.status(400).json({ error: "message is required" });
     }
 
-    const response = await axios.post(
+    const upstream = await axios.post(
       `https://api-inference.huggingface.co/models/${HF_MODEL}`,
-      { inputs: text },
+      { inputs: message },
       {
         headers: {
           Authorization: `Bearer ${HF_TOKEN}`,
@@ -124,24 +110,20 @@ app.post("/api/chat", async (req, res) => {
       }
     );
 
-    const generated = Array.isArray(response.data)
-      ? response.data?.[0]?.generated_text
-      : response.data?.generated_text;
+    const generated = Array.isArray(upstream.data)
+      ? upstream.data?.[0]?.generated_text
+      : upstream.data?.generated_text;
 
     if (!generated || typeof generated !== "string") {
       return res.status(502).json({ error: "Invalid upstream response" });
     }
 
-    res.json({ reply: generated });
+    return res.status(200).json({ reply: generated });
   } catch (error) {
     const status = error?.response?.status;
     const data = error?.response?.data;
     const detail = typeof data === "string" ? data : JSON.stringify(data || {});
-    console.error("Proxy /api/chat failed", status || "", detail || error.message);
-    res.status(500).json({ error: "AI request failed" });
+    console.error("Vercel /api/chat failed", status || "", detail || error.message);
+    return res.status(500).json({ error: "AI request failed" });
   }
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Secure chat proxy running on http://0.0.0.0:${PORT}`);
-});
+};
