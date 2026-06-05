@@ -1040,9 +1040,19 @@ private fun MiniAppManageSwipeRow(
 }
 
 private fun deriveOrderedApps(savedOrder: List<String>): List<MiniApp> {
-    val mapped = savedOrder.mapNotNull { id -> MiniApp.entries.find { it.name == id } }
-    val remaining = MiniApp.entries.filterNot { app -> mapped.any { it == app } }
-    return mapped + remaining
+    return sanitizeAppOrder(savedOrder).mapNotNull { id ->
+        MiniApp.entries.find { it.name == id }
+    }
+}
+
+private fun sanitizeAppOrder(rawOrder: List<String>): List<String> {
+    val validNames = MiniApp.entries.map { it.name }
+    val seen = mutableSetOf<String>()
+    val normalized = rawOrder.filter { name ->
+        validNames.contains(name) && seen.add(name)
+    }
+    if (normalized.size == validNames.size) return normalized
+    return normalized + validNames.filterNot { seen.contains(it) }
 }
 
 private fun loadStringSet(
@@ -1059,14 +1069,15 @@ private fun saveStringSet(prefs: SharedPreferences, key: String, value: Set<Stri
 
 private fun loadAppOrder(prefs: SharedPreferences): List<String> {
     val raw = prefs.getString(KEY_APP_ORDER, "").orEmpty()
-    if (raw.isBlank()) return MiniApp.entries.map { it.name }
-    return runCatching {
+    if (raw.isBlank()) return sanitizeAppOrder(MiniApp.entries.map { it.name })
+    val parsed = runCatching {
         Gson().fromJson(raw, Array<String>::class.java)?.toList().orEmpty()
     }.getOrElse { MiniApp.entries.map { it.name } }
+    return sanitizeAppOrder(parsed)
 }
 
 private fun saveAppOrder(prefs: SharedPreferences, order: List<String>) {
-    prefs.edit().putString(KEY_APP_ORDER, Gson().toJson(order)).apply()
+    prefs.edit().putString(KEY_APP_ORDER, Gson().toJson(sanitizeAppOrder(order))).apply()
 }
 
 private fun loadLastUsedMap(prefs: SharedPreferences): Map<String, Long> {
