@@ -14,6 +14,11 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 class CloudVoiceManager(private val context: Context) {
+    enum class VoiceStyle {
+        NATURAL,
+        CLEAR
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -21,12 +26,17 @@ class CloudVoiceManager(private val context: Context) {
         .build()
     private var mediaPlayer: MediaPlayer? = null
     private var tempAudioFile: File? = null
+    @Volatile
+    private var isPlayingAudio: Boolean = false
+
+    fun isSpeaking(): Boolean = isPlayingAudio
 
     suspend fun speakWithElevenLabs(
         text: String,
         apiKey: String,
         voiceId: String,
-        modelId: String = "eleven_multilingual_v2"
+        modelId: String = "eleven_multilingual_v2",
+        voiceStyle: VoiceStyle = VoiceStyle.NATURAL
     ): Boolean {
         val cleanText = text.trim()
         if (cleanText.isBlank() || apiKey.isBlank() || voiceId.isBlank()) return false
@@ -35,7 +45,8 @@ class CloudVoiceManager(private val context: Context) {
             text = cleanText,
             apiKey = apiKey,
             voiceId = voiceId,
-            modelId = modelId
+            modelId = modelId,
+            voiceStyle = voiceStyle
         ) ?: return false
 
         return playAudioBytes(audioBytes)
@@ -47,12 +58,14 @@ class CloudVoiceManager(private val context: Context) {
             runCatching { player.release() }
         }
         mediaPlayer = null
+        isPlayingAudio = false
         clearTempAudioFile()
     }
 
     fun release() {
         runCatching { mediaPlayer?.release() }
         mediaPlayer = null
+        isPlayingAudio = false
         clearTempAudioFile()
     }
 
@@ -60,15 +73,20 @@ class CloudVoiceManager(private val context: Context) {
         text: String,
         apiKey: String,
         voiceId: String,
-        modelId: String
+        modelId: String,
+        voiceStyle: VoiceStyle
     ): ByteArray? = withContext(Dispatchers.IO) {
+        val (stability, similarityBoost, style) = when (voiceStyle) {
+            VoiceStyle.NATURAL -> Triple(0.34, 0.84, 0.18)
+            VoiceStyle.CLEAR -> Triple(0.68, 0.62, 0.03)
+        }
         val payload = JSONObject().apply {
             put("text", text)
             put("model_id", modelId)
             put("voice_settings", JSONObject().apply {
-                put("stability", 0.34)
-                put("similarity_boost", 0.84)
-                put("style", 0.18)
+                put("stability", stability)
+                put("similarity_boost", similarityBoost)
+                put("style", style)
                 put("use_speaker_boost", true)
             })
         }
@@ -107,17 +125,21 @@ class CloudVoiceManager(private val context: Context) {
                 )
                 setDataSource(audioFile.absolutePath)
                 setOnCompletionListener {
+                    isPlayingAudio = false
                     runCatching { release() }
                 }
                 setOnErrorListener { _, _, _ ->
+                    isPlayingAudio = false
                     runCatching { release() }
                     true
                 }
                 prepare()
+                isPlayingAudio = true
                 start()
             }
             true
         }.getOrElse {
+            isPlayingAudio = false
             clearTempAudioFile()
             false
         }

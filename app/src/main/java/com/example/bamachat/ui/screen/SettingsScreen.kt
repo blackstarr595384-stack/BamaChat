@@ -12,8 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -44,6 +43,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.util.McpServerManager
+import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.MonetizationConfig
 
 private enum class SettingsMode { SIMPLE, ADVANCED }
@@ -61,22 +62,28 @@ fun SettingsScreen(
     settingsViewModel: SettingsViewModel,
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
-    initialSection: String? = null
+    initialSection: String? = null,
+    mcpServerManager: McpServerManager? = null,
+    mcpWorkflowManager: McpWorkflowManager? = null
 ) {
     val provider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
     val design by settingsViewModel.uiDesignPreset.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val tier by settingsViewModel.subscriptionTier.collectAsStateWithLifecycle()
     val credits by settingsViewModel.creditsBalance.collectAsStateWithLifecycle()
-    val scrollState = rememberScrollState()
+    val simpleModeEnabled by settingsViewModel.simpleModeEnabled.collectAsStateWithLifecycle()
 
     var expandedSection by remember(initialSection) { mutableStateOf(initialSection) }
-    var mode by remember { mutableStateOf(SettingsMode.SIMPLE) }
+    var mode by remember(simpleModeEnabled) {
+        mutableStateOf(if (simpleModeEnabled) SettingsMode.SIMPLE else SettingsMode.ADVANCED)
+    }
     if (expandedSection != null) {
         SettingsDialog(
             viewModel = settingsViewModel,
             onDismiss = { expandedSection = null },
-            initialSection = expandedSection
+            initialSection = expandedSection,
+            mcpServerManager = mcpServerManager,
+            mcpWorkflowManager = mcpWorkflowManager
         )
     }
     val simpleEntries = listOf(
@@ -102,111 +109,123 @@ fun SettingsScreen(
                 )
             )
     ) {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Zurück",
-                        tint = Color.White
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Zurück",
+                            tint = Color.White
+                        )
+                    }
+                    Text(
+                        text = "Einstellungen",
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
                     )
                 }
-                Text(
-                    text = "Einstellungen",
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF1A1A2D).copy(alpha = 0.95f)
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xFF1A1A2D).copy(alpha = 0.95f)
                 ) {
-                    Text(
-                        text = "Hauptbereiche",
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = if (mode == SettingsMode.SIMPLE)
-                            "Einfach zeigt nur die wichtigsten Optionen."
-                        else "Advanced zeigt alle Bereiche für Feintuning.",
-                        color = Color.White.copy(alpha = 0.75f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    SettingsModeToggle(
-                        mode = mode,
-                        onModeChange = { mode = it }
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    entries.forEach { item ->
-                        SettingsEntry(
-                            title = item.title,
-                            subtitle = item.subtitle,
-                            icon = item.icon
-                        ) {
-                            if (item.openProfile) {
-                                onOpenProfile()
-                            } else if (item.section != null) {
-                                expandedSection = item.section
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Hauptbereiche",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (mode == SettingsMode.SIMPLE)
+                                "Einfach zeigt nur die wichtigsten Optionen."
+                            else "Advanced zeigt alle Bereiche für Feintuning.",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        SettingsModeToggle(
+                            mode = mode,
+                            onModeChange = {
+                                mode = it
+                                settingsViewModel.setSimpleModeEnabled(it == SettingsMode.SIMPLE)
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        entries.forEach { item ->
+                            SettingsEntry(
+                                title = item.title,
+                                subtitle = item.subtitle,
+                                icon = item.icon
+                            ) {
+                                if (item.openProfile) {
+                                    onOpenProfile()
+                                } else if (item.section != null) {
+                                    expandedSection = item.section
+                                }
                             }
                         }
                     }
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF223248).copy(alpha = 0.92f)
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF223248).copy(alpha = 0.92f)
                 ) {
-                    Text("Aktueller Status", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "Provider: $provider",
-                        color = Color.White.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Design: $design",
-                        color = Color.White.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Workspace: $activeWorkspaceName",
-                        color = Color.White.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Plan: ${MonetizationConfig.PlanTier.fromKey(tier).label} · Credits: $credits",
-                        color = Color.White.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Text(
-                        "Tippe oben auf einen Bereich, um direkt dorthin zu springen.",
-                        color = Color.White.copy(alpha = 0.65f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("Aktueller Status", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Provider: $provider",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Design: $design",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Workspace: $activeWorkspaceName",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Plan: ${MonetizationConfig.PlanTier.fromKey(tier).label} · Credits: $credits",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "Tippe oben auf einen Bereich, um direkt dorthin zu springen.",
+                            color = Color.White.copy(alpha = 0.65f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }

@@ -45,12 +45,16 @@ enum class ChatDesignPreset {
     CURRENT,
     GLASS,
     EDITORIAL,
+    NOIR,
+    SOLAR,
     DASHBOARD;
 
     companion object {
         fun fromSetting(value: String): ChatDesignPreset = when (value) {
             "Glassmorphism Pro" -> GLASS
             "Editorial Bold" -> EDITORIAL
+            "Noir" -> NOIR
+            "Solar" -> SOLAR
             "Neo Dashboard" -> DASHBOARD
             else -> CURRENT
         }
@@ -118,6 +122,36 @@ fun designTokensFor(preset: ChatDesignPreset): ChatDesignTokens = when (preset) 
         assistantBubbleRoundness = 12.dp,
         bubbleMaxWidth = 320.dp,
         bubbleShadow = 7.dp
+    )
+    ChatDesignPreset.NOIR -> ChatDesignTokens(
+        titleSizeSp = 24,
+        subtitleSizeSp = 11,
+        listHorizontalPadding = 13.dp,
+        listVerticalSpacing = 10.dp,
+        headerShadow = 14.dp,
+        chipCornerRadius = 18.dp,
+        chipAlpha = 0.16f,
+        bubbleSurfaceAlpha = 0.82f,
+        inputCornerRadius = 18.dp,
+        userBubbleRoundness = 14.dp,
+        assistantBubbleRoundness = 14.dp,
+        bubbleMaxWidth = 325.dp,
+        bubbleShadow = 9.dp
+    )
+    ChatDesignPreset.SOLAR -> ChatDesignTokens(
+        titleSizeSp = 26,
+        subtitleSizeSp = 11,
+        listHorizontalPadding = 14.dp,
+        listVerticalSpacing = 11.dp,
+        headerShadow = 11.dp,
+        chipCornerRadius = 20.dp,
+        chipAlpha = 0.18f,
+        bubbleSurfaceAlpha = 0.86f,
+        inputCornerRadius = 22.dp,
+        userBubbleRoundness = 16.dp,
+        assistantBubbleRoundness = 16.dp,
+        bubbleMaxWidth = 332.dp,
+        bubbleShadow = 8.dp
     )
     ChatDesignPreset.CURRENT -> ChatDesignTokens()
 }
@@ -225,13 +259,62 @@ fun VoiceVisualizer(color: Color) {
 }
 
 fun sanitizeForSpeech(text: String): String = text
-    .replace(Regex("```[\\s\\S]*?```"), " ")
+    .replace(Regex("```[\\s\\S]*?```"), " Der folgende Code wurde ausgelassen. ")
     .replace(Regex("`([^`]+)`"), "$1")
     .replace(Regex("\\[(.*?)\\]\\((.*?)\\)"), "$1")
     .replace(Regex("https?://\\S+"), " ")
     .replace(Regex("Quellen \\(Live-Recherche\\):[\\s\\S]*"), " ")
+    .replace(Regex("^\\s{0,3}#{1,6}\\s*", setOf(RegexOption.MULTILINE)), "")
+    .replace(Regex("^\\s*[-*+]\\s+", setOf(RegexOption.MULTILINE)), "")
+    .replace(Regex("^\\s*\\d+\\.\\s+", setOf(RegexOption.MULTILINE)), "")
+    .replace("->", " zu ")
+    .replace("&", " und ")
+    .replace("%", " Prozent")
+    .replace(Regex("\\s*[\\r\\n]+\\s*"), ". ")
+    .replace(Regex("([.!?])(?=\\S)"), "$1 ")
     .replace(Regex("\\s+"), " ")
     .trim()
+
+fun splitSpeechChunks(text: String, maxChunkChars: Int = 220): List<String> {
+    val cleaned = text.trim()
+    if (cleaned.isBlank()) return emptyList()
+
+    val sentences = cleaned
+        .split(Regex("(?<=[.!?])\\s+"))
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+    if (sentences.isEmpty()) return listOf(cleaned.take(maxChunkChars))
+
+    val chunks = mutableListOf<String>()
+    val current = StringBuilder()
+    for (sentence in sentences) {
+        if (sentence.length > maxChunkChars) {
+            if (current.isNotBlank()) {
+                chunks += current.toString().trim()
+                current.clear()
+            }
+            sentence.chunked(maxChunkChars).forEach { part ->
+                chunks += part.trim()
+            }
+            continue
+        }
+
+        val needsSeparator = current.isNotBlank()
+        val projectedLength = current.length + (if (needsSeparator) 1 else 0) + sentence.length
+        if (projectedLength > maxChunkChars && current.isNotBlank()) {
+            chunks += current.toString().trim()
+            current.clear()
+        }
+        if (current.isNotBlank()) current.append(' ')
+        current.append(sentence)
+    }
+
+    if (current.isNotBlank()) {
+        chunks += current.toString().trim()
+    }
+    return chunks
+}
 
 fun compactLabel(items: List<String>, maxItems: Int = 2): String {
     if (items.isEmpty()) return ""

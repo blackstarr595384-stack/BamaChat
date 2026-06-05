@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bamachat.data.ApiClient
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.theme.AppDesignPreset
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 @HiltViewModel
@@ -36,6 +38,15 @@ class SettingsViewModel @Inject constructor(
         private const val KEY_PROJECT_WORKSPACES_JSON = "project_workspaces_json"
         private const val KEY_ACTIVE_WORKSPACE_ID = "active_workspace_id"
         private const val KEY_ACTIVE_WORKSPACE_NAME = "active_workspace_name"
+        private const val KEY_TTS_VOICE_STYLE = "tts_voice_style"
+        private const val KEY_SHOW_LIVE_SOURCES = "show_live_sources"
+        private const val KEY_SIMPLE_MODE_ENABLED = "simple_mode_enabled"
+        private const val KEY_OPENCODE_ENDPOINT = "opencode_endpoint"
+        private const val KEY_OPENCODE_MODEL = "opencode_model"
+        private const val KEY_OPENCODE_API_KEY = "opencode_api_key"
+        private const val LEGACY_OPENCODE_ENDPOINT = "https://api.opencode.ai/v1/"
+        private const val LEGACY_OPENCODE_MODEL = "openai/gpt-4.1-mini"
+        private const val DEFAULT_OPENCODE_ENDPOINT = "https://opencode.ai/zen/v1/"
         private const val KEY_PHOTO_AI_CLOUD_ENDPOINT = "photo_ai_cloud_endpoint"
         private const val KEY_PHOTO_AI_CLOUD_API_TOKEN = "photo_ai_cloud_api_token"
         private const val DEFAULT_LIVE_WEB_ENDPOINT = "https://websearch-xxf7qxk3wq-ew.a.run.app"
@@ -46,6 +57,13 @@ class SettingsViewModel @Inject constructor(
         private const val DEFAULT_PHOTO_AI_CLOUD_API_TOKEN = ""
         private const val DEFAULT_LIVE_WEB_ALLOWED_DOMAINS =
             "wikipedia.org,reuters.com,tagesschau.de,bundesregierung.de,heise.de,github.com,dwd.de,wetteronline.de,wetter.com,open-meteo.com"
+        private const val NATURAL_TTS_SPEED = 0.94f
+        private const val NATURAL_TTS_PITCH = 1.02f
+        private const val CLEAR_TTS_SPEED = 1.0f
+        private const val CLEAR_TTS_PITCH = 0.96f
+        private const val DEFAULT_OPENCODE_MODEL = ApiClient.OPENCODE_DEFAULT_MODEL
+        const val TTS_STYLE_NATURAL = "natural"
+        const val TTS_STYLE_CLEAR = "clear"
         val DISPLAY_PRESET_OPTIONS = DisplaySettingsPresets.options
     }
 
@@ -77,7 +95,12 @@ class SettingsViewModel @Inject constructor(
         }
     )
 
-    private val _isBiometricEnabled = MutableStateFlow(prefs.getBoolean("biometric_enabled", true))
+    private val _onboardingCompleted = MutableStateFlow(
+        prefs.getBoolean("onboarding_completed", false)
+    )
+    val onboardingCompleted: StateFlow<Boolean> = _onboardingCompleted.asStateFlow()
+
+    private val _isBiometricEnabled = MutableStateFlow(prefs.getBoolean("biometric_enabled", false))
     val isBiometricEnabled: StateFlow<Boolean> = _isBiometricEnabled.asStateFlow()
 
     private val _primaryColorInt = MutableStateFlow(prefs.getInt("primary_color", 0xFF6A11CB.toInt()))
@@ -89,7 +112,10 @@ class SettingsViewModel @Inject constructor(
     private val _multiProviderEnabled = MutableStateFlow(prefs.getBoolean("multi_provider", true))
     val multiProviderEnabled: StateFlow<Boolean> = _multiProviderEnabled.asStateFlow()
 
-    private val _aiProvider = MutableStateFlow(prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter")
+    private val _aiProvider = MutableStateFlow(
+        prefs.getString("ai_provider", if (secureString(KEY_OPENCODE_API_KEY).isNotBlank()) "OpenCode" else "OpenRouter")
+            ?: if (secureString(KEY_OPENCODE_API_KEY).isNotBlank()) "OpenCode" else "OpenRouter"
+    )
     val aiProvider: StateFlow<String> = _aiProvider.asStateFlow()
 
     private val _notificationsEnabled = MutableStateFlow(prefs.getBoolean("notifications_enabled", true))
@@ -115,6 +141,11 @@ class SettingsViewModel @Inject constructor(
 
     private val _ttsPitch = MutableStateFlow(prefs.getFloat("tts_pitch", 1.0f))
     val ttsPitch: StateFlow<Float> = _ttsPitch.asStateFlow()
+
+    private val _ttsVoiceStyle = MutableStateFlow(
+        normalizeTtsVoiceStyle(prefs.getString(KEY_TTS_VOICE_STYLE, TTS_STYLE_NATURAL))
+    )
+    val ttsVoiceStyle: StateFlow<String> = _ttsVoiceStyle.asStateFlow()
 
     private val _ttsProVoiceEnabled = MutableStateFlow(prefs.getBoolean("tts_pro_voice_enabled", true))
     val ttsProVoiceEnabled: StateFlow<Boolean> = _ttsProVoiceEnabled.asStateFlow()
@@ -174,6 +205,8 @@ class SettingsViewModel @Inject constructor(
 
     private val _showTimestamps = MutableStateFlow(prefs.getBoolean("show_timestamps", true))
     val showTimestamps: StateFlow<Boolean> = _showTimestamps.asStateFlow()
+    private val _showLiveSources = MutableStateFlow(prefs.getBoolean(KEY_SHOW_LIVE_SOURCES, true))
+    val showLiveSources: StateFlow<Boolean> = _showLiveSources.asStateFlow()
 
     private val _bubbleAnimations = MutableStateFlow(prefs.getBoolean("bubble_animations", true))
     val bubbleAnimations: StateFlow<Boolean> = _bubbleAnimations.asStateFlow()
@@ -199,6 +232,10 @@ class SettingsViewModel @Inject constructor(
         DisplaySettingsPresets.normalize(prefs.getString("ui_display_preset", DisplaySettingsPresets.STANDARD))
     )
     val displayPreset: StateFlow<String> = _displayPreset.asStateFlow()
+    private val _simpleModeEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_SIMPLE_MODE_ENABLED, true)
+    )
+    val simpleModeEnabled: StateFlow<Boolean> = _simpleModeEnabled.asStateFlow()
     private val _compactChatHeader = MutableStateFlow(
         prefs.getBoolean("compact_chat_header", true)
     )
@@ -249,6 +286,20 @@ class SettingsViewModel @Inject constructor(
     private val _geminiApiKey = MutableStateFlow(secureString("gemini_api_key"))
     val geminiApiKey: StateFlow<String> = _geminiApiKey.asStateFlow()
 
+    private val _openCodeApiKey = MutableStateFlow(secureString(KEY_OPENCODE_API_KEY))
+    val openCodeApiKey: StateFlow<String> = _openCodeApiKey.asStateFlow()
+
+    private val _openCodeEndpoint = MutableStateFlow(
+        prefs.getString(KEY_OPENCODE_ENDPOINT, DEFAULT_OPENCODE_ENDPOINT) ?: DEFAULT_OPENCODE_ENDPOINT
+    )
+    val openCodeEndpoint: StateFlow<String> = _openCodeEndpoint.asStateFlow()
+    private val _openCodeEndpointWarning = MutableStateFlow(buildOpenCodeEndpointWarning(_openCodeEndpoint.value))
+    val openCodeEndpointWarning: StateFlow<String> = _openCodeEndpointWarning.asStateFlow()
+    private val _openCodeModel = MutableStateFlow(
+        prefs.getString(KEY_OPENCODE_MODEL, DEFAULT_OPENCODE_MODEL) ?: DEFAULT_OPENCODE_MODEL
+    )
+    val openCodeModel: StateFlow<String> = _openCodeModel.asStateFlow()
+
     private val _ollamaUrl = MutableStateFlow(prefs.getString("ollama_url", "http://192.168.178.162:11434/") ?: "http://192.168.178.162:11434/")
     val ollamaUrl: StateFlow<String> = _ollamaUrl.asStateFlow()
     private val _liveWebEnabled = MutableStateFlow(prefs.getBoolean("live_web_enabled", false))
@@ -257,6 +308,12 @@ class SettingsViewModel @Inject constructor(
     val liveWebEndpoint: StateFlow<String> = _liveWebEndpoint.asStateFlow()
     private val _liveWebApiToken = MutableStateFlow(secureString("live_web_api_token"))
     val liveWebApiToken: StateFlow<String> = _liveWebApiToken.asStateFlow()
+    private val _mcpRemoteUrl = MutableStateFlow(prefs.getString("mcp_remote_url", "") ?: "")
+    val mcpRemoteUrl: StateFlow<String> = _mcpRemoteUrl.asStateFlow()
+    private val _mcpRemoteUrlWarning = MutableStateFlow(buildMcpRemoteUrlWarning(_mcpRemoteUrl.value))
+    val mcpRemoteUrlWarning: StateFlow<String> = _mcpRemoteUrlWarning.asStateFlow()
+    private val _mcpRemoteToken = MutableStateFlow(secureString("mcp_remote_token"))
+    val mcpRemoteToken: StateFlow<String> = _mcpRemoteToken.asStateFlow()
     private val _liveWebAllowedDomains = MutableStateFlow(
         prefs.getString("live_web_allowed_domains", DEFAULT_LIVE_WEB_ALLOWED_DOMAINS)
             ?: DEFAULT_LIVE_WEB_ALLOWED_DOMAINS
@@ -354,6 +411,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     init {
+        ensureOpenCodeEndpointBaseline()
+        ensureOpenCodeModelBaseline()
         ensureLiveWebAllowlistBaseline()
         ensureLiveWebEndpointBaseline()
         ensurePhotoAiEndpointBaseline()
@@ -377,6 +436,91 @@ class SettingsViewModel @Inject constructor(
     private fun persistSecret(key: String, value: String) {
         SecureSettingsStore.putString(appContext, key, value)
         prefs.edit().remove(key).apply()
+    }
+
+    private fun normalizeTtsVoiceStyle(style: String?): String {
+        return when (style?.trim()?.lowercase()) {
+            TTS_STYLE_CLEAR -> TTS_STYLE_CLEAR
+            else -> TTS_STYLE_NATURAL
+        }
+    }
+
+    private fun buildMcpRemoteUrlWarning(url: String): String {
+        val clean = url.trim()
+        if (clean.isBlank()) return ""
+        if (!clean.startsWith("http://", ignoreCase = true) &&
+            !clean.startsWith("https://", ignoreCase = true)
+        ) {
+            return "URL sollte mit http:// oder https:// beginnen."
+        }
+
+        val parsed = runCatching { URI(clean) }.getOrNull()
+            ?: return "URL ist ungueltig oder unvollstaendig."
+        val scheme = parsed.scheme?.lowercase().orEmpty()
+        val host = parsed.host?.lowercase().orEmpty()
+        if (host.isBlank() || (scheme != "http" && scheme != "https")) {
+            return "URL ist ungueltig oder unvollstaendig."
+        }
+
+        if (scheme == "http" && !isLikelyLocalMcpHost(host)) {
+            return "Fuer oeffentliche Endpunkte HTTPS verwenden (HTTP nur im lokalen Netzwerk)."
+        }
+
+        return ""
+    }
+
+    private fun buildOpenCodeEndpointWarning(url: String): String {
+        val clean = url.trim()
+        if (clean.isBlank()) return ""
+        if (!clean.startsWith("http://", ignoreCase = true) &&
+            !clean.startsWith("https://", ignoreCase = true)
+        ) {
+            return "OpenCode Endpoint muss mit http:// oder https:// beginnen."
+        }
+
+        val parsed = runCatching { URI(clean) }.getOrNull()
+            ?: return "OpenCode Endpoint ist ungueltig oder unvollstaendig."
+        val scheme = parsed.scheme?.lowercase().orEmpty()
+        val host = parsed.host?.lowercase().orEmpty()
+        if (host.isBlank() || (scheme != "http" && scheme != "https")) {
+            return "OpenCode Endpoint ist ungueltig oder unvollstaendig."
+        }
+        if (scheme == "http" && !isLikelyLocalMcpHost(host)) {
+            return "OpenCode Endpoint: fuer externe Endpunkte HTTPS verwenden."
+        }
+        return ""
+    }
+
+    private fun ensureOpenCodeEndpointBaseline() {
+        val current = prefs.getString(KEY_OPENCODE_ENDPOINT, "")?.trim().orEmpty()
+        val shouldBackfill = current.isBlank() ||
+            current.equals(LEGACY_OPENCODE_ENDPOINT, ignoreCase = true) ||
+            current.equals(LEGACY_OPENCODE_ENDPOINT.removeSuffix("/"), ignoreCase = true)
+        if (!shouldBackfill) return
+
+        _openCodeEndpoint.value = DEFAULT_OPENCODE_ENDPOINT
+        _openCodeEndpointWarning.value = buildOpenCodeEndpointWarning(DEFAULT_OPENCODE_ENDPOINT)
+        prefs.edit().putString(KEY_OPENCODE_ENDPOINT, DEFAULT_OPENCODE_ENDPOINT).apply()
+    }
+
+    private fun ensureOpenCodeModelBaseline() {
+        val current = prefs.getString(KEY_OPENCODE_MODEL, "")?.trim().orEmpty()
+        val shouldBackfill = current.isBlank() || current.equals(LEGACY_OPENCODE_MODEL, ignoreCase = true)
+        if (!shouldBackfill) return
+
+        _openCodeModel.value = DEFAULT_OPENCODE_MODEL
+        prefs.edit().putString(KEY_OPENCODE_MODEL, DEFAULT_OPENCODE_MODEL).apply()
+    }
+
+    private fun isLikelyLocalMcpHost(host: String): Boolean {
+        val lower = host.lowercase()
+        if (lower == "localhost" || lower == "::1") return true
+        if (lower.endsWith(".local")) return true
+        if (lower.startsWith("127.")) return true
+        if (lower.startsWith("10.")) return true
+        if (lower.startsWith("192.168.")) return true
+        if (Regex("^172\\.(1[6-9]|2\\d|3[0-1])\\.").containsMatchIn(lower)) return true
+        return false
     }
 
     private fun ensureLiveWebAllowlistBaseline() {
@@ -482,6 +626,11 @@ class SettingsViewModel @Inject constructor(
         return "$statusText • $age"
     }
 
+    fun completeOnboarding() {
+        _onboardingCompleted.value = true
+        prefs.edit().putBoolean("onboarding_completed", true).apply()
+    }
+
     fun setBiometricEnabled(enabled: Boolean) {
         _isBiometricEnabled.value = enabled
         prefs.edit().putBoolean("biometric_enabled", enabled).apply()
@@ -538,13 +687,33 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setTtsSpeed(speed: Float) {
-        _ttsSpeed.value = speed
-        prefs.edit().putFloat("tts_speed", speed).apply()
+        val clamped = speed.coerceIn(0.5f, 2.0f)
+        _ttsSpeed.value = clamped
+        prefs.edit().putFloat("tts_speed", clamped).apply()
     }
 
     fun setTtsPitch(pitch: Float) {
-        _ttsPitch.value = pitch
-        prefs.edit().putFloat("tts_pitch", pitch).apply()
+        val clamped = pitch.coerceIn(0.8f, 1.2f)
+        _ttsPitch.value = clamped
+        prefs.edit().putFloat("tts_pitch", clamped).apply()
+    }
+
+    fun setTtsVoiceStyle(style: String) {
+        val normalized = normalizeTtsVoiceStyle(style)
+        _ttsVoiceStyle.value = normalized
+        prefs.edit().putString(KEY_TTS_VOICE_STYLE, normalized).apply()
+    }
+
+    fun applyNaturalTtsPreset() {
+        setTtsSpeed(NATURAL_TTS_SPEED)
+        setTtsPitch(NATURAL_TTS_PITCH)
+        setTtsVoiceStyle(TTS_STYLE_NATURAL)
+    }
+
+    fun applyClearTtsPreset() {
+        setTtsSpeed(CLEAR_TTS_SPEED)
+        setTtsPitch(CLEAR_TTS_PITCH)
+        setTtsVoiceStyle(TTS_STYLE_CLEAR)
     }
 
     fun setTtsProVoiceEnabled(enabled: Boolean) {
@@ -631,6 +800,11 @@ class SettingsViewModel @Inject constructor(
         prefs.edit().putBoolean("show_timestamps", enabled).apply()
     }
 
+    fun setShowLiveSources(enabled: Boolean) {
+        _showLiveSources.value = enabled
+        prefs.edit().putBoolean(KEY_SHOW_LIVE_SOURCES, enabled).apply()
+    }
+
     fun setBubbleAnimations(enabled: Boolean) {
         _bubbleAnimations.value = enabled
         prefs.edit().putBoolean("bubble_animations", enabled).apply()
@@ -655,6 +829,11 @@ class SettingsViewModel @Inject constructor(
         val normalized = AppDesignSystem.normalizePresetLabel(preset)
         _uiDesignPreset.value = normalized
         prefs.edit().putString("ui_design_preset", normalized).apply()
+    }
+
+    fun setSimpleModeEnabled(enabled: Boolean) {
+        _simpleModeEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_SIMPLE_MODE_ENABLED, enabled).apply()
     }
 
     fun setCompactChatHeader(enabled: Boolean) {
@@ -753,6 +932,25 @@ class SettingsViewModel @Inject constructor(
         persistSecret("gemini_api_key", clean)
     }
 
+    fun setOpenCodeApiKey(key: String) {
+        val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
+        _openCodeApiKey.value = clean
+        persistSecret(KEY_OPENCODE_API_KEY, clean)
+    }
+
+    fun setOpenCodeEndpoint(endpoint: String) {
+        val clean = endpoint.trim()
+        _openCodeEndpoint.value = clean
+        _openCodeEndpointWarning.value = buildOpenCodeEndpointWarning(clean)
+        prefs.edit().putString(KEY_OPENCODE_ENDPOINT, clean).apply()
+    }
+
+    fun setOpenCodeModel(model: String) {
+        val clean = model.trim()
+        _openCodeModel.value = if (clean.isBlank()) DEFAULT_OPENCODE_MODEL else clean
+        prefs.edit().putString(KEY_OPENCODE_MODEL, _openCodeModel.value).apply()
+    }
+
     fun setOllamaUrl(url: String) {
         _ollamaUrl.value = url
         prefs.edit().putString("ollama_url", url).apply()
@@ -773,6 +971,19 @@ class SettingsViewModel @Inject constructor(
         val clean = token.trim().replace(Regex("[\\r\\n]+"), "")
         _liveWebApiToken.value = clean
         persistSecret("live_web_api_token", clean)
+    }
+
+    fun setMcpRemoteUrl(url: String) {
+        val clean = url.trim()
+        _mcpRemoteUrl.value = clean
+        _mcpRemoteUrlWarning.value = buildMcpRemoteUrlWarning(clean)
+        prefs.edit().putString("mcp_remote_url", clean).apply()
+    }
+
+    fun setMcpRemoteToken(token: String) {
+        val clean = token.trim().replace(Regex("[\\r\\n]+"), "")
+        _mcpRemoteToken.value = clean
+        persistSecret("mcp_remote_token", clean)
     }
 
     fun setLiveWebAllowedDomains(domains: String) {

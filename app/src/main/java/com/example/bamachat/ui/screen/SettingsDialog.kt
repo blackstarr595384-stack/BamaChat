@@ -3,6 +3,7 @@ package com.example.bamachat.ui.screen
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,14 +32,19 @@ import androidx.compose.ui.unit.sp
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.ui.component.CompactTextAction
 import com.example.bamachat.ui.component.CompactTextActionRow
+import com.example.bamachat.ui.component.sanitizeForSpeech
+import com.example.bamachat.ui.component.splitSpeechChunks
 import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.util.CloudVoiceManager
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PlayBillingManager
 import com.example.bamachat.util.McpConnectionStatus
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -60,11 +66,18 @@ fun SettingsDialog(
     val cerebrasApiKey by viewModel.cerebrasApiKey.collectAsState()
     val togetherApiKey by viewModel.togetherApiKey.collectAsState()
     val geminiApiKey by viewModel.geminiApiKey.collectAsState()
+    val openCodeApiKey by viewModel.openCodeApiKey.collectAsState()
+    val openCodeEndpoint by viewModel.openCodeEndpoint.collectAsState()
+    val openCodeEndpointWarning by viewModel.openCodeEndpointWarning.collectAsState()
+    val openCodeModel by viewModel.openCodeModel.collectAsState()
     val aiProvider by viewModel.aiProvider.collectAsState()
     val ollamaUrl by viewModel.ollamaUrl.collectAsState()
     val liveWebEnabled by viewModel.liveWebEnabled.collectAsState()
     val liveWebEndpoint by viewModel.liveWebEndpoint.collectAsState()
     val liveWebApiToken by viewModel.liveWebApiToken.collectAsState()
+    val mcpRemoteUrl by viewModel.mcpRemoteUrl.collectAsState()
+    val mcpRemoteUrlWarning by viewModel.mcpRemoteUrlWarning.collectAsState()
+    val mcpRemoteToken by viewModel.mcpRemoteToken.collectAsState()
     val liveWebAllowedDomains by viewModel.liveWebAllowedDomains.collectAsState()
     val liveWebPreferGithub by viewModel.liveWebPreferGithub.collectAsState()
     val photoAiCloudEndpoint by viewModel.photoAiCloudEndpoint.collectAsState()
@@ -91,6 +104,7 @@ fun SettingsDialog(
     val ttsEnabled by viewModel.ttsEnabled.collectAsState()
     val ttsSpeed by viewModel.ttsSpeed.collectAsState()
     val ttsPitch by viewModel.ttsPitch.collectAsState()
+    val ttsVoiceStyle by viewModel.ttsVoiceStyle.collectAsState()
     val ttsProVoiceEnabled by viewModel.ttsProVoiceEnabled.collectAsState()
     val cloudVoiceEnabled by viewModel.cloudVoiceEnabled.collectAsState()
     val elevenLabsApiKey by viewModel.elevenLabsApiKey.collectAsState()
@@ -98,6 +112,7 @@ fun SettingsDialog(
     val elevenLabsModelId by viewModel.elevenLabsModelId.collectAsState()
     val streamingEnabled by viewModel.streamingEnabled.collectAsState()
     val showTimestamps by viewModel.showTimestamps.collectAsState()
+    val showLiveSources by viewModel.showLiveSources.collectAsState()
     val bubbleAnimations by viewModel.bubbleAnimations.collectAsState()
     val developerModeEnabled by viewModel.developerModeEnabled.collectAsState()
     val developerUnlimitedTraining by viewModel.developerUnlimitedTraining.collectAsState()
@@ -127,6 +142,115 @@ fun SettingsDialog(
 
     val _uriHandler = LocalUriHandler.current
     val context = LocalContext.current
+    val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
+    val previewScope = rememberCoroutineScope()
+    val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
+    val ttsLocale = remember(language) { localeForLanguageCode(language) }
+    val voicePreviewSamples = remember(language) { voicePreviewSamplesForLanguage(language) }
+    var voicePreviewStatus by remember { mutableStateOf("") }
+    var voicePreviewPlaying by remember { mutableStateOf(false) }
+    var previewTts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var voicePreviewJob by remember { mutableStateOf<Job?>(null) }
+
+    DisposableEffect(context) {
+        lateinit var ttsInstance: TextToSpeech
+        ttsInstance = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                ttsInstance.language = ttsLocale
+                ttsInstance.setSpeechRate(ttsSpeed)
+                ttsInstance.setPitch(ttsPitch)
+            }
+        }
+        previewTts = ttsInstance
+        onDispose {
+            runCatching { ttsInstance.stop() }
+            runCatching { ttsInstance.shutdown() }
+            runCatching { cloudVoiceManager.release() }
+            previewTts = null
+        }
+    }
+
+    LaunchedEffect(ttsLocale, ttsSpeed, ttsPitch) {
+        previewTts?.language = ttsLocale
+        previewTts?.setSpeechRate(ttsSpeed)
+        previewTts?.setPitch(ttsPitch)
+    }
+
+    val stopVoicePreview: () -> Unit = {
+        voicePreviewJob?.cancel()
+        runCatching { previewTts?.stop() }
+        previewScope.launch { cloudVoiceManager.stop() }
+        voicePreviewPlaying = false
+        voicePreviewStatus = ""
+    }
+
+    val playVoicePreview: (VoicePreviewSample) -> Unit = playSample@{ sample ->
+        val speakText = sanitizeForSpeech(sample.text)
+        if (speakText.isBlank()) return@playSample
+        voicePreviewJob?.cancel()
+        voicePreviewJob = previewScope.launch {
+            voicePreviewPlaying = true
+            voicePreviewStatus = "Spielt: ${sample.label}"
+            try {
+                runCatching { previewTts?.stop() }
+                runCatching { cloudVoiceManager.stop() }
+
+                val maxChunkChars = if (useClearVoiceStyle) 170 else 220
+                val pauseMs = if (useClearVoiceStyle) 80L else 130L
+
+                val useCloudVoice =
+                    ttsProVoiceEnabled && cloudVoiceEnabled && elevenLabsApiKey.isNotBlank() && elevenLabsVoiceId.isNotBlank()
+                if (useCloudVoice) {
+                    val cloudOk = runCatching {
+                        cloudVoiceManager.speakWithElevenLabs(
+                            text = speakText,
+                            apiKey = elevenLabsApiKey,
+                            voiceId = elevenLabsVoiceId,
+                            modelId = elevenLabsModelId,
+                            voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
+                        )
+                    }.getOrDefault(false)
+                    if (cloudOk) {
+                        while (cloudVoiceManager.isSpeaking()) {
+                            delay(140)
+                        }
+                        return@launch
+                    }
+                }
+
+                val engine = previewTts
+                if (engine != null) {
+                    val chunks = splitSpeechChunks(speakText, maxChunkChars = maxChunkChars)
+                    chunks.forEachIndexed { index, chunk ->
+                        val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                        engine.speak(
+                            chunk,
+                            queueMode,
+                            null,
+                            "settings_voice_preview_${System.currentTimeMillis()}_$index"
+                        )
+                        if (index < chunks.lastIndex) {
+                            engine.playSilentUtterance(
+                                pauseMs,
+                                TextToSpeech.QUEUE_ADD,
+                                "settings_voice_preview_pause_$index"
+                            )
+                        }
+                    }
+                    while (engine.isSpeaking) {
+                        delay(120)
+                    }
+                }
+            } finally {
+                voicePreviewPlaying = false
+                voicePreviewStatus = ""
+            }
+        }
+    }
+
+    LaunchedEffect(ttsEnabled) {
+        if (!ttsEnabled) stopVoicePreview()
+    }
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
     var newWorkspaceName by remember { mutableStateOf("") }
@@ -141,6 +265,8 @@ fun SettingsDialog(
         0xFFD63031, 0xFFFDBC40, 0xFF2D3436,
         0xFFE17055, 0xFF0984E3, 0xFF6C5CE7
     )
+    var customAccentHex by remember(primaryColor) { mutableStateOf(colorToHex(primaryColor)) }
+    val parsedCustomAccent = remember(customAccentHex) { parseHexColor(customAccentHex) }
 
     val languages = listOf(
         "de" to "Deutsch",
@@ -154,6 +280,7 @@ fun SettingsDialog(
     val agentPresets = AgentPresetLibrary.labels
     val outputStyles = AgentPresetLibrary.outputStyles
     val designPresets = AppDesignPreset.labels
+    val aiProviderOptions = listOf("OpenRouter", "OpenCode", "Groq", "Cerebras", "Together", "Ollama")
     val agentPreview = remember(
         agentStudioEnabled,
         agentPreset,
@@ -174,7 +301,10 @@ fun SettingsDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            stopVoicePreview()
+            onDismiss()
+        },
         title = { Text("Einstellungen", fontWeight = FontWeight.Bold) },
         text = {
             Column(
@@ -245,7 +375,7 @@ fun SettingsDialog(
                             steps = 6
                         )
                     }
-                    SettingRow("Design-Stil", "3 Design-Varianten live testen") {
+                    SettingRow("Design-Stil", "5 Design-Varianten live testen") {
                         DropdownSelector(
                             value = uiDesignPreset,
                             items = designPresets,
@@ -393,6 +523,85 @@ fun SettingsDialog(
                                     _uriHandler.openUri("https://elevenlabs.io/docs/api-reference/text-to-speech/convert")
                                 }) {
                                     Text("Voice-Docs öffnen", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Stimmstil (A/B-Test)", fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = !useClearVoiceStyle,
+                                    onClick = {
+                                        viewModel.setTtsVoiceStyle(SettingsViewModel.TTS_STYLE_NATURAL)
+                                        viewModel.applyNaturalTtsPreset()
+                                    },
+                                    label = { Text("Natürlich", fontSize = 11.sp) }
+                                )
+                                FilterChip(
+                                    selected = useClearVoiceStyle,
+                                    onClick = {
+                                        viewModel.setTtsVoiceStyle(SettingsViewModel.TTS_STYLE_CLEAR)
+                                        viewModel.applyClearTtsPreset()
+                                    },
+                                    label = { Text("Klar/Präzise", fontSize = 11.sp) }
+                                )
+                            }
+                            Text(
+                                if (useClearVoiceStyle)
+                                    "Klar/Präzise: direkter, kompakter und mit kuerzeren Sprachpausen."
+                                else
+                                    "Natürlich: weicher Klang mit leicht langsamem Tempo und natürlicheren Pausen.",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.62f)
+                            )
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Voice-Testmodus", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text(
+                                    "Teste die aktuelle Stimme mit kurzen Beispielen (beruecksichtigt Speed/Pitch und optional Cloud Voice).",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.65f)
+                                )
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(items = voicePreviewSamples, key = { it.id }) { sample ->
+                                        OutlinedButton(
+                                            onClick = { playVoicePreview(sample) },
+                                            enabled = ttsEnabled,
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(sample.label, fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        if (voicePreviewStatus.isNotBlank()) voicePreviewStatus else "Bereit fuer einen Testlauf.",
+                                        fontSize = 10.sp,
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(
+                                        onClick = { stopVoicePreview() },
+                                        enabled = voicePreviewPlaying
+                                    ) {
+                                        Text("Stopp", fontSize = 11.sp)
+                                    }
                                 }
                             }
                         }
@@ -667,6 +876,50 @@ fun SettingsDialog(
                     }
 
                     if (mcpServerManager != null) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("Remote MCP Bridge", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Text(
+                                    "HTTP JSON-RPC Endpoint für MCP (statt lokalem npx auf Android)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.65f)
+                                )
+                                OutlinedTextField(
+                                    value = mcpRemoteUrl,
+                                    onValueChange = { viewModel.setMcpRemoteUrl(it) },
+                                    label = { Text("Remote MCP URL", fontSize = 11.sp) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    placeholder = { Text("https://your-mcp-bridge.example.com/mcp", fontSize = 10.sp) },
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                )
+                                if (mcpRemoteUrlWarning.isNotBlank()) {
+                                    Text(
+                                        mcpRemoteUrlWarning,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFFFFC107)
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = mcpRemoteToken,
+                                    onValueChange = { viewModel.setMcpRemoteToken(it) },
+                                    label = { Text("Bridge Token (optional)", fontSize = 11.sp) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    placeholder = { Text("Bearer Token", fontSize = 10.sp) },
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                )
+                            }
+                        }
                         McpServersSection(mcpServerManager, mcpWorkflowManager)
                     }
 
@@ -689,9 +942,117 @@ fun SettingsDialog(
                         }
                     }
 
+                    if (!multiProvider) {
+                        SettingRow(
+                            "Aktiver Provider",
+                            "Wird genutzt, wenn Auto-Fallback deaktiviert ist"
+                        ) {
+                            DropdownSelector(
+                                value = aiProvider,
+                                items = aiProviderOptions,
+                                onSelect = { viewModel.setAiProvider(it) }
+                            )
+                        }
+                    }
+
                     ProviderCardMini("Cerebras", "ULTRA schnell (~2000 tok/s)", "https://cloud.cerebras.ai/", cerebrasApiKey, "csk-...") { viewModel.setCerebrasApiKey(it) }
                     ProviderCardMini("Groq", "Sehr schnell, 30 req/min", "https://console.groq.com/keys", groqApiKey, "gsk_...") { viewModel.setGroqApiKey(it) }
                     ProviderCardMini("OpenRouter", "Viele freie Modelle", "https://openrouter.ai/keys", openRouterApiKey, "sk-or-v1-...") { viewModel.setOpenRouterApiKey(it) }
+
+                    ProviderCardMini(
+                        "OpenCode",
+                        "OpenCode Zen (x-api-key)",
+                        "https://opencode.ai/",
+                        openCodeApiKey,
+                        "sk-..."
+                    ) { viewModel.setOpenCodeApiKey(it) }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            TextButton(onClick = { viewModel.setOpenCodeEndpoint("https://opencode.ai/zen/v1/") }) {
+                                Text("Zen Endpoint", fontSize = 11.sp)
+                            }
+                        }
+                        item {
+                            TextButton(onClick = { viewModel.setOpenCodeModel("claude-sonnet-4-5") }) {
+                                Text("Sonnet", fontSize = 11.sp)
+                            }
+                        }
+                        item {
+                            TextButton(onClick = { viewModel.setOpenCodeModel("claude-opus-4-5") }) {
+                                Text("Opus", fontSize = 11.sp)
+                            }
+                        }
+                        item {
+                            TextButton(onClick = { viewModel.setOpenCodeModel("claude-haiku-4-5") }) {
+                                Text("Haiku", fontSize = 11.sp)
+                            }
+                        }
+                        item {
+                            TextButton(onClick = { viewModel.setOpenCodeModel("gpt-5.3-codex") }) {
+                                Text("Codex", fontSize = 11.sp)
+                            }
+                        }
+                        item {
+                            TextButton(onClick = { viewModel.setOpenCodeModel("gpt-5.4-mini") }) {
+                                Text("GPT", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customAccentHex,
+                            onValueChange = { customAccentHex = it.trim() },
+                            label = { Text("Eigene Akzentfarbe", fontSize = 11.sp) },
+                            placeholder = { Text("#4E7DE8", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        Button(
+                            onClick = {
+                                parsedCustomAccent?.let { colorInt ->
+                                    viewModel.setPrimaryColor(colorInt)
+                                    customAccentHex = colorToHex(colorInt)
+                                }
+                            },
+                            enabled = parsedCustomAccent != null
+                        ) {
+                            Text("Anwenden", fontSize = 11.sp)
+                        }
+                    }
+                    if (parsedCustomAccent == null && customAccentHex.isNotBlank()) {
+                        Text("Format: #RRGGBB oder #AARRGGBB", fontSize = 10.sp, color = Color(0xFFFFC107))
+                    }
+                    OutlinedTextField(
+                        value = openCodeEndpoint,
+                        onValueChange = { viewModel.setOpenCodeEndpoint(it) },
+                        label = { Text("OpenCode Endpoint", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("https://opencode.ai/zen/v1/", fontSize = 10.sp) },
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
+                    if (openCodeEndpointWarning.isNotBlank()) {
+                        Text(openCodeEndpointWarning, fontSize = 10.sp, color = Color(0xFFFFC107))
+                    }
+                    OutlinedTextField(
+                        value = openCodeModel,
+                        onValueChange = { viewModel.setOpenCodeModel(it) },
+                        label = { Text("OpenCode Modell", fontSize = 12.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("claude-sonnet-4-5", fontSize = 10.sp) },
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
+                    Text(
+                        "Key-Verwaltung: opencode.ai/auth -> console.opencode.ai (API Keys)",
+                        fontSize = 10.sp,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
 
                     if (openRouterApiKey.isNotBlank()) {
                         SettingRow(
@@ -746,6 +1107,16 @@ fun SettingsDialog(
                         Switch(
                             checked = liveWebEnabled,
                             onCheckedChange = { viewModel.setLiveWebEnabled(it) },
+                            modifier = Modifier.scale(0.85f)
+                        )
+                    }
+                    SettingRow(
+                        "Live-Quellen im Chat",
+                        "Zeigt oder versteckt den Quellen-Block unter Antworten"
+                    ) {
+                        Switch(
+                            checked = showLiveSources,
+                            onCheckedChange = { viewModel.setShowLiveSources(it) },
                             modifier = Modifier.scale(0.85f)
                         )
                     }
@@ -1186,29 +1557,56 @@ private fun McpServersSection(
             servers.forEach { config ->
                 val connState = connStates[config.id]
                 val isConnected = connState == McpConnectionStatus.CONNECTED
+                val isError = connState == McpConnectionStatus.ERROR
+                val isRemote = config.command == "remote_http" || config.id == "remote-bridge"
+                val isNpxServer = config.command == "npx"
+                // npx-basierte Server sind auf Android nicht ausfuehrbar
+                val androidUnsupported = isNpxServer
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
-                        Text(config.name, fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            if (isConnected) "Verbunden" else "Getrennt",
+                            config.name,
+                            fontSize = 12.sp,
+                            color = if (androidUnsupported) Color.White.copy(alpha = 0.35f) else Color.White,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            when {
+                                androidUnsupported -> "Nur auf Desktop verfügbar (npx)"
+                                isError -> "Fehler beim Verbinden"
+                                isConnected -> "Verbunden"
+                                else -> "Getrennt"
+                            },
                             fontSize = 10.sp,
-                            color = if (isConnected) Color(0xFF00B894) else Color.White.copy(alpha = 0.4f)
+                            color = when {
+                                androidUnsupported -> Color.White.copy(alpha = 0.25f)
+                                isError -> Color(0xFFE74C3C)
+                                isConnected -> Color(0xFF00B894)
+                                else -> Color.White.copy(alpha = 0.4f)
+                            }
                         )
                     }
                     Switch(
                         checked = isConnected,
                         onCheckedChange = { enable ->
-                            scope.launch {
-                                if (enable) manager.startServer(config.id)
-                                else manager.stopServer(config.id)
+                            if (!androidUnsupported) {
+                                scope.launch {
+                                    if (enable) manager.startServer(config.id)
+                                    else manager.stopServer(config.id)
+                                }
                             }
                         },
+                        enabled = !androidUnsupported,
                         modifier = Modifier.scale(0.75f),
-                        colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF9B59B6))
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = Color(0xFF9B59B6),
+                            disabledUncheckedTrackColor = Color.White.copy(alpha = 0.1f)
+                        )
                     )
                 }
             }
@@ -1234,6 +1632,74 @@ private fun McpServersSection(
         }
     }
 }
+
+private data class VoicePreviewSample(
+    val id: String,
+    val label: String,
+    val text: String
+)
+
+private fun localeForLanguageCode(code: String): Locale {
+    return when (code) {
+        "en" -> Locale.ENGLISH
+        "pl" -> Locale("pl")
+        "fr" -> Locale.FRENCH
+        "es" -> Locale("es")
+        "tr" -> Locale("tr")
+        "ar" -> Locale("ar")
+        else -> Locale.GERMAN
+    }
+}
+
+private fun voicePreviewSamplesForLanguage(code: String): List<VoicePreviewSample> {
+    return when (code) {
+        "en" -> listOf(
+            VoicePreviewSample("business", "Business", "Good morning. Your agenda summary: three prioritized tasks, two pending approvals, and one meeting at ten. Shall I start with item one?"),
+            VoicePreviewSample("locker", "Casual", "Hey, welcome back. Quick plan? Inbox first, focus block next, meetings after that."),
+            VoicePreviewSample("tech", "Tech", "Tech mode: I inspect build logs, isolate the root cause, verify the fix, and return a step-by-step patch plan.")
+        )
+        "fr" -> listOf(
+            VoicePreviewSample("business", "Business", "Bonjour. Votre synthese du jour: trois priorites, deux validations en attente et une reunion a dix heures. Souhaitez-vous commencer par la premiere action?"),
+            VoicePreviewSample("locker", "Detendu", "Salut, content de te revoir. Plan express? D abord les messages, ensuite un bloc focus, puis les rendez-vous."),
+            VoicePreviewSample("tech", "Tech", "Mode technique: je lis les logs, j isole la cause racine, je valide le correctif et je propose un plan de patch etape par etape.")
+        )
+        "es" -> listOf(
+            VoicePreviewSample("business", "Business", "Buenos dias. Resumen de agenda: tres tareas priorizadas, dos aprobaciones pendientes y una reunion a las diez. Quieres que empecemos por la primera?"),
+            VoicePreviewSample("locker", "Casual", "Hola, que bueno verte. Plan rapido: primero bandeja, luego bloque de foco y despues reuniones."),
+            VoicePreviewSample("tech", "Tech", "Modo tecnico: reviso logs de build, aislo la causa raiz, valido el fix y te devuelvo un plan de parche paso a paso.")
+        )
+        "tr" -> listOf(
+            VoicePreviewSample("business", "Business", "Gunaydin. Gunun ozetini paylasiyorum: uc oncelikli gorev, iki bekleyen onay ve saat onda bir toplanti. Ilk maddeyle baslayayim mi?"),
+            VoicePreviewSample("locker", "Rahat", "Selam, tekrar hos geldin. Mini plan: once gelen kutusu, sonra odak calismasi, ardindan toplantilar."),
+            VoicePreviewSample("tech", "Tech", "Teknik mod: build loglarini incelerim, kok nedeni ayiklarim, duzeltmeyi dogrularim ve adim adim patch plani cikaririm.")
+        )
+        "ar" -> listOf(
+            VoicePreviewSample("business", "عمل", "صباح الخير. هذا ملخص جدولك: ثلاث مهام ذات اولوية، موافقتان معلقتان، واجتماع عند العاشرة. هل ابدأ بالبند الاول؟"),
+            VoicePreviewSample("locker", "خفيف", "اهلا بعودتك. خطة سريعة؟ نبدأ بالبريد ثم تركيز قصير وبعدها الاجتماعات."),
+            VoicePreviewSample("tech", "تقني", "الوضع التقني: اراجع سجلات البناء، احدد السبب الجذري، اتحقق من الاصلاح، ثم اقدم خطة تصحيح خطوة بخطوة.")
+        )
+        else -> listOf(
+            VoicePreviewSample("business", "Business", "Guten Morgen. Ihr Tagesueberblick: drei priorisierte Aufgaben, zwei offene Freigaben und ein Termin um zehn Uhr. Soll ich mit Punkt eins beginnen?"),
+            VoicePreviewSample("locker", "Locker", "Hey, schoen dass du da bist. Kurzplan? Erst Inbox, dann Fokusblock, danach Termine."),
+            VoicePreviewSample("tech", "Tech", "Tech-Modus: Ich pruefe Build-Logs, isoliere die Root-Cause, validiere den Fix und liefere einen Schritt-fuer-Schritt Patch-Plan.")
+        )
+    }
+}
+
+private fun parseHexColor(raw: String): Int? {
+    val normalized = raw.trim().removePrefix("#")
+    if (normalized.length != 6 && normalized.length != 8) return null
+    return runCatching {
+        val value = normalized.toLong(16)
+        if (normalized.length == 6) {
+            (0xFF000000 or value).toInt()
+        } else {
+            value.toInt()
+        }
+    }.getOrNull()
+}
+
+private fun colorToHex(colorInt: Int): String = "#%08X".format(colorInt)
 
 private fun openNotificationSettings(context: android.content.Context) {
     val intent = Intent().apply {

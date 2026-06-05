@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.HelpCenter
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Psychology
@@ -82,11 +83,13 @@ fun HomeHubScreen(
     onOpenRealtimeCollab: () -> Unit,
     onOpenKnowledgeGraph: () -> Unit,
     onOpenHelp: () -> Unit,
+    simpleModeEnabled: Boolean,
+    onToggleSimpleMode: (Boolean) -> Unit,
     @Suppress("UNUSED_PARAMETER") onOpenMenu: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") onOpenProfile: () -> Unit = {}
 ) {
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
-    val entries = listOf(
+    val allEntries = listOf(
         HubEntry(
             title = "Chat",
             subtitle = "Schneller Einstieg in laufende Gespräche",
@@ -144,6 +147,41 @@ fun HomeHubScreen(
             onClick = onOpenKnowledgeGraph
         )
     )
+    val simpleEntries = listOf(
+        HubEntry(
+            title = "Chat",
+            subtitle = "Fragen stellen, Aufgaben lösen, Antworten erhalten",
+            icon = Icons.AutoMirrored.Filled.Chat,
+            iconStartColor = Color(0xFF4D8DFF),
+            iconEndColor = Color(0xFF77B6FF),
+            onClick = onOpenChat
+        ),
+        HubEntry(
+            title = "Workspaces",
+            subtitle = "Projektkontext und Notizen zentral halten",
+            icon = Icons.Default.Settings,
+            iconStartColor = Color(0xFF11B79F),
+            iconEndColor = Color(0xFF8DE1D4),
+            onClick = onOpenWorkspaceSettings
+        ),
+        HubEntry(
+            title = "Mini-Apps",
+            subtitle = "Schnelltools für Alltag und Recherche",
+            icon = Icons.Default.Extension,
+            iconStartColor = Color(0xFF11B79F),
+            iconEndColor = Color(0xFF59DBC6),
+            onClick = onOpenMiniApps
+        ),
+        HubEntry(
+            title = "Einstellungen",
+            subtitle = "Konto, Provider, Design und Datenschutz",
+            icon = Icons.Default.Tune,
+            iconStartColor = Color(0xFF6A8CFF),
+            iconEndColor = Color(0xFF9AB6FF),
+            onClick = onOpenSettings
+        )
+    )
+    val entries = if (simpleModeEnabled) simpleEntries else allEntries
 
     Box(
         modifier = Modifier
@@ -177,8 +215,17 @@ fun HomeHubScreen(
                 palette = palette
             )
 
+            if (simpleModeEnabled) {
+                SimpleModeCard(palette = palette)
+            }
+
             FeatureGrid(entries = entries, palette = palette)
-            QuickActions(onOpenHelp = onOpenHelp, onOpenCollab = onOpenRealtimeCollab, palette = palette)
+            QuickActions(
+                onOpenHelp = onOpenHelp,
+                simpleModeEnabled = simpleModeEnabled,
+                onToggleSimpleMode = onToggleSimpleMode,
+                palette = palette
+            )
             Spacer(modifier = Modifier.height(4.dp))
             UsageChip(palette = palette)
         }
@@ -256,6 +303,46 @@ private fun StatusRow(
             palette = palette,
             accent = palette.accent
         )
+    }
+}
+
+@Composable
+private fun SimpleModeCard(palette: AppDesignPalette) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(14.dp)),
+        shape = RoundedCornerShape(14.dp),
+        color = palette.surface,
+        border = BorderStroke(1.dp, palette.surfaceBorder)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                tint = palette.accentStrong,
+                modifier = Modifier.size(18.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "Einfacher Modus aktiv",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "Du siehst die wichtigsten Bereiche für den schnellen Einstieg.",
+                    color = palette.textSecondary,
+                    fontSize = 12.sp
+                )
+            }
+        }
     }
 }
 
@@ -442,7 +529,8 @@ private fun HubCard(
 @Composable
 private fun QuickActions(
     onOpenHelp: () -> Unit,
-    onOpenCollab: () -> Unit,
+    simpleModeEnabled: Boolean,
+    onToggleSimpleMode: (Boolean) -> Unit,
     palette: AppDesignPalette
 ) {
     Row(
@@ -459,13 +547,13 @@ private fun QuickActions(
             iconEndColor = Color(0xFF7EC1FF)
         )
         ActionPill(
-            title = "Collab",
-            icon = Icons.Default.Groups,
-            onClick = onOpenCollab,
+            title = if (simpleModeEnabled) "Mehr Features" else "Einfach",
+            icon = if (simpleModeEnabled) Icons.Default.Settings else Icons.Default.Tune,
+            onClick = { onToggleSimpleMode(!simpleModeEnabled) },
             modifier = Modifier.weight(1f),
             palette = palette,
-            iconStartColor = Color(0xFF11B79F),
-            iconEndColor = Color(0xFF59DBC6)
+            iconStartColor = if (simpleModeEnabled) Color(0xFF8B6DFF) else Color(0xFF11B79F),
+            iconEndColor = if (simpleModeEnabled) Color(0xFFB79AFF) else Color(0xFF59DBC6)
         )
     }
 }

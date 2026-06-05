@@ -19,6 +19,9 @@ object ApiClient {
     private const val GROQ_BASE = "https://api.groq.com/openai/v1/"
     private const val CEREBRAS_BASE = "https://api.cerebras.ai/v1/"
     private const val TOGETHER_BASE = "https://api.together.xyz/v1/"
+    private const val OPENCODE_BASE = "https://opencode.ai/zen/v1/"
+
+    const val OPENCODE_DEFAULT_MODEL = "claude-sonnet-4-5"
 
     // ===== OpenRouter Free Models =====
     val OPENROUTER_FREE_MODELS = listOf(
@@ -59,12 +62,12 @@ object ApiClient {
 
     // ===== Groq Models (kostenlos, sehr schnell) =====
     val GROQ_MODELS = listOf(
-        "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
         "gemma2-9b-it",
         "mixtral-8x7b-32768"
     )
-    val GROQ_DEFAULT = "llama-3.3-70b-versatile"
+    val GROQ_DEFAULT = "llama-3.1-8b-instant"
 
     // ===== Cerebras Models (kostenlos, ULTRA schnell) =====
     val CEREBRAS_MODELS = listOf(
@@ -92,7 +95,8 @@ object ApiClient {
         OPENROUTER("OpenRouter", "OpenRouter", OPENROUTER_BASE, "https://openrouter.ai/keys", "sk-or-", "🌐"),
         GROQ("Groq", "Groq (sehr schnell)", GROQ_BASE, "https://console.groq.com/keys", "gsk_", "⚡"),
         CEREBRAS("Cerebras", "Cerebras (ULTRA schnell)", CEREBRAS_BASE, "https://cloud.cerebras.ai/", "csk-", "🚀"),
-        TOGETHER("Together", "Together AI", TOGETHER_BASE, "https://api.together.xyz/settings/api-keys", "", "🤝")
+        TOGETHER("Together", "Together AI", TOGETHER_BASE, "https://api.together.xyz/settings/api-keys", "", "🤝"),
+        OPENCODE("OpenCode", "OpenCode", OPENCODE_BASE, "https://opencode.ai/", "sk-", "🧠")
     }
 
     /**
@@ -100,6 +104,19 @@ object ApiClient {
      * Alle nutzen das gleiche /chat/completions Format.
      */
     fun createOpenAICompatibleService(provider: Provider, apiKey: String): OpenAICompatibleService {
+        return createOpenAICompatibleService(
+            baseUrl = provider.baseUrl,
+            apiKey = apiKey,
+            includeOpenRouterHeaders = provider == Provider.OPENROUTER
+        )
+    }
+
+    fun createOpenAICompatibleService(
+        baseUrl: String,
+        apiKey: String,
+        includeOpenRouterHeaders: Boolean = false
+    ): OpenAICompatibleService {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
         val cleanKey = apiKey.trim().replace(Regex("[\\r\\n]+"), "")
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -111,7 +128,7 @@ object ApiClient {
                     .addHeader("Authorization", "Bearer $cleanKey")
                     .addHeader("Content-Type", "application/json")
 
-                if (provider == Provider.OPENROUTER) {
+                if (includeOpenRouterHeaders) {
                     builder.addHeader("HTTP-Referer", "https://bamachat.app")
                     builder.addHeader("X-Title", "BamaChat")
                 }
@@ -120,11 +137,71 @@ object ApiClient {
             .build()
 
         return Retrofit.Builder()
-            .baseUrl(provider.baseUrl)
+            .baseUrl(normalizedBaseUrl)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(OpenAICompatibleService::class.java)
+    }
+
+    fun createOpenCodeZenService(baseUrl: String, apiKey: String): OpenCodeZenService {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val cleanKey = apiKey.trim().replace(Regex("[\\r\\n]+"), "")
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(createLoggingInterceptor())
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("x-api-key", cleanKey)
+                    .addHeader("anthropic-version", "2023-06-01")
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl(normalizedBaseUrl)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(OpenCodeZenService::class.java)
+    }
+
+    fun createOpenCodeZenResponsesService(baseUrl: String, apiKey: String): OpenCodeZenResponsesService {
+        val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+        val cleanKey = apiKey.trim().replace(Regex("[\\r\\n]+"), "")
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(createLoggingInterceptor())
+            .addInterceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Authorization", "Bearer $cleanKey")
+                    .addHeader("x-api-key", cleanKey)
+                    .addHeader("Content-Type", "application/json")
+                    .build()
+                chain.proceed(request)
+            }
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl(normalizedBaseUrl)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(OpenCodeZenResponsesService::class.java)
+    }
+
+    private fun normalizeBaseUrl(rawBaseUrl: String): String {
+        val trimmed = rawBaseUrl.trim()
+        require(trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            "Base URL muss mit http:// oder https:// beginnen"
+        }
+        return if (trimmed.endsWith('/')) trimmed else "$trimmed/"
     }
 
     fun createOllamaService(baseUrl: String): com.example.bamachat.data.api.OllamaApiService {
@@ -178,8 +255,88 @@ interface OpenAICompatibleService {
     ): retrofit2.Response<ResponseBody>
 }
 
+interface OpenCodeZenService {
+    @POST("messages")
+    suspend fun message(
+        @Body request: OpenCodeZenRequest
+    ): OpenCodeZenResponse
+}
+
+interface OpenCodeZenResponsesService {
+    @POST("responses")
+    suspend fun response(
+        @Body request: OpenCodeZenResponsesRequest
+    ): OpenCodeZenResponsesResponse
+}
+
 // Legacy alias für Rückwärtskompatibilität
 typealias OpenRouterApiService = OpenAICompatibleService
+
+data class OpenCodeZenRequest(
+    val model: String,
+    val messages: List<OpenCodeZenMessage>,
+    @SerializedName("max_tokens")
+    val maxTokens: Int = 1024,
+    val system: String? = null,
+    val temperature: Float? = null,
+    val stream: Boolean = false
+)
+
+data class OpenCodeZenMessage(
+    val role: String,
+    val content: String
+)
+
+data class OpenCodeZenResponse(
+    val content: List<OpenCodeZenContentPart>? = null,
+    val error: OpenCodeZenError? = null
+)
+
+data class OpenCodeZenContentPart(
+    val type: String? = null,
+    val text: String? = null
+)
+
+data class OpenCodeZenError(
+    val type: String? = null,
+    val message: String? = null
+)
+
+data class OpenCodeZenResponsesRequest(
+    val model: String,
+    val input: List<OpenCodeZenResponsesInputItem>,
+    @SerializedName("max_output_tokens")
+    val maxOutputTokens: Int? = null,
+    val temperature: Float? = null,
+    val stream: Boolean = false
+)
+
+data class OpenCodeZenResponsesInputItem(
+    val role: String,
+    val content: List<OpenCodeZenResponsesInputContent>
+)
+
+data class OpenCodeZenResponsesInputContent(
+    val type: String = "input_text",
+    val text: String
+)
+
+data class OpenCodeZenResponsesResponse(
+    @SerializedName("output_text")
+    val outputText: String? = null,
+    val output: List<OpenCodeZenResponsesOutputItem>? = null,
+    val error: OpenCodeZenError? = null
+)
+
+data class OpenCodeZenResponsesOutputItem(
+    val type: String? = null,
+    val content: List<OpenCodeZenResponsesOutputContent>? = null
+)
+
+data class OpenCodeZenResponsesOutputContent(
+    val type: String? = null,
+    val text: String? = null
+)
 
 data class OpenRouterChatRequest(
     val model: String,
@@ -283,5 +440,6 @@ data class OpenRouterError(
         return HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.NONE
             redactHeader("Authorization")
+            redactHeader("x-api-key")
         }
     }
