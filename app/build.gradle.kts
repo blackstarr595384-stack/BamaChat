@@ -1,14 +1,14 @@
 import java.util.Properties
 
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.devtools.ksp")
-    id("com.google.gms.google-services") apply false
-    id("com.google.firebase.crashlytics")
-    id("io.gitlab.arturbosch.detekt") version "1.23.6"
-    id("com.google.dagger.hilt.android")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services) apply false
+    alias(libs.plugins.firebase.crashlytics)
+    alias(libs.plugins.detekt)
+    alias(libs.plugins.hilt.android)
 }
 
 val googleServicesFiles = listOf(
@@ -35,12 +35,12 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.example.bamachat"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.bamachat"
         minSdk = 33
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -109,110 +109,108 @@ android {
 }
 
 dependencies {
-    val mlKitTranslateVersion = "17.0.3"
-    val mlKitLanguageIdVersion = "17.0.6"
-    val mlKitSmartReplyVersion = "17.0.4"
-    val bouncyCastleVersion = "1.84"
-    val credentialsVersion = "1.2.0-rc01"
-
     implementation(project(":sharedCore"))
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.activity.compose)
 
-    implementation(platform("androidx.compose:compose-bom:2024.10.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
     
     // Lottie Animations
-    implementation("com.airbnb.android:lottie-compose:6.4.1")
+    implementation(libs.airbnb.lottie.compose)
     
     // Material Design Icons (Icons für UI)
-    implementation("androidx.biometric:biometric:1.1.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.9")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment.ktx)
+    implementation(libs.androidx.security.crypto)
     
     // Room Database
-    val roomVersion = "2.8.4"
-    implementation("androidx.room:room-runtime:$roomVersion")
-    implementation("androidx.room:room-ktx:$roomVersion")
-    ksp("androidx.room:room-compiler:$roomVersion")
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
     
     // Markdown support
-    implementation("com.github.jeziellago:compose-markdown:0.7.1")
-    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation(libs.compose.markdown)
+    implementation(libs.coil.compose)
     
     // Retrofit + OkHttp
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    implementation("com.google.code.gson:gson:2.11.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.okhttp.core)
+    implementation(libs.okhttp.logging)
+    implementation(libs.google.gson)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // Gemini AI
-    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+    implementation(libs.google.generativeai)
 
     // ML Kit Translation & Language ID
-    implementation("com.google.mlkit:translate:$mlKitTranslateVersion")
-    implementation("com.google.mlkit:language-id:$mlKitLanguageIdVersion")
-    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation(libs.mlkit.translate)
+    implementation(libs.mlkit.language.id)
+    implementation(libs.mlkit.text.recognition)
     // ML Kit Smart Reply
-    implementation("com.google.mlkit:smart-reply:$mlKitSmartReplyVersion") {
+    implementation(libs.mlkit.smart.reply) {
         // Prevent duplicate classes with language-id-common from gms beta artifact.
         exclude(group = "com.google.android.gms", module = "play-services-mlkit-language-id")
     }
 
     // Jsoup for Link Previews
-    implementation("org.jsoup:jsoup:1.18.3")
-    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    implementation("org.bouncycastle:bcprov-jdk15to18:$bouncyCastleVersion")
-    implementation("org.bouncycastle:bcpkix-jdk15to18:$bouncyCastleVersion")
-    implementation("org.bouncycastle:bcutil-jdk15to18:$bouncyCastleVersion")
+    implementation(libs.jsoup)
+    implementation(libs.pdfbox.android)
+    implementation(libs.bouncycastle.bcprov)
+    implementation(libs.bouncycastle.bcpkix)
+    implementation(libs.bouncycastle.bcutil)
 
     // Location Services
-    implementation("com.google.android.gms:play-services-location:21.3.0")
-    implementation("com.google.android.gms:play-services-auth:21.3.0")
-    implementation("androidx.credentials:credentials:$credentialsVersion")
-    implementation("androidx.credentials:credentials-play-services-auth:$credentialsVersion")
-    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
+    implementation(libs.play.services.location)
+    implementation(libs.play.services.auth)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     // Google Play Billing (Abo/Paywall Vorbereitung)
-    implementation("com.android.billingclient:billing-ktx:8.3.0")
+    implementation(libs.billing.ktx)
+    
+    // Google Play In-App Review
+    implementation(libs.google.play.review.ktx)
+
+    // WorkManager for Offline Sync
+    implementation(libs.androidx.work.runtime.ktx)
 
     // Hilt DI
-    val hiltVersion = "2.54"
-    implementation("com.google.dagger:hilt-android:$hiltVersion")
-    ksp("com.google.dagger:hilt-compiler:$hiltVersion")
-    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+    implementation(libs.google.hilt.android)
+    ksp(libs.google.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
 
     // Firebase (Auth / Profile / Storage)
-    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-firestore")
-    implementation("com.google.firebase:firebase-storage")
-    implementation("com.google.firebase:firebase-analytics")
-    implementation("com.google.firebase:firebase-crashlytics")
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics)
 
-    testImplementation("junit:junit:4.13.2")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
-    androidTestImplementation("junit:junit:4.13.2")
-    androidTestImplementation("androidx.test:core-ktx:1.6.1")
-    androidTestImplementation("androidx.test:runner:1.6.2")
-    androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation(libs.junit4)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.junit4)
+    androidTestImplementation(libs.androidx.test.core.ktx)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
+    detektPlugins(libs.detekt.formatting)
 }
 
 tasks.register("stabilityCheck") {
