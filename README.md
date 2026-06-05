@@ -1,30 +1,36 @@
-# BamaChat
+# BamaChat — AI Workspace OS
 
-BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System, Multi-Provider-KI, Sprachfunktionen, Bildanalyse/-generierung, Auth/Profil und erweiterten AI-Features (Training, Multi-Agent, Realtime-Collab, Multimodal-Import). Zusätzlich gibt es einen Windows-Desktop-Client auf Compose Multiplatform sowie ein `sharedCore`-Modul fuer plattformneutrale Logik.
+**BamaChat ist kein Chat-Fenster. Es ist ein autonomer KI-Arbeitsraum.**  
+Chat, Personas, multimodale Analyse, Echtzeit-Tools, MCP-Agenten-Loops, Workspace-Automation und Team-Kollaboration – in einer Plattform vereint. Keine fünf Apps, kein Kontextwechsel.
+
+BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (Compose Multiplatform, MSI-Paket) mit einem gemeinsamen `sharedCore` für plattformneutrale Geschäftslogik.
 
 ## Status
 - Plattform: Android 13+ (Kotlin, Compose, Room, Firebase)
-- Windows Desktop Client: Compose Multiplatform Modul `:desktopApp` (Stage 4)
-- Shared Core: JVM-Modul `:sharedCore` fuer wiederverwendbare Business-Logik (Drafts, Workspace-Text-Tools, Quick-Action-Heuristiken, Send-Dedup, Workspace-Naming)
-- Sprache in der App: primär Deutsch
+- Windows Desktop Client: Compose Multiplatform `:desktopApp` (Stage 6, MSI-Paketierung)
+- Shared Core: JVM-Modul `:sharedCore` (Drafts, Workspace-Text-Tools, Quick-Action-Heuristiken, Send-Dedup, Workspace-Naming)
+- Build-Konfiguration: zentrale Versionen in `gradle/libs.versions.toml`
+- Android Toolchain: AGP 8.7.3, Kotlin 2.1.21, Gradle 8.10.2, compile/targetSdk 35
+- Sprache: primär Deutsch, Architektur für i18n vorbereitet
 - Build-Status: `stabilityCheck` erfolgreich (Assemble + Unit Tests + Lint)
-- Letzte Validierung (15.05.2026): `:app:assembleDebug` erfolgreich nach Compile-Fixes in UI/ViewModel; MCP-Agent-Loop/Workflow-Mechanik unverändert
-- Tablet-Layout: adaptive UI (u. a. Mini-Apps V2)
-- iPhone: erfordert separaten iOS-Client (nicht im Android-Projekt enthalten)
+- Tablet: adaptive UI mit Mini-Apps V2
+- iPhone: separater iOS-Client geplant (KMM-Shared-Core)
 
 ## Hauptfunktionen
 - Persona-Chat mit editierbaren Prompts und Prompt-Versionierung (Rollback)
+- Home Hub startet standardmäßig im **einfachen Modus** (fokussierte Kernaktionen) und kann per Toggle auf Vollansicht wechseln
 - Persona-Cloud-Sync pro Nutzerkonto:
   - Charakterprofil (Empathie/Kreativität/Direktheit + Autonomie)
   - Prompt-Overrides (inkl. Custom Persona Prompt)
   - Trainingsbeispiele pro Persona (Fine-Tuning-MVP)
   - Merge-Logik bei Login/Persona-Wechsel (lokal + cloud)
-- Multi-Provider-Flow (OpenRouter, Gemini, Ollama + Fallback-Logik)
+- Multi-Provider-Flow (OpenRouter, OpenCode, Gemini, Ollama + Fallback-Logik)
 - Optionale Live-Web-Recherche für Agenten (über Firebase Function Proxy + Quellenanhang)
 - Sprachfeatures:
   - STT (Diktieren)
   - TTS lokal
   - optionale Cloud-Voice (ElevenLabs)
+  - Natuerlicher Sprachmodus: Speech-Sanitizing (Markdown/Links/Code), chunked TTS mit kurzen Pausen, Anti-Echo zwischen TTS und STT
   - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
   - Bild hochladen, Foto direkt aus dem Chat aufnehmen und analysieren
@@ -91,6 +97,7 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
   - Bestehende Mini-Apps: `Automation Board` + `Knowledge Vault`
 - MCP (Model Context Protocol):
   - stdio-basierte MCP-Client-Integration für lokale Tool-Server
+  - **Remote MCP Bridge**: HTTP JSON-RPC Endpoint-Unterstützung für Android (kein npx nötig)
   - Multi-Server-Management mit Start/Stop pro Server in den Einstellungen
   - Automatische Tool-Registry und Konvertierung in OpenAI-Function-Calling-Format
   - Agent Loop: KI kann MCP-Tools autonom aufrufen und Ergebnisse verarbeiten
@@ -129,11 +136,11 @@ BamaChat ist primär eine Android-Chat-App (Jetpack Compose) mit Persona-System,
 
 ## MCP (Model Context Protocol) Integration
 
-BamaChat unterstützt das stdio-basierte MCP-Protokoll zur Anbindung lokaler Tools und Datenquellen.
+BamaChat unterstützt MCP zur Anbindung lokaler und remote Tools und Datenquellen.
 
 ### Architektur
-- `util/McpClient.kt` — JSON-RPC 2.0 Client über stdio-Prozesskommunikation
-- `util/McpServerManager.kt` — Multi-Server-Management, Tool-Registry, Konvertierung in OpenAI-kompatibles Tool-Format (`getToolDefinitionsOpenAI()`)
+- `util/McpClient.kt` — JSON-RPC 2.0 Client über stdio (lokal) oder HTTP POST (remote)
+- `util/McpServerManager.kt` — Multi-Server-Management, Tool-Registry, Konvertierung in OpenAI-kompatibles Tool-Format (`getToolDefinitionsOpenAI()`), Remote-Config-Auflösung
 - `util/McpTypes.kt` — Datenmodelle (`McpServerConfig`, `McpToolDefinition`, `McpToolCall`, `McpToolResult`)
 - `util/McpWorkflowManager.kt` — Workflow-Engine für mehrstufige Tool-Pipelines
 
@@ -143,8 +150,38 @@ Vorkonfigurierte Default-Server in `McpTypes.kt`:
 - **Web-Suche** (`@anthropic-ai/mcp-server-web-search`)
 - **Knowledge Graph** (`@modelcontextprotocol/server-memory`)
 - **Code-Ausführung** (`@anthropic-ai/mcp-server-code-executor`)
+- **Remote MCP Bridge** — HTTP JSON-RPC Endpoint (URL + Token in Einstellungen konfigurierbar)
 
 Server können in den Einstellungen (KI & Modelle → MCP Server) aktiviert/deaktiviert werden.
+
+### Remote MCP Bridge (Android)
+Da Android keine lokalen `npx`-Prozesse starten kann, ermöglicht die Remote Bridge die Verbindung zu einem HTTP-basierten MCP-Server im selben Netzwerk oder in der Cloud.
+
+**Einrichtung:**
+1. MCP-Server auf dem PC starten (fertig vorbereiteter All-in-One Server unter `C:\Users\Black\mcp-server\`):
+```powershell
+C:\Users\Black\mcp-server\start.ps1
+```
+2. In der App unter `Einstellungen → KI & Modelle → Remote MCP Bridge`:
+   - **Remote MCP URL**: `http://192.168.178.162:3000/mcp` (WLAN-IP des PCs)
+   - **Bridge Token**: leer lassen (oder Token setzen für Absicherung)
+3. Im MCP-Server-Bereich **"Remote MCP Bridge"** aktivieren.
+
+**All-in-One Server Tools** (`C:\Users\Black\mcp-server\`):
+
+| Tool | Beschreibung |
+|---|---|
+| `read_file` | Datei vom PC lesen |
+| `write_file` | Datei auf dem PC schreiben |
+| `list_directory` | Verzeichnis auflisten |
+| `search_files` | Dateien nach Glob-Muster suchen |
+| `search_in_files` | Text in Dateien suchen |
+| `run_command` | Shell-Befehl ausführen |
+| `web_fetch` | Webseite als Text laden |
+| `get_time` | Aktuelle Uhrzeit und Datum |
+| `calculator` | Mathematischen Ausdruck berechnen |
+
+**Technisch:** `McpClient` erkennt `http://`/`https://` in `config.command` und sendet alle JSON-RPC-Requests als OkHttp POST statt über eine Prozess-Pipe. Optionaler Bearer-Token wird als `Authorization`-Header mitgeschickt.
 
 ### Agent Loop (Tool-Calling)
 Wenn MCP- oder Workflow-Tools verfügbar sind, schaltet `sendChatViaApi` automatisch in den Agent-Modus:
@@ -165,6 +202,7 @@ Workflows werden als `workflow_<id>`-Tools im Agent-Kontext registriert und kön
 - Android Studio (neuere stabile Version)
 - JDK 11+ (Projekt nutzt Toolchain 11)
 - Android SDK/Build Tools installiert
+- Host-spezifische Gradle-/AGP-Overrides nicht im Projekt ablegen; dafuer `%USERPROFILE%/.gradle/gradle.properties` oder `local.properties` verwenden
 
 ## Projekt starten
 ```powershell
@@ -183,6 +221,9 @@ Enthält:
 - `assembleDebug`
 - `testDebugUnitTest`
 - `lintDebug`
+
+Lint-Hinweis:
+- `app/lint.xml` ignoriert absichtlich `AndroidGradlePluginVersion` (Toolchain-Pin auf AGP 8.7.3) und `TrustAllX509TrustManager` nur fuer externes `bcpkix`-Jar (kommt ueber `pdfbox-android`).
 
 ## Desktop Client starten (Windows)
 ```powershell
@@ -287,6 +328,65 @@ Hinweise:
 - Mit `GITHUB_TOKEN` werden GitHub-Recherchetreffer (Repos/Issues) stabiler und mit höherem Rate-Limit geliefert.
 - Web-Recherche hat eigenes Tageslimit (`webSearchRequests`) + optionalen Credit-Fallback.
 
+## Lokaler Secure Chat Proxy (`/api/chat`)
+Wenn ein Client nicht direkt mit API-Keys sprechen soll, kannst du lokal einen Backend-Proxy starten.
+
+1. Dependencies im Repo-Root installieren:
+```powershell
+npm install
+```
+2. Env-Datei vorbereiten (Beispiel kopieren):
+```powershell
+Copy-Item .env.proxy.example .env
+```
+3. `HF_TOKEN` in `.env` setzen.
+   - Optional: `PROXY_AUTH_TOKEN` setzen (zusätzliche Absicherung per `x-proxy-token` Header).
+   - Für native Clients ohne Browser-Origin `ALLOW_MISSING_ORIGIN=true` lassen.
+   - Optional Rate-Limit anpassen: `RATE_LIMIT_WINDOW_MS` + `RATE_LIMIT_MAX_REQUESTS`.
+4. Proxy starten:
+```powershell
+npm run dev
+```
+
+Endpoints:
+- Health: `http://<host>:5173/health`
+- Chat: `http://<host>:5173/api/chat`
+
+## Vercel Deploy (Production)
+Serverless Endpoints sind unter `api/chat.js` und `api/health.js` vorbereitet.
+
+1. Projekt bei Vercel importieren.
+2. Environment Variables setzen:
+   - `HF_TOKEN` (required)
+   - `HF_MODEL` (optional)
+   - `ALLOWED_ORIGIN` (required, konkrete Origin)
+   - `ALLOW_MISSING_ORIGIN` (`true` fuer native Clients, sonst `false`)
+   - `PROXY_AUTH_TOKEN` (optional)
+   - `RATE_LIMIT_WINDOW_MS` (optional, default `60000`)
+   - `RATE_LIMIT_MAX_REQUESTS` (optional, default `30`)
+3. Deploy ausführen.
+
+Production-Endpunkte:
+- `https://<dein-projekt>.vercel.app/health`
+- `https://<dein-projekt>.vercel.app/api/chat`
+
+Beispiel-Request:
+```json
+{
+  "message": "Hallo, was kannst du?"
+}
+```
+
+## OpenCode (Zen) aktivieren
+1. In der App unter `Einstellungen -> KI & Modelle` den `OpenCode API-Key` setzen (`sk-...`).
+2. Als Endpoint `https://opencode.ai/zen/v1/` eintragen (Standard in aktuellen Builds).
+3. Modell setzen, z. B. `claude-sonnet-4-5` (Default), `claude-opus-4-5` oder `claude-haiku-4-5`.
+   - OpenAI/Codex-Modelle sind ebenfalls möglich, z. B. `gpt-5.3-codex` oder `gpt-5.4-mini`.
+4. Optional `Auto-Fallback` deaktivieren und `Aktiver Provider = OpenCode` auswählen.
+
+Hinweis:
+- OpenCode in BamaChat nutzt die Zen-`/messages`-API mit `x-api-key` (Anthropic-kompatibel), nicht den alten `api.opencode.ai` OpenAI-`/chat/completions` Pfad.
+
 Wichtiger Hinweis zu Persona-Cloud-Sync:
 - Firestore-Rules müssen die folgenden Subcollections unter `users/{uid}` erlauben:
   - `persona_profiles`
@@ -304,6 +404,10 @@ npx firebase-tools deploy --only firestore:rules
 - Ohne Groq-Key funktionieren Bild-/Text-/DOCX-/XLSX-/PDF-Importe weiterhin, Audio/Video dann nur mit Hinweis.
 
 ## Wichtige Dateien
+- Build-Konfiguration:
+  - `gradle/libs.versions.toml`
+  - `gradle.properties`
+  - `local.properties` (lokal, nicht einchecken)
 - App-Einstieg:
   - `app/src/main/java/com/example/bamachat/MainActivity.kt`
   - `app/src/main/java/com/example/bamachat/BamaChatApplication.kt`
@@ -410,6 +514,7 @@ Manifest-Berechtigungen in der App:
 - `USE_BIOMETRIC`: optionaler App-Lock
 - `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`: Standortfunktion (wenn genutzt)
 - `VIBRATE`, `WAKE_LOCK`: System-/Background-Unterstützung
+- Runtime-Berechtigungen werden On-Demand in den jeweiligen Features angefragt (kein Sammel-Prompt beim App-Start)
 
 Vor Store-Upload:
 - Im Play Console Data-Safety-Formular exakt diese Datenflüsse abbilden.
@@ -435,7 +540,7 @@ Vor Store-Upload:
 
 ### Aktuelle bekannte Restpunkte
 - Lint-Warnungen stammen aus externer Dependency (`bouncycastle`) und nicht aus App-Code.
-- `android:allowBackup="true"` ist aktiv. Für striktere Datenschutz-Policy ggf. auf `false` setzen.
+- `android:allowBackup="false"` ist aktiv (Backups via Android Auto-Backup sind deaktiviert).
 
 ## Monetarisierung (Live-Konfig)
 - Zentrale Config: `app/src/main/java/com/example/bamachat/util/MonetizationConfig.kt`

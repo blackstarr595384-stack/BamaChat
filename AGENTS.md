@@ -3,6 +3,7 @@
 ## Große Architekturübersicht
 - Dreimodulige App-Basis: Android-Hauptapp (`:app`) mit Kotlin + Compose + MVVM, Desktop-Client (`:desktopApp`) auf Compose Multiplatform (Windows Stage 6) und Shared-Core (`:sharedCore`) fuer plattformneutrale Logik; Android-Einstieg ist `MainActivity` + `BamaChatApplication` (Android 13+, minSdk 33).
 - Navigation ist zentralisiert in `ui/screen/BamaChatApp.kt`; Auth-Status steuert Routen (`WELCOME`/`AUTH`/`HOME_HUB`/`CHAT` etc.).
+- Home-Hub Verständlichkeitsmodus: `SettingsViewModel.simpleModeEnabled` (`settings.simple_mode_enabled`) steuert die reduzierte Einstiegskachel-Auswahl im `HomeHubScreen`.
 - `ChatViewModel` ist der Orchestrierungskern: AI-Provider-Routing, Streaming, Persona-Logik, Quotas/Paywall, Benachrichtigungen, multimodaler Import und Cloud-Persona-Sync.
 - Für installierbare Workspace-Plugins gibt es einen separaten Flow aus `ExtensionManagerViewModel` + `ExtensionManagerScreen` + `util/WorkspaceExtensions.kt` (Katalog, Capabilities, Persistenz); aktive Extensions werden im `ChatViewModel` turn-basiert in den Runtime-Kontext injiziert. Zusätzlich steuert die Composer-Quick-Action (`Auto`/`Research`/`Code Review`/`Plan`) den Extension-Modus pro Nachricht.
 - Lokale Persistenz verwendet Room (`data/local/*`) über `ChatRepository`; AI-Netzwerkaufrufe werden absichtlich in `ChatViewModel` durchgeführt (siehe Repo-Kommentar in `ChatRepository.kt`).
@@ -17,26 +18,34 @@
 - Desktop-Build: `.\gradlew.bat :desktopApp:build`
 - Desktop-Start lokal: `.\gradlew.bat :desktopApp:run`
 - Shared-Core-Tests: `.\gradlew.bat :sharedCore:test`
+- Lokaler Secure-Proxy (`/api/chat`): `npm install && npm run dev` (Root, Token via `.env`)
 - Lint-Berichtspfad: `app/build/reports/lint-results-debug.html`
 - Android UI Smoke-Test APK: `.\gradlew.bat :app:assembleDebugAndroidTest`; Geräteausführung: `:app:connectedDebugAndroidTest`
 - Firebase IaC-Wrapper: `.\scripts\iac-firebase.ps1 -Environment dev -Action check|rules|indexes|all`
 - Functions Deploy (Live-Web-Proxy): `npx firebase-tools deploy --only functions`
+- Optional Secure-Proxy Deploy (Vercel): Serverless Handler unter `api/chat.js` + `api/health.js`
 - Mini-Apps/Photo-AI Release-Checkliste: `MINIAPPS_RELEASE_CHECKLIST.md`
 - Release-Signierung ist bedingt: `app/build.gradle.kts` liest `keystore.properties` und schlägt schnell fehl, wenn Schlüssel unvollständig sind.
 
 ## Projekt-spezifische Konventionen
-- Kein DI-Container: ViewModels werden in `MainActivity` über `ViewModelProvider` erstellt.
+- Android verwendet Hilt fuer `Application`, `Activity` und `ViewModel` Wiring; Screens beziehen ViewModels ueber `hiltViewModel()`.
 - UI-Status ist `MutableStateFlow` in ViewModels und wird mit `collectAsStateWithLifecycle` in Screens konsumiert.
 - SharedPreferences (`"settings"`) ist ein wichtiger Konfigurationsbus (API-Schlüssel, Provider-Auswahl, Persona-Tuning, Billing-Flags).
 - Benutzerseitige Fehler/Status werden über ViewModel-Status (`_errorMessage`, `_statusMessage`) angezeigt und meist deutscher Text.
-- Room DB verwendet `fallbackToDestructiveMigration(dropAllTables = true)` in `ChatDatabase`; Schema-Änderungen können lokale Daten löschen.
+- Room DB nutzt explizite Migrationen in `ChatDatabase` (kein `fallbackToDestructiveMigration`); fehlende Migrationen schlagen bewusst fehl statt lokale Daten zu loeschen.
 - Gastdaten-Bereinigung ist explizit in `LocalDataSanitizer.clearGuestSessionData`; füge neue private Schlüssel dort hinzu, falls nötig.
+- Plugin- und Dependency-Versionen liegen zentral in `gradle/libs.versions.toml`; maschinenbezogene Gradle-/AGP-Overrides bleiben in `%USERPROFILE%/.gradle/gradle.properties` oder `local.properties`.
+- Lint-Ausnahmen liegen bewusst in `app/lint.xml`: `AndroidGradlePluginVersion` ist wegen Toolchain-Pin auf AGP 8.7.3 ignoriert; `TrustAllX509TrustManager` nur fuer externes `bcpkix`-Jar (pdfbox-Transitiv).
 
 ## Integrations-Hotspots
-- Provider-Integration lebt in `data/ApiClient.kt` (OpenRouter/Groq/Cerebras/Together/Gemini/Ollama).
+- Provider-Integration lebt in `data/ApiClient.kt` (OpenRouter/OpenCode/Groq/Cerebras/Together/Gemini/Ollama).
+- OpenCode nutzt standardmäßig die Zen-API (`https://opencode.ai/zen/v1/`, `/messages`, `x-api-key`); Legacy-Endpoint `https://api.opencode.ai/v1/` gilt als veraltet.
 - Billing-Produkt-IDs müssen zwischen `MonetizationConfig.kt` und `PlayBillingManager.kt` konsistent bleiben.
 - Live-Web-Recherche ist verteilt über `SettingsViewModel` (`live_web_*`, inkl. `live_web_prefer_github`), `ApiManager.runLiveWebResearch`, `ChatViewModel.resolveLiveWebContext` und `functions/index.js`.
+- Optionaler lokaler Chat-Proxy fuer API-Key-Abschirmung liegt in `server.js` (Root, Endpoint `/api/chat`).
+- Vercel-Proxy-Variante fuer `/api/chat` liegt in `api/chat.js` (CORS/Origin-Checks + optional `x-proxy-token`).
 - Workspace-/Produktivitäts-Features liegen primär in `SettingsViewModel` (`project_workspaces_json`, `active_workspace_id`, `workspace_chat_filter_enabled`), `ChatViewModel` (Workspace-Bindings + Chatfilter) sowie `ui/screen/MiniAppsScreen.kt` (Mini-Apps V2 Discover + Personalisierung + `PromptLabApp`, `VoiceNotesAiApp`, `SmartWorkspaceApp`, `AutomationBoard`, `KnowledgeVault`).
+- Build-Toolchain ist derzeit auf AGP 8.7.3 + Kotlin 2.1.21 + Gradle 8.10.2 + compile/targetSdk 35 ausgerichtet (`gradle/libs.versions.toml`, `gradle/wrapper/gradle-wrapper.properties`, `app/build.gradle.kts`).
 - Photo-AI-Editing ist dreigeteilt: UI/Flow in `ui/screen/MiniAppsScreen.kt` (`PhotoStudioApp`, Rechtepanel, Undo/Redo), Aktionsausführung in `util/PhotoAiActionExecutor.kt` und Cloud-Transport in `util/PhotoAiCloudClient.kt` (Endpoint/Token aus `settings.photo_ai_cloud_*`, Fallback-Ableitung aus Live-Web-Endpoint).
 - Erweiterungs-/Plugin-Basis liegt in `util/WorkspaceExtensions.kt` (Katalog + Capability-Mapping), `ui/viewmodel/ExtensionManagerViewModel.kt` (Install/Enable/Rechte) und `ui/screen/ExtensionManagerScreen.kt` (Management-UI).
 - Sprach-/Multimodal-Pipeline ist aufgeteilt: `SettingsViewModel` (`auto_language_detection_enabled`, `local_ocr_enabled`), Parsing/OCR/Language-ID in `MultimodalProcessor.kt`, Prompt-Integration und RAG-Chunking in `ChatViewModel`.

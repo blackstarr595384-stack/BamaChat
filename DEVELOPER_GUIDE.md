@@ -9,11 +9,13 @@ Die aktuelle Basis ist stabil genug für iteratives Produkt-Building, noch vor f
 ## 2. Tech Stack
 - Sprache: Kotlin
 - UI: Jetpack Compose + Navigation
+- DI: Hilt (`@HiltAndroidApp`, `@AndroidEntryPoint`, `@HiltViewModel`)
 - Desktop UI (Windows Client): Compose Multiplatform Desktop (`:desktopApp`)
 - State: ViewModels + `StateFlow`
 - DB lokal: Room
 - Netzwerk: Retrofit + OkHttp
-- KI-Provider: OpenRouter, Gemini, Ollama (+ Fallback-Strategie)
+- KI-Provider: OpenRouter, OpenCode, Gemini, Ollama (+ Fallback-Strategie)
+  - OpenCode-Default: Zen-API `https://opencode.ai/zen/v1/` (`/messages`, Header `x-api-key`, Modell-Default `claude-sonnet-4-5`)
 - Live-Web-Recherche: Firebase Function `webSearch` als sicherer Internet-Proxy für Agenten
 - Firebase:
   - Auth
@@ -23,6 +25,7 @@ Die aktuelle Basis ist stabil genug für iteratives Produkt-Building, noch vor f
   - Crashlytics
 - Billing: Google Play Billing
 - Target Device Range: Android 13+ (minSdk 33)
+- Android Build-Toolchain: AGP 8.7.3, Kotlin 2.1.21, Gradle 8.10.2, compile/targetSdk 35
 - Hinweis zu iOS: benötigt separaten Client (z. B. KMP/Flutter oder native iOS-App)
 
 ## 3. Projektstruktur (relevant)
@@ -69,8 +72,10 @@ Desktop-Client relevante Klassen:
 ## 4. Lokales Setup
 ## Voraussetzungen
 - Android Studio (aktuell, stable)
-- JDK 11 oder höher
+- JDK 17 oder höher
 - Android SDK + Emulator/Device
+- Plugin- und Dependency-Versionen werden zentral in `gradle/libs.versions.toml` gepflegt.
+- Host-spezifische Gradle-/AGP-Overrides gehoeren in `%USERPROFILE%/.gradle/gradle.properties`; SDK- oder andere lokale Dateipfade bleiben in `local.properties`.
 
 ## Initial Build
 ```powershell
@@ -81,6 +86,28 @@ Desktop-Client relevante Klassen:
 ```powershell
 .\gradlew.bat :app:stabilityCheck
 ```
+
+## Optional: Lokaler Secure Chat Proxy
+Falls ein Client gegen einen sicheren lokalen Backend-Proxy (`/api/chat`) testen soll:
+
+```powershell
+npm install
+Copy-Item .env.proxy.example .env
+# HF_TOKEN in .env setzen
+# optional: PROXY_AUTH_TOKEN setzen
+npm run dev
+```
+
+Standard-Endpunkte:
+- `http://<host>:5173/health`
+- `http://<host>:5173/api/chat`
+
+Production (Vercel):
+- Serverless Handler: `api/chat.js`, `api/health.js`
+- Rewrites: `vercel.json` mapped `/health -> /api/health`
+- Pflicht-Env: `HF_TOKEN`, `ALLOWED_ORIGIN`
+- Empfehlenswert: `ALLOW_MISSING_ORIGIN=true` fuer native Clients, optional `PROXY_AUTH_TOKEN`
+- Optional Abuse-Schutz: `RATE_LIMIT_WINDOW_MS` (default 60000), `RATE_LIMIT_MAX_REQUESTS` (default 30)
 
 ## 5. Firebase Setup
 ## 5.1 `google-services.json`
@@ -113,6 +140,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\start-bamachat-desktop.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\desktop-launch-smoke-test.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\remove-legacy-machine-install.ps1
 ```
+
+Lint-Hinweise:
+- `app/lint.xml` ignoriert `AndroidGradlePluginVersion`, da AGP 8.7.3 als validierte Basis fuer compile/targetSdk 35 gehalten wird.
+- `TrustAllX509TrustManager` wird nur fuer das externe `org.bouncycastle:bcpkix-jdk15to18`-Jar ignoriert; App-eigener Netzwerkcode bleibt von der Pruefung erfasst.
 
 Desktop Cloud-Sync (Stage 3):
 - Login/Registrierung läuft über Firebase Auth REST (`accounts:signInWithPassword`, `accounts:signUp`).
@@ -190,6 +221,9 @@ Verhalten:
 ## Voice
 - Lokale TTS/STT in `ChatScreen.kt`
 - Cloud-Voice in `CloudVoiceManager.kt`
+- TTS nutzt Speech-Sanitizing + Chunking mit kurzen Pausen (`sanitizeForSpeech`, `splitSpeechChunks`) fuer natuerlicheres Sprechen.
+- Continuous Voice wartet auf abgeschlossenes Playback (lokal + Cloud), bevor STT neu startet (Anti-Echo/Loop-Schutz).
+- Settings enthalten ein "Natuerliches Preset" fuer TTS-Geschwindigkeit/Stimmhoehe.
 
 ## Advanced-AI-Basis (Feature 1-8, aktueller MVP-Stand)
 - Persistent Memory:
@@ -229,6 +263,7 @@ Verhalten:
   - OCR-Fallback für PDF-Scans (ML Kit Text Recognition)
   - Video-Keyframe-Pipeline in `VideoKeyframeExtractor.kt`
 - Workspaces & Produktivität (neu):
+  - Home Hub startet standardmäßig im einfachen Modus (`settings.simple_mode_enabled`) und kann auf Advanced umgeschaltet werden
   - Workspace-Status in `SettingsViewModel` (`project_workspaces_json`, `active_workspace_id`)
   - Workspace-Sektion in `SettingsDialog.kt`
   - Chat-Titel übernimmt aktiven Workspace (`ChatViewModel.newConversationTitle()`)
@@ -253,6 +288,46 @@ Verhalten:
   - Bestehende Apps weiterhin aktiv: `AutomationBoard` + `KnowledgeVault`
   - Persona-Marketplace in `AgentHubScreen.kt`
 
+## 7b. MCP Integration
+
+### Architektur
+- `util/McpClient.kt` — JSON-RPC 2.0 über stdio (lokal) oder HTTP POST (remote)
+- `util/McpServerManager.kt` — Multi-Server-Lifecycle, Tool-Registry, `getToolDefinitionsOpenAI()`, Remote-Config-Auflösung via `resolveStartConfig()`
+- `util/McpTypes.kt` — Datenmodelle + `defaultMcpServers` Liste
+- `util/McpWorkflowManager.kt` / `McpWorkflowTypes.kt` — mehrstufige Tool-Pipelines
+
+### Remote MCP Bridge
+Lokale `npx`-Prozesse funktionieren auf Android nicht. Die Remote Bridge ermöglicht die Verbindung zu einem HTTP JSON-RPC Server im Netzwerk oder in der Cloud.
+
+**Wie es funktioniert:**
+1. `McpTypes.kt` enthält einen `remote-bridge` Eintrag mit `command = "remote_http"` als Sentinel.
+2. Beim Start ruft `McpServerManager.resolveStartConfig()` die echte URL aus `SharedPreferences` (`mcp_remote_url`) ab und den Token aus `SecureSettingsStore` (`mcp_remote_token`).
+3. `McpClient.isRemoteTransport()` erkennt `http://`/`https://` und sendet alle JSON-RPC-Requests als OkHttp POST statt über eine Prozess-Pipe.
+4. Optionaler Bearer-Token wird als `Authorization`-Header mitgeschickt.
+
+**Einstellungen in der App:**
+- `Einstellungen → KI & Modelle → Remote MCP Bridge`
+  - **Remote MCP URL** — z. B. `http://192.168.178.162:3000/mcp`
+  - **Bridge Token** — optional, für Absicherung
+
+**Relevante Settings-Keys:**
+- `settings.mcp_remote_url` — plain SharedPreferences
+- `mcp_remote_token` — verschlüsselt in `SecureSettingsStore`
+
+**All-in-One Starter-Server (lokal):**
+Fertig vorbereitet unter `C:\Users\Black\mcp-server\`. Starten mit:
+```powershell
+C:\Users\Black\mcp-server\start.ps1
+```
+Tools: `read_file`, `write_file`, `list_directory`, `search_files`, `search_in_files`, `run_command`, `web_fetch`, `get_time`, `calculator`.
+
+### Agent Loop
+`ChatViewModel.sendChatViaApi` schaltet bei verfügbaren Tools automatisch in den Agent-Modus:
+1. Request mit `tools`-Array + `tool_choice: "auto"` an Provider
+2. Bei `tool_calls`: Ausführung via `McpServerManager.callTool()` oder `McpWorkflowManager.executeWorkflow()`
+3. Ergebnisse als `role: "tool"` zurück an Modell
+4. Max. 5 Iterationen bis finale Text-Antwort
+
 ## 8. Datenmodell (vereinfacht)
 - `conversations`
 - `chat_messages`
@@ -264,7 +339,7 @@ Verhalten:
 - `knowledge_edges`
 - `persona_training_examples`
 
-Hinweis: DB-Version ist auf den aktuellen Stand angehoben, Migration aktuell destruktiv (`fallbackToDestructiveMigration`).
+Hinweis: DB-Migrationen laufen explizit über definierte Room-Migrationsschritte (fail-fast bei fehlender Migration, kein automatischer Daten-Reset).
 
 ## Release-/Feature-Kommunikation
 - Wenn du ein neues User-Feature einbaust, aktualisiere immer direkt `README.md` und diesen Developer Guide.

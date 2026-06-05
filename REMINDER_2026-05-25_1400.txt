@@ -1,0 +1,10 @@
+Erinnerung: Jetzt genau da weitermachen, wo wir aufgehort haben.
+
+Naechster Schritt:
+- P0-05 Billing E2E finalisieren (Sandbox-Pro/Expert + Credits)
+- Danach Entitlement/Restore/Credits pruefen
+
+Kontext:
+- Mobile Data only (ohne WLAN)
+- OpenRouter aktiv
+- Release-Stand in RELEASE_BOARD.md
