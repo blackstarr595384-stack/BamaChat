@@ -1,4 +1,4 @@
-package com.example.bamachat.ui.screen
+﻿package com.example.bamachat.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -117,13 +117,13 @@ fun SettingsScreen(
                 IconButton(onClick = onBack) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Zurück",
+                        contentDescription = "ZurÃ¼ck",
                         tint = Color.White
                     )
                 }
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "⚙️ Einstellungen",
+                    text = "âš™ï¸ Einstellungen",
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
@@ -161,13 +161,13 @@ fun SettingsScreen(
                 ) {
                     Column {
                         Text(
-                            "Abo • ${tier.uppercase()}",
+                            "Abo \u2022 ${tier.uppercase()}",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
                         )
                         Text(
-                            "Credits: €${"%.2f".format(credits)}",
+                            "Credits: \u20AC${"%.2f".format(credits.toDouble())}",
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 13.sp
                         )
