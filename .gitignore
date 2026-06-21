@@ -16,3 +16,38 @@ hs_err_pid*.log
 replay_pid*.log
 functions/node_modules/
 .kotlin/
+
+# Local generated/cache folders
+/.firebase/
+/.stakpak/
+/node_modules/
+/playstore_reports/
+/backups/
+
+# Local patch/export folders
+/BamaChat_*_v*/
+
+# Local backup files
+*.bak
+*.bak_*
+*.backup*
+*.backup_*
+*.log
+*Fixed.txt
+firestore.rules.backup_*
+storage.rules.backup_*
+gradle.properties.bak_*
+app/**/*.bak*
+app/**/*.backup*
+
+# Secrets / signing / local config
+/release-key
+*.jks
+*.keystore
+*.p12
+*.env
+apikeys.properties
+local.properties
+
+# Wrong Firebase local filename
+/app/google-service.json
