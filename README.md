@@ -29,17 +29,18 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
 - Sprachfeatures:
   - STT (Diktieren)
   - TTS lokal
-  - optionale Cloud-Voice (ElevenLabs)
+  - optionale Cloud-Voice (ElevenLabs oder Piper)
   - Natuerlicher Sprachmodus: Speech-Sanitizing (Markdown/Links/Code), chunked TTS mit kurzen Pausen, Anti-Echo zwischen TTS und STT
   - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
   - Bild hochladen, Foto direkt aus dem Chat aufnehmen und analysieren
-  - Bildgenerierung
+  - Bildgenerierung über konfigurierbaren Chat-Modus (`settings.image_generation_mode`); leerer Prompt, deaktivierter Modus oder externer Dienstfehler erzeugen eine verständliche Fehlermeldung statt einer kaputten Bildkarte
 - Auth & Profil:
   - Registrierung/Anmeldung
   - Google Sign-In über Credential Manager (Google ID Token)
   - Gastmodus
   - Profilname + Profilbild (Firebase Storage)
+  - Consent-Route vor dem Haupt-Flow, Telemetrie erst nach Zustimmung und vollständige Konto-Löschung (lokal + Cloud)
 - Monetarisierung-Basis:
   - Free-Quotas
   - Paywall-Struktur
@@ -72,6 +73,7 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
 - Hinweis: nur für angemeldete Nutzer (nicht Gastmodus)
 - Feature 8 (MVP): Multimodal Advanced
   - Bild/Screenshot-Analyse
+  - Chat-Bildgenerierung ist von Bildanalyse getrennt und kann in Einstellungen > KI & Modelle deaktiviert werden
   - Optional lokale OCR für Bild-Chat-Kontext (ML Kit Text Recognition)
   - Dokumentimport inkl. TXT/MD/CSV/JSON
   - DOCX/XLSX-Extraktion (Basis)

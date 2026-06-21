@@ -1,7 +1,8 @@
 package com.example.bamachat.ui.component
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
@@ -18,14 +19,16 @@ data class CompactTextAction(
     val color: Color? = null
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CompactTextActionRow(
     actions: List<CompactTextAction>,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    FlowRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         actions.forEach { action ->
             TextButton(

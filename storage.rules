@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service firebase.storage {
   match /b/{bucket}/o {
     function isSignedIn() {
@@ -9,23 +10,48 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isImage() {
+      return request.resource != null
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    function isSmallProfileImage() {
+      return request.resource != null
+        && request.resource.size < 5 * 1024 * 1024
+        && isImage();
+    }
+
     // Current profile image path: profile_images/{uid}.jpg
     match /profile_images/{fileName} {
-      allow read, write: if isSignedIn() &&
-        fileName.matches(request.auth.uid + "\\.jpg");
+      allow read: if isSignedIn() && fileName.matches(request.auth.uid + "\\.jpg");
+      allow write: if isSignedIn()
+        && fileName.matches(request.auth.uid + "\\.jpg")
+        && isSmallProfileImage();
     }
 
     // Future-proof per-user profile image folder
     match /profile_images/{uid}/{allPaths=**} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid) && isSmallProfileImage();
     }
 
-    // User-owned docs for RAG feature
+    // User-owned docs for RAG feature.
+    // Limit: 25 MB pro Datei. Passe Content-Types bei Bedarf an.
     match /rag_docs/{uid}/{allPaths=**} {
-      allow read, write: if isOwner(uid);
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid)
+        && request.resource != null
+        && request.resource.size < 25 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('text/.*')
+          || request.resource.contentType == 'application/pdf'
+          || request.resource.contentType == 'application/json'
+          || request.resource.contentType == 'text/csv'
+          || request.resource.contentType == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          || request.resource.contentType == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
     }
 
-    // Deny everything else
     match /{allPaths=**} {
       allow read, write: if false;
     }

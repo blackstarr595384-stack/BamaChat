@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.BuildConfig
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.ui.theme.AppDesignPalette
 import java.text.SimpleDateFormat
@@ -132,8 +133,8 @@ fun ChatDrawer(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "made by Mamadou Dian Baldé w/AI",
-                    color = Color.White.copy(alpha = 0.35f),
+                    "BamaChat · Version ${BuildConfig.VERSION_NAME}",
+                    color = Color.White.copy(alpha = 0.42f),
                     fontSize = 10.sp
                 )
             }

@@ -2,135 +2,75 @@
 
 ## Store Listing Text
 
-### Title (50 chars max)
-BamaChat - AI mit Personas
+### Titel (max. 50 Zeichen)
+BamaChat - KI-Workspace mit Agenten
 
-### Short Description (80 chars max)
-Multi-Persona KI Chat. Offline. Schnell. Deine API-Keys.
+### Kurzbeschreibung (max. 80 Zeichen)
+Chat, Agenten, MCP-Tools und Teamarbeit mit deinen KI-Modellen in einer App.
 
-### Full Description (4000 chars max)
+### Vollbeschreibung (max. 4000 Zeichen)
 
-🤖 **BamaChat** - Dein Persönlicher Multi-Persona AI Assistant
+**BamaChat** ist kein einzelner Chatbot, sondern ein KI-Workspace für Android.
+
+Verbinde deine bevorzugten Modelle, arbeite mit spezialisierten Agenten und bündele Chat, Recherche, Dateien und Zusammenarbeit in einer Oberfläche.
 
 **Warum BamaChat?**
 
-ChatGPT ist schnell, aber teuer. Claude ist gut, aber begrenzt. BamaChat ist DEIN KI-Assistent — mit deinen API-Keys, deinen Personas, deinen Regeln.
+- **Mehrere KI-Modelle in einer App**
+  OpenRouter, OpenCode, Groq, Cerebras, Together, Gemini und Ollama lassen sich in einem Chat-Workflow nutzen.
 
-**Kernfeatures:**
+- **Agenten und Personas**
+  Nutze vordefinierte Rollen oder baue eigene Agenten mit Prompts, Trainingsbeispielen und klaren Aufgaben.
 
-✨ **7 Vorgefertigte Personas**
-- Developer: Code Reviews, Debugging, Architektur
-- Teacher: Erklärungen, Lernmaterial, Quizze
-- Chef: Rezepte, Kochtechniken, Meal Planning
-- Fitness Coach: Training, Ernährung, Motivation
-- Translator: Mehrsprachig, kulturelle Anpassung
-- Therapist: Reflexion, aktives Zuhören, Support
-- Custom: Trainiere deine eigene Persona
+- **Workspaces statt Chat-Chaos**
+  Organisiere Projekte, Ideen, Aufgaben und Gespräche in getrennten Arbeitsräumen.
 
-🔧 **Custom Training**
-- Lehre dein Persona deine Kommunikationsstil
-- Speichere Beispiele: "Wenn Nutzer X fragt, antworte Y"
-- Live-Preview der Personality-Änderungen
+- **MCP-Tools und Extensions**
+  Binde externe Werkzeuge an, erweitere den Chat-Kontext und bringe mehr Produktivität direkt in die Unterhaltung.
 
-🌍 **Multi-Model Support**
-- OpenRouter: GPT-4, Claude 3, Gemma, Mistral, etc.
-- Groq: Blitzschnell & kostenlos
-- Cerebras: Große Kontexte
-- Together AI: Open Source Models
-- Ollama: Lokal, Offline, 100% privat
+- **Kollaboration in Echtzeit**
+  Teile Sessions, arbeite gemeinsam an Inhalten und nutze Präsenz- und Rollenfunktionen für Teamarbeit.
 
-💾 **Offline-Mode**
-- Schreibe Messages offline
-- Auto-Sync wenn Online
-- Keine verlorenen Chats
+- **Multimodale Eingaben**
+  Text, Bilder, Sprache, Dokumente und Uploads laufen in einem durchgehenden Flow zusammen.
 
-🔒 **Sicherheit**
-- Biometric Lock (Fingerprint/Face)
-- Verschlüsselte API-Keys
-- Keine Datensammlung (nur Crashes)
-- Deine Chats gehören DIR
+- **Hilfe direkt in der App**
+  Das Hilfezentrum erklärt Workspaces, MCP, Kollaboration, Rollen, Gäste und KI-Agenten verständlich.
 
-📊 **Extensions & Tools**
-- Web Search
-- Code Execution (Sandboxed)
-- File Upload & Analysis
-- Workflows & Automation
+**Ideal für:**
 
-📈 **Analytics**
-- Sehe deine Chat-Nutzung
-- Erfasse welche Personas am nützlichsten
-- Track API-Costs
+- Recherche, Planung und tägliche Wissensarbeit
+- Eigene KI-Setups mit mehreren Providern
+- Code Review, Briefings und strukturierte Zusammenarbeit
+- Nutzer, die mehr als nur einen Standard-Chat wollen
 
-**Preismodell:**
+**So startest du:**
 
-🆓 **Free** — Immer kostenlos
-- 10 Messages/Tag
-- Standard Models
-- 1 Persona
+1. App öffnen
+2. Als Gast testen oder Konto anlegen
+3. Optional eigene Provider-Keys verbinden
+4. Workspace wählen, Agent starten, loslegen
 
-💎 **Pro** — $3.99/Monat
-- Unlimited Messages
-- ALLE Models + Personas
-- Custom Training
-- Extensions
-- Cloud Backup
-- Priority Support
+**Pläne und Nutzung**
 
-**Getting Started:**
+- Kostenlos starten mit täglichem Kontingent
+- Pro und Expert für größere Limits und produktivere Nutzung
+- Credits für zusätzliche Aktionen wie Recherche, Multimodalität und Spezial-Workflows
 
-1. Download BamaChat
-2. Gehe zu openrouter.ai (kostenlos, kostet nur was du nutzt)
-3. Erstelle einen API-Key (5 Minutes)
-4. Kopiere Key in BamaChat
-5. Los geht's! 🚀
+**Datenschutz und Vertrauen**
 
-**Warum ein API-Key?**
+- Öffentliche Datenschutzseite
+- Öffentliche Support-Seite
+- Öffentliche Seite zur Kontolöschung
+- Rechtstexte direkt aus der App erreichbar
 
-BamaChat kümmert sich um die UI & UX. Du zahlst direkt dem KI-Provider — das ist GÜNSTIGER als ChatGPT Plus! Ein Free-Tier bei OpenRouter kostet $0 wenn du wenig nutzt.
+**Support**
 
-**Datenschutz:**
+E-Mail: support@bamachat.app
 
-Deine Chats sind 100% privat. Niemand außer dir sieht sie. Wir tracken NICHT deine Conversations — nur Crashes für Stabilität.
+**Rechtliche Links**
 
-**Community:**
-
-- Teile Personas mit anderen
-- Nutze Community Extensions
-- GitHub: Siehe Source Code (Open Source freigegeben)
-
----
-
-**Sicherheit & Compliance:**
-
-✅ Biometric Authentication
-✅ Encrypted Storage
-✅ HTTPS only
-✅ Offline-ready
-✅ Cloud Backup (optional)
-✅ GDPR compliant
-✅ 30-day data deletion
-✅ No trackers
-
----
-
-**Changelog v1.0:**
-
-🎉 Launch Version
-- 7 Personas
-- Multi-Model Support
-- Custom Training
-- Offline Mode
-- Cloud Backup
-- Extensions
-
----
-
-**Support:**
-
-📧 Email: support@bamachat.app
-🐛 Bug Reports: GitHub Issues
-💬 Feedback: Discord Community
-
----
-
-Made with ❤️ for AI enthusiasts. Not affiliated with OpenAI, Anthropic, or Google.
+- Datenschutz: https://bamachat-d07fb.web.app/privacy-policy/
+- Nutzungsbedingungen: https://bamachat-d07fb.web.app/terms/
+- Konto löschen: https://bamachat-d07fb.web.app/delete-account/
+- Support: https://bamachat-d07fb.web.app/support/

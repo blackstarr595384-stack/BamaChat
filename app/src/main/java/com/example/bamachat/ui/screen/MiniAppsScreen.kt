@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+﻿@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 
 package com.example.bamachat.ui.screen
 
@@ -6,6 +6,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.SharedPreferences
 import android.graphics.Color as AndroidColor
 import android.speech.RecognizerIntent
@@ -90,8 +91,8 @@ import kotlin.random.Random
 enum class MiniAppCategory(val label: String) {
     PRODUCTIVITY("Produktiv"),
     CREATIVE("Kreativ"),
-    UTILITY("Utility"),
-    KNOWLEDGE("Knowledge")
+    UTILITY("Werkzeuge"),
+    KNOWLEDGE("Wissen")
 }
 
 @Composable
@@ -109,7 +110,7 @@ private fun MiniAppHeroCard() {
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "Discover-Ansicht, Live-Cards, Favoriten, Swipe-Management und neue AI-Tools.",
+                "Entdecken-Ansicht, Live-Karten, Favoriten, Wisch-Verwaltung und neue KI-Tools.",
                 color = Color.White.copy(alpha = 0.78f),
                 fontSize = 13.sp
             )
@@ -163,7 +164,7 @@ internal fun MiniAppStatusBanner(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                Text(message, color = Color.White, fontSize = 12.sp)
+                Text(message, color = Color.White, fontSize = 14.sp)
             }
             AnimatedVisibility(visible = isLoading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Color.White)
@@ -192,7 +193,7 @@ private fun MiniAppsEmptyState(
             Text(
                 "Filter: $filterLabel${if (query.isNotBlank()) " • Suche: \"$query\"" else ""}",
                 color = Color.White.copy(alpha = 0.75f),
-                fontSize = 12.sp
+                fontSize = 14.sp
             )
             TextButton(onClick = onReset) {
                 Text("Filter & Suche zurücksetzen")
@@ -258,7 +259,7 @@ private fun MiniAppSpotlightCard(
             Text(
                 app.description,
                 color = Color.White.copy(alpha = 0.72f),
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 maxLines = 2
             )
             AssistChip(
@@ -302,7 +303,7 @@ private fun MiniAppLiveCard(
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(app.displayName, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                    Text(app.description, color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, maxLines = 2)
+                    Text(app.description, color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp, maxLines = 2)
                 }
                 StatusBadge(
                     text = app.status.label,
@@ -344,7 +345,7 @@ private fun StatusBadge(
         Text(
             text = text,
             color = Color.White,
-            fontSize = 11.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
         )
@@ -373,7 +374,7 @@ enum class MiniApp(
     GAME_2048("2048", "🎮", "Klassisches Zahlen-Spiel", MiniAppCategory.CREATIVE, MiniAppStatus.STABLE),
     NOTES("Notizen", "📝", "Schnelle Notizen", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.STABLE),
     AUTOMATION("Automation Board", "⚙️", "Schnellaktionen für Produktivität", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.STABLE),
-    KNOWLEDGE("Knowledge Vault", "📚", "Lokale Wissensbasis durchsuchen", MiniAppCategory.KNOWLEDGE, MiniAppStatus.BETA)
+    KNOWLEDGE("Knowledge Vault", "", "Lokale Wissensbasis durchsuchen", MiniAppCategory.KNOWLEDGE, MiniAppStatus.BETA), AI_IMAGE_TOOLS("AI Image Tools", "", "FreeForAI und Raphael AI sicher extern öffnen", MiniAppCategory.CREATIVE, MiniAppStatus.NEW)
 }
 
 private enum class MiniAppsFilter(val label: String) {
@@ -466,7 +467,8 @@ private fun miniAppMood(app: MiniApp?): MiniAppMood = when (app) {
         appBar = Color(0xFF2C8E93),
         card = Color(0xFF26535A)
     )
-    null -> MiniAppMood(
+    MiniApp.AI_IMAGE_TOOLS -> MiniAppMood( top = Color(0xFF190F2F), bottom = Color(0xFF301A5A), appBar = Color(0xFF8B5CF6), card = Color(0xFF3D2470) )
+        null -> MiniAppMood(
         top = Color(0xFF0F1828),
         bottom = Color(0xFF1A2138),
         appBar = Color(0xFF3D5AA8),
@@ -632,6 +634,7 @@ fun MiniAppsScreen(
                 MiniApp.NOTES -> NotesApp(mood.appBar)
                 MiniApp.AUTOMATION -> AutomationBoard(mood.appBar)
                 MiniApp.KNOWLEDGE -> KnowledgeVault(mood.appBar)
+                MiniApp.AI_IMAGE_TOOLS -> AiImageToolsHub(mood.appBar)
             }
         }
     }
@@ -761,7 +764,7 @@ private fun AppsHub(
             if (isLoading) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Lade Mini-Apps ...", color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
+                        Text("Lade Mini-Apps ...", color = Color.White.copy(alpha = 0.82f), fontSize = 14.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             repeat(3) {
                                 MiniAppCardSkeleton(modifier = Modifier.width(200.dp))
@@ -1153,7 +1156,7 @@ private fun MiniBrowser(themeColor: Color) {
                         value = inputUrl,
                         onValueChange = { inputUrl = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("URL oder Suche...", fontSize = 12.sp) },
+                        placeholder = { Text("URL oder Suche...", fontSize = 14.sp) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = {
@@ -1179,7 +1182,7 @@ private fun MiniBrowser(themeColor: Color) {
                     Text(
                         pageTitle,
                         color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 10.sp,
+                        fontSize = 13.sp,
                         modifier = Modifier.padding(start = 8.dp),
                         maxLines = 1
                     )
@@ -1274,7 +1277,7 @@ private fun DoodlePad(themeColor: Color) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Pinsel:", color = Color.White, fontSize = 12.sp)
+                    Text("Pinsel:", color = Color.White, fontSize = 14.sp)
                     Spacer(Modifier.width(8.dp))
                     Slider(
                         value = strokeWidth,
@@ -1398,7 +1401,7 @@ private fun Game2048(themeColor: Color) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("Punkte", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                Text("Punkte", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
                 Text("$score", color = themeColor, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             }
             Button(
@@ -1471,7 +1474,7 @@ private fun Game2048(themeColor: Color) {
         Text(
             "Wische um zu spielen!",
             color = Color.White.copy(alpha = 0.6f),
-            fontSize = 12.sp
+            fontSize = 14.sp
         )
         if (gameOver.value) {
             Text("Game Over! 😅", color = Color.Red, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -1617,7 +1620,7 @@ private fun AutomationBoard(themeColor: Color) {
             Text(
                 "Kopiere einen Prompt und nutze ihn direkt im Chat oder Collab.",
                 color = Color.White.copy(alpha = 0.72f),
-                fontSize = 12.sp
+                fontSize = 14.sp
             )
         }
         items(AutomationCatalog.templates, key = { it.id }) { template ->
@@ -1632,8 +1635,8 @@ private fun AutomationBoard(themeColor: Color) {
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(template.title, color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(template.description, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                    Text(template.prompt, color = Color.White.copy(alpha = 0.82f), fontSize = 11.sp)
+                    Text(template.description, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                    Text(template.prompt, color = Color.White.copy(alpha = 0.82f), fontSize = 13.sp)
                     CompactTextActionRow(
                         actions = listOf(
                             CompactTextAction(
@@ -1669,7 +1672,7 @@ private fun KnowledgeVault(themeColor: Color) {
         Text(
             "Importiere Notizen in die lokale Wissensbasis und suche sie später wieder.",
             color = Color.White.copy(alpha = 0.72f),
-            fontSize = 12.sp
+            fontSize = 14.sp
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(
@@ -1715,7 +1718,7 @@ private fun KnowledgeVault(themeColor: Color) {
             label = { Text("Suchbegriff") },
             singleLine = true
         )
-        Text(status, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+        Text(status, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
 
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
@@ -1728,12 +1731,12 @@ private fun KnowledgeVault(themeColor: Color) {
                     color = Color(0xFF1F2431)
                 ) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(item.sourceTitle, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        Text(item.content.take(280), color = Color.White.copy(alpha = 0.82f), fontSize = 12.sp)
+                        Text(item.sourceTitle, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text(item.content.take(280), color = Color.White.copy(alpha = 0.82f), fontSize = 14.sp)
                         Text(
                             "Keywords: ${item.keywords}",
                             color = Color.White.copy(alpha = 0.65f),
-                            fontSize = 10.sp
+                            fontSize = 13.sp
                         )
                     }
                 }
@@ -1802,7 +1805,7 @@ private fun PromptLabApp(themeColor: Color) {
             Text(
                 "Baue wiederverwendbare High-Quality-Prompts für Personas und Agenten.",
                 color = Color.White.copy(alpha = 0.74f),
-                fontSize = 12.sp
+                fontSize = 14.sp
             )
         }
         item {
@@ -1819,7 +1822,7 @@ private fun PromptLabApp(themeColor: Color) {
                     Text(
                         bannerMessage.orEmpty(),
                         color = Color.White,
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         modifier = Modifier.padding(10.dp)
                     )
                 }
@@ -1884,7 +1887,7 @@ private fun PromptLabApp(themeColor: Color) {
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Generierter Prompt", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(generatedPrompt, color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
+                    Text(generatedPrompt, color = Color.White.copy(alpha = 0.86f), fontSize = 14.sp)
                     CompactTextActionRow(
                         modifier = Modifier.fillMaxWidth(),
                         actions = listOf(
@@ -1936,7 +1939,7 @@ private fun PromptLabApp(themeColor: Color) {
                 ) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(template.title, color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text(template.prompt.take(420), color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp)
+                        Text(template.prompt.take(420), color = Color.White.copy(alpha = 0.78f), fontSize = 14.sp)
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -1984,7 +1987,7 @@ private fun PromptLabApp(themeColor: Color) {
                     Text(
                         "Noch keine gespeicherten Prompts. Erstelle einen ersten Prompt und speichere ihn.",
                         color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
@@ -2068,7 +2071,7 @@ private fun VoiceNotesAiApp(themeColor: Color) {
             Text(
                 "Erfasse Sprache und generiere automatisch Kernpunkte + nächste Schritte.",
                 color = Color.White.copy(alpha = 0.75f),
-                fontSize = 12.sp
+                fontSize = 14.sp
             )
         }
         item {
@@ -2143,13 +2146,13 @@ private fun VoiceNotesAiApp(themeColor: Color) {
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Zusammenfassung", color = Color.White, fontWeight = FontWeight.SemiBold)
-                    Text(summary, color = Color.White.copy(alpha = 0.84f), fontSize = 12.sp)
+                    Text(summary, color = Color.White.copy(alpha = 0.84f), fontSize = 14.sp)
                     Text("Nächste Schritte", color = Color.White, fontWeight = FontWeight.SemiBold)
                     if (actionItems.isEmpty()) {
-                        Text("Noch keine eindeutigen ToDos erkannt.", color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp)
+                        Text("Noch keine eindeutigen ToDos erkannt.", color = Color.White.copy(alpha = 0.72f), fontSize = 14.sp)
                     } else {
                         actionItems.forEach { item ->
-                            Text("• $item", color = Color.White.copy(alpha = 0.84f), fontSize = 12.sp)
+                            Text("• $item", color = Color.White.copy(alpha = 0.84f), fontSize = 14.sp)
                         }
                     }
                     CompactTextActionRow(
@@ -2182,7 +2185,7 @@ private fun VoiceNotesAiApp(themeColor: Color) {
             items(notes, key = { it.id }) { entry ->
                 Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFF1A202D), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(entry.text, color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
+                        Text(entry.text, color = Color.White.copy(alpha = 0.86f), fontSize = 14.sp)
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -2220,7 +2223,7 @@ private fun VoiceNotesAiApp(themeColor: Color) {
                         Text(
                             "Nutze Spracheingabe oder speichere manuellen Text, um hier Einträge zu sehen.",
                             color = Color.White.copy(alpha = 0.78f),
-                            fontSize = 12.sp
+                            fontSize = 14.sp
                         )
                     }
                 }
@@ -2277,7 +2280,7 @@ private fun SmartWorkspaceApp(themeColor: Color) {
                 Text(
                     "${sourceText.length} Zeichen • ${sourceText.lineSequence().count()} Zeilen",
                     color = Color.White.copy(alpha = 0.72f),
-                    fontSize = 12.sp
+                    fontSize = 14.sp
                 )
                 MiniAppStatusBanner(
                     message = statusMessage,
@@ -2292,7 +2295,7 @@ private fun SmartWorkspaceApp(themeColor: Color) {
                         Text(
                             "Füge erst Rohnotizen ein, dann nutze Struktur/Summary/ToDos.",
                             color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             modifier = Modifier.padding(8.dp)
                         )
                     }
@@ -2320,7 +2323,7 @@ private fun SmartWorkspaceApp(themeColor: Color) {
                     Text(
                         outputText.ifBlank { "Noch keine Ausgabe. Wähle eine Aktion." },
                         color = Color.White.copy(alpha = 0.86f),
-                        fontSize = 12.sp,
+                        fontSize = 14.sp,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
@@ -2571,3 +2574,133 @@ private fun saveNotes(prefs: android.content.SharedPreferences, notes: List<Pair
     val arr = notes.map { arrayOf(it.first, it.second) }.toTypedArray()
     prefs.edit().putString("notes_json", com.google.gson.Gson().toJson(arr)).apply()
 }
+@Composable
+private fun AiImageToolsHub(accent: Color) {
+    val context = LocalContext.current
+
+    fun openExternal(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        context.startActivity(intent)
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color.White.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "AI Image Tools",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Sichere Variante: BamaChat öffnet externe Bildgeneratoren im Browser. Es werden keine inoffiziellen API-Requests, kein Scraping und keine versteckten Zugangsdaten genutzt.",
+                        color = Color.White.copy(alpha = 0.78f),
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
+
+        item {
+            ExternalImageToolCard(
+                title = "FreeForAI",
+                subtitle = "Externen Bildgenerator öffnen",
+                description = "Öffnet FreeForAI im Browser. Prompts gibst du direkt beim Anbieter ein.",
+                accent = accent,
+                onOpen = { openExternal("https://www.freeforai.com/") }
+            )
+        }
+
+        item {
+            ExternalImageToolCard(
+                title = "Raphael AI",
+                subtitle = "Externen Bildgenerator öffnen",
+                description = "Öffnet Raphael AI im Browser. Prüfe dort Nutzungsbedingungen und Bildrechte vor kommerzieller Nutzung.",
+                accent = accent,
+                onOpen = { openExternal("https://raphaelai.org/") }
+            )
+        }
+
+        item {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White.copy(alpha = 0.10f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Datenschutz-Hinweis", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
+                    Text(
+                        text = "Wenn du externe Tools öffnest, gelten deren Datenschutz- und Nutzungsbedingungen. BamaChat verarbeitet diese Prompts nicht selbst, solange du die Tools im externen Browser nutzt.",
+                        color = Color.White.copy(alpha = 0.76f),
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExternalImageToolCard(
+    title: String,
+    subtitle: String,
+    description: String,
+    accent: Color,
+    onOpen: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White.copy(alpha = 0.12f),
+        modifier = Modifier.fillMaxWidth(),
+        shadowElevation = 8.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🖼️", fontSize = 26.sp)
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text(subtitle, color = Color.White.copy(alpha = 0.68f), fontSize = 14.sp)
+                }
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Color.White)
+            }
+            Text(description, color = Color.White.copy(alpha = 0.76f), fontSize = 13.sp)
+            Button(
+                onClick = onOpen,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = accent.copy(alpha = 0.78f))
+            ) {
+                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Extern öffnen")
+            }
+        }
+    }
+}
+
+

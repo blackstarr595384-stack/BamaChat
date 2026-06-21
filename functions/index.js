@@ -1,10 +1,15 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const logger = require("firebase-functions/logger");
+const admin = require("firebase-admin");
 let sharp = null;
 try {
   sharp = require("sharp");
 } catch (error) {
   logger.warn("sharp_not_installed", { message: error?.message || String(error) });
+}
+
+if (admin.apps.length === 0) {
+  admin.initializeApp();
 }
 
 const DEFAULT_ALLOWED_DOMAINS = [
@@ -214,6 +219,160 @@ exports.photoEdit = onRequest(
     }
   }
 );
+
+exports.deleteAccount = onRequest(
+  {
+    region: "europe-west1",
+    cors: true,
+    invoker: "public",
+    timeoutSeconds: 120,
+    memory: "512MiB"
+  },
+  async (req, res) => {
+    res.set("Cache-Control", "no-store");
+
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Use POST" });
+      return;
+    }
+
+    const idToken = extractBearerToken(req);
+    if (!idToken) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      logger.warn("deleteAccount_token_invalid", {
+        message: error?.message || String(error)
+      });
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const uid = String(decodedToken?.uid || "").trim();
+    if (!uid) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      await deleteUserFirestoreData(uid);
+      await deleteOwnedCollabSessions(uid);
+      await detachUserFromCollaborations(uid);
+      await deleteStoragePrefix(`profile_images/${uid}.jpg`);
+      await deleteStoragePrefix(`profile_images/${uid}/`);
+      await deleteStoragePrefix(`rag_docs/${uid}/`);
+
+      try {
+        await admin.auth().deleteUser(uid);
+      } catch (error) {
+        if (!isIgnorableAuthDeleteError(error)) {
+          throw error;
+        }
+      }
+
+      logger.info("deleteAccount_success", { uid });
+      res.json({
+        success: true,
+        uid
+      });
+    } catch (error) {
+      logger.error("deleteAccount_failed", {
+        uid,
+        message: error?.message || String(error)
+      });
+      res.status(500).json({ error: "Account deletion failed" });
+    }
+  }
+);
+
+async function deleteUserFirestoreData(uid) {
+  const firestore = admin.firestore();
+  await firestore.recursiveDelete(firestore.collection("users").doc(uid));
+  await firestore.recursiveDelete(firestore.collection("user_memory").doc(uid));
+  await firestore.recursiveDelete(firestore.collection("user_knowledge").doc(uid));
+}
+
+async function deleteOwnedCollabSessions(uid) {
+  const firestore = admin.firestore();
+  const snapshot = await firestore.collection("collab_sessions")
+    .where("ownerId", "==", uid)
+    .get();
+
+  for (const doc of snapshot.docs) {
+    await firestore.recursiveDelete(doc.ref);
+  }
+}
+
+async function detachUserFromCollaborations(uid) {
+  const firestore = admin.firestore();
+  const snapshot = await firestore.collection("collab_sessions")
+    .where("participants", "array-contains", uid)
+    .get();
+
+  for (const doc of snapshot.docs) {
+    const data = doc.data() || {};
+    if (String(data.ownerId || "").trim() === uid) {
+      continue;
+    }
+
+    const participants = Array.isArray(data.participants)
+      ? data.participants.filter((participant) => String(participant || "").trim() !== uid)
+      : [];
+    const participantRoles = { ...(data.participantRoles || {}) };
+    delete participantRoles[uid];
+
+    const updates = {
+      participants,
+      participantRoles
+    };
+
+    if (participants.length === 0) {
+      await firestore.recursiveDelete(doc.ref);
+      continue;
+    }
+
+    await doc.ref.update(updates);
+    await doc.ref.collection("presence").doc(uid).delete().catch((error) => {
+      if (!isIgnorableNotFoundError(error)) {
+        throw error;
+      }
+    });
+  }
+}
+
+async function deleteStoragePrefix(prefix) {
+  const bucket = admin.storage().bucket();
+  const [files] = await bucket.getFiles({ prefix });
+  for (const file of files) {
+    await file.delete().catch((error) => {
+      if (!isIgnorableNotFoundError(error)) {
+        throw error;
+      }
+    });
+  }
+}
+
+function extractBearerToken(req) {
+  const authHeader = String(req.get("authorization") || "").trim();
+  if (!authHeader.startsWith("Bearer ")) return "";
+  return authHeader.slice(7).trim();
+}
+
+function isIgnorableAuthDeleteError(error) {
+  const code = String(error?.code || error?.errorInfo?.code || "").toLowerCase();
+  return code === "auth/user-not-found";
+}
+
+function isIgnorableNotFoundError(error) {
+  const code = Number(error?.code || 0);
+  const message = String(error?.message || "").toLowerCase();
+  return code === 404 || message.includes("not found") || message.includes("no such object");
+}
 
 function isAuthorized(req, tokenEnvName = "WEBSEARCH_TOKEN") {
   const expectedToken = process.env[tokenEnvName] || process.env.WEBSEARCH_TOKEN;

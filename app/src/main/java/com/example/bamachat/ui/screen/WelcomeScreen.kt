@@ -1,5 +1,6 @@
 package com.example.bamachat.ui.screen
 
+import android.animation.ValueAnimator
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -128,7 +129,7 @@ fun WelcomeScreen(
                 )
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    WelcomeEyebrow("AI Workspace OS")
+                    WelcomeEyebrow("KI-Workspace für Android")
                     Spacer(Modifier.height(14.dp))
                     Text(
                         text = "BamaChat",
@@ -138,7 +139,7 @@ fun WelcomeScreen(
                     )
                     Spacer(Modifier.height(10.dp))
                     Text(
-                        text = "Autonomer KI-Arbeitsraum: Chat, Personas, Tools, Agenten, Kollaboration – in einer Plattform.",
+                        text = "Dein KI-Workspace für Chat, Agenten, Recherche und Zusammenarbeit in einer Oberfläche.",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFFD8E4FF),
                         textAlign = TextAlign.Center,
@@ -176,16 +177,23 @@ fun WelcomeScreen(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        Text(
+                            text = "Mehr als ein Chatfenster: Modelle, Agenten, Workspaces und Tools an einem Ort.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFFE5EEFF),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            WelcomeFeaturePill("Multi-Modelle")
                             WelcomeFeaturePill("KI-Agenten")
                             WelcomeFeaturePill("MCP-Tools")
-                            WelcomeFeaturePill("Kollaboration")
-                            WelcomeFeaturePill("Workspaces")
+                            WelcomeFeaturePill("Team-Workspaces")
                         }
 
                         if (isAuthenticated) {
@@ -200,7 +208,7 @@ fun WelcomeScreen(
                                     contentColor = Color(0xFF10233F)
                                 )
                             ) {
-                                Text("Zum BamaHub", fontWeight = FontWeight.SemiBold)
+                                Text("Workspace öffnen", fontWeight = FontWeight.SemiBold)
                             }
                         } else {
                             Button(
@@ -214,7 +222,7 @@ fun WelcomeScreen(
                                     contentColor = Color(0xFF10233F)
                                 )
                             ) {
-                                Text("Sofort als Gast starten", fontWeight = FontWeight.SemiBold)
+                                Text("Kostenlos ausprobieren", fontWeight = FontWeight.SemiBold)
                             }
 
                             OutlinedButton(
@@ -225,7 +233,7 @@ fun WelcomeScreen(
                                 shape = RoundedCornerShape(18.dp),
                                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
                             ) {
-                                Text("Anmelden oder Registrieren", color = Color.White.copy(alpha = 0.92f))
+                                Text("Anmelden / Konto erstellen", color = Color.White.copy(alpha = 0.92f))
                             }
                         }
 
@@ -248,6 +256,9 @@ fun WelcomeScreen(
 
 @Composable
 private fun WelcomeBackdrop() {
+    // P1-4 Design-Fix: Systemsetting "Animationen entfernen/reduzieren" respektieren.
+    if (!ValueAnimator.areAnimatorsEnabled()) return
+
     val transition = rememberInfiniteTransition(label = "welcome_backdrop")
     val driftA by transition.animateFloat(
         initialValue = -18f,

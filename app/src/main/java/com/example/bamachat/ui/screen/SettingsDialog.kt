@@ -4,7 +4,9 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
+import android.widget.Toast
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
@@ -25,16 +29,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.BuildConfig
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.ui.component.CompactTextAction
 import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.ui.component.sanitizeForSpeech
 import com.example.bamachat.ui.component.splitSpeechChunks
 import com.example.bamachat.util.AgentPresetLibrary
+import com.example.bamachat.util.LegalPolicy
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.CloudVoiceManager
@@ -82,6 +91,7 @@ fun SettingsDialog(
     val liveWebPreferGithub by viewModel.liveWebPreferGithub.collectAsState()
     val photoAiCloudEndpoint by viewModel.photoAiCloudEndpoint.collectAsState()
     val photoAiCloudApiToken by viewModel.photoAiCloudApiToken.collectAsState()
+    val imageGenerationMode by viewModel.imageGenerationMode.collectAsState()
     val selectedOpenRouterModel by viewModel.selectedOpenRouterModel.collectAsState()
     val openRouterVisionOnlyModels by viewModel.openRouterVisionOnlyModels.collectAsState()
     val agentStudioEnabled by viewModel.agentStudioEnabled.collectAsState()
@@ -107,9 +117,12 @@ fun SettingsDialog(
     val ttsVoiceStyle by viewModel.ttsVoiceStyle.collectAsState()
     val ttsProVoiceEnabled by viewModel.ttsProVoiceEnabled.collectAsState()
     val cloudVoiceEnabled by viewModel.cloudVoiceEnabled.collectAsState()
+    val cloudVoiceProvider by viewModel.cloudVoiceProvider.collectAsState()
     val elevenLabsApiKey by viewModel.elevenLabsApiKey.collectAsState()
     val elevenLabsVoiceId by viewModel.elevenLabsVoiceId.collectAsState()
     val elevenLabsModelId by viewModel.elevenLabsModelId.collectAsState()
+    val piperEndpoint by viewModel.piperEndpoint.collectAsState()
+    val piperVoiceName by viewModel.piperVoiceName.collectAsState()
     val streamingEnabled by viewModel.streamingEnabled.collectAsState()
     val showTimestamps by viewModel.showTimestamps.collectAsState()
     val showLiveSources by viewModel.showLiveSources.collectAsState()
@@ -145,6 +158,32 @@ fun SettingsDialog(
     val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
     val previewScope = rememberCoroutineScope()
     val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
+    val cloudVoiceRequested = ttsProVoiceEnabled && cloudVoiceEnabled
+    val selectedCloudVoiceProvider = remember(cloudVoiceProvider) {
+        CloudVoiceManager.Provider.fromStorage(cloudVoiceProvider)
+    }
+    val cloudVoiceConfig = remember(
+        cloudVoiceRequested,
+        cloudVoiceProvider,
+        elevenLabsApiKey,
+        elevenLabsVoiceId,
+        elevenLabsModelId,
+        piperEndpoint,
+        piperVoiceName
+    ) {
+        if (!cloudVoiceRequested) {
+            null
+        } else {
+            CloudVoiceManager.resolveCloudVoiceConfig(
+                providerValue = cloudVoiceProvider,
+                elevenLabsApiKey = elevenLabsApiKey,
+                elevenLabsVoiceId = elevenLabsVoiceId,
+                elevenLabsModelId = elevenLabsModelId,
+                piperEndpoint = piperEndpoint,
+                piperVoiceName = piperVoiceName
+            )
+        }
+    }
     val ttsLocale = remember(language) { localeForLanguageCode(language) }
     val voicePreviewSamples = remember(language) { voicePreviewSamplesForLanguage(language) }
     var voicePreviewStatus by remember { mutableStateOf("") }
@@ -191,6 +230,7 @@ fun SettingsDialog(
         voicePreviewJob = previewScope.launch {
             voicePreviewPlaying = true
             voicePreviewStatus = "Spielt: ${sample.label}"
+            var finalStatus = ""
             try {
                 runCatching { previewTts?.stop() }
                 runCatching { cloudVoiceManager.stop() }
@@ -198,15 +238,17 @@ fun SettingsDialog(
                 val maxChunkChars = if (useClearVoiceStyle) 170 else 220
                 val pauseMs = if (useClearVoiceStyle) 80L else 130L
 
-                val useCloudVoice =
-                    ttsProVoiceEnabled && cloudVoiceEnabled && elevenLabsApiKey.isNotBlank() && elevenLabsVoiceId.isNotBlank()
-                if (useCloudVoice) {
+                if (cloudVoiceRequested) {
+                    val config = cloudVoiceConfig
+                    if (config == null) {
+                        finalStatus = "${selectedCloudVoiceProvider.displayName} ist aktiviert, aber die Konfiguration ist unvollständig."
+                        Toast.makeText(context, finalStatus, Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
                     val cloudOk = runCatching {
-                        cloudVoiceManager.speakWithElevenLabs(
+                        cloudVoiceManager.speak(
                             text = speakText,
-                            apiKey = elevenLabsApiKey,
-                            voiceId = elevenLabsVoiceId,
-                            modelId = elevenLabsModelId,
+                            config = config,
                             voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
                         )
                     }.getOrDefault(false)
@@ -216,6 +258,11 @@ fun SettingsDialog(
                         }
                         return@launch
                     }
+
+                    finalStatus = cloudVoiceManager.lastErrorMessage()
+                        ?: "ElevenLabs konnte nicht gestartet werden."
+                    Toast.makeText(context, finalStatus, Toast.LENGTH_LONG).show()
+                    return@launch
                 }
 
                 val engine = previewTts
@@ -240,10 +287,12 @@ fun SettingsDialog(
                     while (engine.isSpeaking) {
                         delay(120)
                     }
+                } else {
+                    finalStatus = "Android-Sprachausgabe ist nicht bereit."
                 }
             } finally {
                 voicePreviewPlaying = false
-                voicePreviewStatus = ""
+                voicePreviewStatus = finalStatus
             }
         }
     }
@@ -254,6 +303,12 @@ fun SettingsDialog(
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
     var newWorkspaceName by remember { mutableStateOf("") }
+    // P0-2: confirm-dialog state for workspace deletion
+    var workspacePendingDelete by remember { mutableStateOf<com.example.bamachat.util.ProjectWorkspace?>(null) }
+    // P1-1: inline rename state — holds the id of the workspace currently being edited
+    var renamingWorkspaceId by remember { mutableStateOf<String?>(null) }
+    var renamingDraft by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
     LaunchedEffect(initialSection) {
         if (!initialSection.isNullOrBlank()) {
             expandedSection = initialSection
@@ -295,6 +350,9 @@ fun SettingsDialog(
     val cloudSyncStatusText = remember(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus) {
         viewModel.formatCloudSyncStatus(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus)
     }
+    val activeWorkspaceLabel = remember(projectWorkspaces, activeWorkspaceId) {
+        projectWorkspaces.firstOrNull { it.id == activeWorkspaceId }?.name ?: "Kein aktiver Workspace"
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshCloudSyncStatus()
@@ -305,15 +363,35 @@ fun SettingsDialog(
             stopVoicePreview()
             onDismiss()
         },
-        title = { Text("Einstellungen", fontWeight = FontWeight.Bold) },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Einstellungen", fontWeight = FontWeight.Bold)
+                Text(
+                    "Design, Modelle, Privatsphäre und Workspaces auf einen Blick",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.66f)
+                )
+            }
+        },
         text = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 500.dp)
+                    .imePadding()
                     .verticalScroll(rememberScrollState())
             ) {
+                SettingsOverviewCard(
+                    planLabel = MonetizationConfig.PlanTier.fromKey(subscriptionTier).label,
+                    creditsBalance = creditsBalance,
+                    providerLabel = aiProvider,
+                    workspaceLabel = activeWorkspaceLabel,
+                    syncStatus = cloudSyncStatusText,
+                    premiumActive = isPremiumActive,
+                    billingReady = billingReady
+                )
+
                 SettingsSection("Allgemein", expandedSection == "general", onClick = { expandedSection = if (expandedSection == "general") null else "general" }) {
                     SettingRow("Fingerabdruck-Sperre", "App beim Start sichern") {
                         Switch(checked = isBiometricEnabled, onCheckedChange = { viewModel.setBiometricEnabled(it) })
@@ -482,45 +560,90 @@ fun SettingsDialog(
                                 onCheckedChange = { viewModel.setTtsProVoiceEnabled(it) }
                             )
                         }
-                        SettingRow("Cloud Voice (ElevenLabs)", "Menschlichere Premium-Stimme") {
+                        SettingRow("Cloud Voice", "Natürliche Stimme über ElevenLabs oder Piper") {
                             Switch(
                                 checked = cloudVoiceEnabled,
                                 onCheckedChange = { viewModel.setCloudVoiceEnabled(it) }
                             )
                         }
                         if (cloudVoiceEnabled) {
-                            OutlinedTextField(
-                                value = elevenLabsApiKey,
-                                onValueChange = { viewModel.setElevenLabsApiKey(it) },
-                                label = { Text("ElevenLabs API-Key", fontSize = 12.sp) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                placeholder = { Text("sk_...", fontSize = 11.sp) },
-                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                            )
-                            OutlinedTextField(
-                                value = elevenLabsVoiceId,
-                                onValueChange = { viewModel.setElevenLabsVoiceId(it) },
-                                label = { Text("Voice ID", fontSize = 12.sp) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                            )
-                            OutlinedTextField(
-                                value = elevenLabsModelId,
-                                onValueChange = { viewModel.setElevenLabsModelId(it) },
-                                label = { Text("Model ID", fontSize = 12.sp) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                placeholder = { Text("eleven_multilingual_v2", fontSize = 11.sp) },
-                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "Provider wählen. Es werden nur die passenden Felder angezeigt.",
+                                    fontSize = 10.sp,
+                                    color = Color.White.copy(alpha = 0.62f)
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    CloudVoiceManager.Provider.entries.forEach { provider ->
+                                        FilterChip(
+                                            selected = selectedCloudVoiceProvider == provider,
+                                            onClick = { viewModel.setCloudVoiceProvider(provider.storageValue) },
+                                            label = { Text(provider.displayName, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+                            when (selectedCloudVoiceProvider) {
+                                CloudVoiceManager.Provider.ELEVENLABS -> {
+                                    OutlinedTextField(
+                                        value = elevenLabsApiKey,
+                                        onValueChange = { viewModel.setElevenLabsApiKey(it) },
+                                        label = { Text("ElevenLabs API-Key", fontSize = 12.sp) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        placeholder = { Text("sk_...", fontSize = 11.sp) },
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                    )
+                                    OutlinedTextField(
+                                        value = elevenLabsVoiceId,
+                                        onValueChange = { viewModel.setElevenLabsVoiceId(it) },
+                                        label = { Text("Voice ID", fontSize = 12.sp) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                    )
+                                    OutlinedTextField(
+                                        value = elevenLabsModelId,
+                                        onValueChange = { viewModel.setElevenLabsModelId(it) },
+                                        label = { Text("Model ID", fontSize = 12.sp) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        placeholder = { Text("eleven_multilingual_v2", fontSize = 11.sp) },
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                    )
+                                }
+                                CloudVoiceManager.Provider.PIPER -> {
+                                    OutlinedTextField(
+                                        value = piperEndpoint,
+                                        onValueChange = { viewModel.setPiperEndpoint(it) },
+                                        label = { Text("Piper Endpoint", fontSize = 12.sp) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        placeholder = { Text("http://192.168.178.162:5000", fontSize = 11.sp) },
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                    )
+                                    OutlinedTextField(
+                                        value = piperVoiceName,
+                                        onValueChange = { viewModel.setPiperVoiceName(it) },
+                                        label = { Text("Voice Name (optional)", fontSize = 12.sp) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true,
+                                        placeholder = { Text("de_DE-thorsten-high", fontSize = 11.sp) },
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                                    )
+                                    Text(
+                                        "Piper läuft typischerweise lokal oder im Heimnetz als HTTP-Server und liefert WAV-Dateien zurück.",
+                                        fontSize = 10.sp,
+                                        color = Color.White.copy(alpha = 0.62f)
+                                    )
+                                }
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 TextButton(onClick = {
-                                    _uriHandler.openUri("https://elevenlabs.io/docs/api-reference/text-to-speech/convert")
+                                    _uriHandler.openUri(selectedCloudVoiceProvider.docsUrl)
                                 }) {
                                     Text("Voice-Docs öffnen", fontSize = 11.sp)
                                 }
@@ -627,12 +750,13 @@ fun SettingsDialog(
                 }
 
                 SettingsSection("Workspaces & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
-                    Text("Aktiver Projekt-Workspace", fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                    Text("Aktiver Projekt-Workspace", fontWeight = FontWeight.Medium, fontSize = 15.sp)
                     projectWorkspaces.forEach { workspace ->
                         val isActive = workspace.id == activeWorkspaceId
+                        val isRenaming = renamingWorkspaceId == workspace.id
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
@@ -642,46 +766,107 @@ fun SettingsDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    .heightIn(min = 56.dp)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(workspace.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    if (workspace.description.isNotBlank()) {
-                                        Text(
-                                            workspace.description,
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
+                                    if (isRenaming) {
+                                        OutlinedTextField(
+                                            value = renamingDraft,
+                                            onValueChange = { renamingDraft = it },
+                                            singleLine = true,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
+                                            label = { Text("Name", fontSize = 13.sp) },
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                            keyboardActions = KeyboardActions(onDone = {
+                                                if (viewModel.renameWorkspace(workspace.id, renamingDraft)) {
+                                                    renamingWorkspaceId = null
+                                                    renamingDraft = ""
+                                                    focusManager.clearFocus()
+                                                }
+                                            })
                                         )
-                                    }
-                                }
-                                CompactTextActionRow(
-                                    actions = listOfNotNull(
-                                        CompactTextAction(
-                                            label = if (isActive) "Aktiv" else "Aktivieren",
-                                            onClick = { viewModel.setActiveWorkspace(workspace.id) }
-                                        ),
-                                        workspace.id.takeIf { it != "ws-default" }?.let {
-                                            CompactTextAction(
-                                                label = "Löschen",
-                                                onClick = { viewModel.deleteWorkspace(workspace.id) },
-                                                color = Color(0xFFD63031)
+                                    } else {
+                                        Text(workspace.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                        if (workspace.description.isNotBlank()) {
+                                            Text(
+                                                workspace.description,
+                                                fontSize = 13.sp,
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
                                             )
                                         }
+                                    }
+                                }
+                                if (isRenaming) {
+                                    // P1-1: confirm / cancel rename — full 48 dp IconButtons
+                                    IconButton(
+                                        onClick = {
+                                            if (viewModel.renameWorkspace(workspace.id, renamingDraft)) {
+                                                renamingWorkspaceId = null
+                                                renamingDraft = ""
+                                                focusManager.clearFocus()
+                                            }
+                                        },
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = "Speichern")
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            renamingWorkspaceId = null
+                                            renamingDraft = ""
+                                            focusManager.clearFocus()
+                                        },
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "Abbrechen")
+                                    }
+                                } else {
+                                    CompactTextActionRow(
+                                        actions = listOfNotNull(
+                                            CompactTextAction(
+                                                label = if (isActive) "Aktiv" else "Aktivieren",
+                                                onClick = { viewModel.setActiveWorkspace(workspace.id) }
+                                            ),
+                                            CompactTextAction(
+                                                label = "Umbenennen",
+                                                onClick = {
+                                                    renamingWorkspaceId = workspace.id
+                                                    renamingDraft = workspace.name
+                                                }
+                                            ),
+                                            workspace.id.takeIf { it != "ws-default" }?.let {
+                                                CompactTextAction(
+                                                    label = "Löschen",
+                                                    onClick = { workspacePendingDelete = workspace },
+                                                    color = Color(0xFFD63031)
+                                                )
+                                            }
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
                     OutlinedTextField(
                         value = newWorkspaceName,
                         onValueChange = { newWorkspaceName = it },
-                        label = { Text("Neuer Workspace", fontSize = 12.sp) },
-                        placeholder = { Text("z.B. Kundenprojekt Alpha", fontSize = 11.sp) },
+                        label = { Text("Neuer Workspace", fontSize = 14.sp) },
+                        placeholder = { Text("z.B. Kundenprojekt Alpha", fontSize = 14.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        textStyle = LocalTextStyle.current.copy(fontSize = 15.sp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            val name = newWorkspaceName.trim()
+                            if (name.isNotBlank() && viewModel.createWorkspace(name)) {
+                                newWorkspaceName = ""
+                                focusManager.clearFocus()
+                            }
+                        })
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
@@ -689,25 +874,25 @@ fun SettingsDialog(
                             onClick = {
                                 if (viewModel.createWorkspace(newWorkspaceName.trim())) {
                                     newWorkspaceName = ""
+                                    focusManager.clearFocus()
                                 }
-                            }
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
-                            Text("Workspace erstellen", fontSize = 11.sp)
+                            Text("Workspace erstellen", fontSize = 14.sp)
                         }
                     }
                     SettingRow("Nur aktive Workspace-Chats", "Chatliste auf aktiven Workspace filtern") {
                         Switch(
                             checked = workspaceChatFilterEnabled,
-                            onCheckedChange = { viewModel.setWorkspaceChatFilterEnabled(it) },
-                            modifier = Modifier.scale(0.85f)
+                            onCheckedChange = { viewModel.setWorkspaceChatFilterEnabled(it) }
                         )
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     SettingRow("Schnellaktionen in Chat", "Zeigt Chips oder einen kompakten Smart-Selector") {
                         Switch(
                             checked = automationQuickActionsEnabled,
-                            onCheckedChange = { viewModel.setAutomationQuickActionsEnabled(it) },
-                            modifier = Modifier.scale(0.85f)
+                            onCheckedChange = { viewModel.setAutomationQuickActionsEnabled(it) }
                         )
                     }
                     SettingRow("Agent-Tool Aktionen bestätigen", "Vor Tool-Ausführung immer bestätigen") {
@@ -806,7 +991,7 @@ fun SettingsDialog(
                                         label = "Billing aktualisieren",
                                         onClick = { viewModel.refreshBillingState() }
                                     ),
-                                    if (!billingReady) {
+                                    if (!billingReady && BuildConfig.DEBUG) {
                                         CompactTextAction(
                                             label = "Premium-Test lokal",
                                             onClick = { viewModel.setPremiumActiveForDebug(true) }
@@ -1193,6 +1378,17 @@ fun SettingsDialog(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                    Text("Bildgenerierung im Chat", fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                    DropdownSelector(
+                        value = imageGenerationMode,
+                        items = SettingsViewModel.IMAGE_GENERATION_MODE_OPTIONS,
+                        onSelect = { viewModel.setImageGenerationMode(it) }
+                    )
+                    Text(
+                        "Hinweis: Der externe Bilddienst kann ohne eigene Auth zeitweise Zahlung/Auth verlangen. Bei Deaktiviert zeigt der Chat nur einen Hinweis und erzeugt keine Bildkarte.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     OutlinedTextField(
                         value = photoAiCloudEndpoint,
                         onValueChange = { viewModel.setPhotoAiCloudEndpoint(it) },
@@ -1350,6 +1546,28 @@ fun SettingsDialog(
                             onCheckedChange = { viewModel.setPrivacyStrictModeEnabled(it) }
                         )
                     }
+                    SettingRow("Rechtliches", "Öffentliche Texte und Kontaktwege") {
+                        CompactTextActionRow(
+                            actions = listOf(
+                                CompactTextAction(
+                                    label = "Datenschutz",
+                                    onClick = { _uriHandler.openUri(LegalPolicy.PRIVACY_POLICY_URL) }
+                                ),
+                                CompactTextAction(
+                                    label = "AGB",
+                                    onClick = { _uriHandler.openUri(LegalPolicy.TERMS_URL) }
+                                ),
+                                CompactTextAction(
+                                    label = "Löschung",
+                                    onClick = { _uriHandler.openUri(LegalPolicy.ACCOUNT_DELETION_URL) }
+                                ),
+                                CompactTextAction(
+                                    label = "Support",
+                                    onClick = { _uriHandler.openUri(LegalPolicy.SUPPORT_URL) }
+                                )
+                            )
+                        )
+                    }
                     SettingRow("Gastdaten bei Konto-Login löschen", "Schützt private Testdaten beim Wechsel auf echtes Konto") {
                         Switch(
                             checked = guestAutoClearOnAccountSignIn,
@@ -1373,7 +1591,7 @@ fun SettingsDialog(
                             )
                         )
                     }
-                    SettingRow("Alle Daten löschen", "Einstellungen und Chats zurücksetzen") {
+                    SettingRow("Lokale Daten löschen", "Einstellungen und Chats auf diesem Gerät zurücksetzen") {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -1400,7 +1618,11 @@ fun SettingsDialog(
                         )
                     }
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
-                        Text("BamaChat v1.0 — made by Mamadou Dian Baldé w/AI", color = Color.Gray, fontSize = 10.sp)
+                        Text(
+                            "BamaChat · Version ${BuildConfig.VERSION_NAME}",
+                            color = Color.White.copy(alpha = 0.48f),
+                            fontSize = 10.sp
+                        )
                     }
                 }
             }
@@ -1409,16 +1631,156 @@ fun SettingsDialog(
             TextButton(onClick = onDismiss) { Text("Fertig") }
         }
     )
+
+    // P0-2: confirmation dialog for workspace deletion
+    workspacePendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { workspacePendingDelete = null },
+            title = { Text("Workspace löschen?") },
+            text = {
+                Text(
+                    "Workspace \"${target.name}\" wirklich löschen? Die zugehörigen Chats bleiben erhalten, " +
+                        "werden aber bei aktivem Workspace-Filter ausgeblendet.",
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteWorkspace(target.id)
+                    workspacePendingDelete = null
+                }) { Text("Löschen", color = Color(0xFFD63031)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { workspacePendingDelete = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingsOverviewCard(
+    planLabel: String,
+    creditsBalance: Int,
+    providerLabel: String,
+    workspaceLabel: String,
+    syncStatus: String,
+    premiumActive: Boolean,
+    billingReady: Boolean
+) {
+    val statusLabel = when {
+        premiumActive -> "Premium aktiv"
+        billingReady -> "Billing bereit"
+        else -> "Free-Plan"
+    }
+    val statusColor = when {
+        premiumActive -> Color(0xFF67E2AE)
+        billingReady -> Color(0xFFFFD166)
+        else -> Color.White.copy(alpha = 0.7f)
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.62f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Schnellüberblick", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text(
+                        "Kontostatus, Provider und Sync auf einen Blick.",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.66f)
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = statusColor.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, statusColor.copy(alpha = 0.22f))
+                ) {
+                    Text(
+                        statusLabel,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        color = statusColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    SettingsSummaryChip("Plan", planLabel)
+                }
+                item {
+                    SettingsSummaryChip("Credits", creditsBalance.toString())
+                }
+                item {
+                    SettingsSummaryChip("Provider", providerLabel)
+                }
+                item {
+                    SettingsSummaryChip("Workspace", workspaceLabel)
+                }
+            }
+
+            Text(
+                syncStatus,
+                fontSize = 10.sp,
+                color = Color.White.copy(alpha = 0.62f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsSummaryChip(label: String, value: String) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color.White.copy(alpha = 0.05f),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(min = 92.dp, max = 150.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                color = Color.White.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                fontSize = 12.sp,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
 }
 
 @Composable
 private fun SettingsSection(title: String, expanded: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (expanded) 0.36f else 0.24f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
     ) {
-        Column(modifier = Modifier.padding(12.dp).animateContentSize()) {
+        Column(modifier = Modifier.padding(14.dp).animateContentSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1435,7 +1797,7 @@ private fun SettingsSection(title: String, expanded: Boolean, onClick: () -> Uni
                 )
             }
             if (expanded) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     content()
                 }
@@ -1449,11 +1811,18 @@ private fun SettingRow(title: String, subtitle: String? = null, action: @Composa
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.66f)
+                )
+            }
         }
         action()
     }

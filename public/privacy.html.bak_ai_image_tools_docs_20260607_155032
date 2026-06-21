@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Datenschutzerklärung – BamaChat</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;line-height:1.6;max-width:920px;margin:0 auto;padding:32px;background:#111827;color:#f9fafb}a{color:#93c5fd}.card{background:#1f2937;border:1px solid #374151;border-radius:16px;padding:24px}h1,h2{line-height:1.25}small{color:#cbd5e1}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Datenschutzerklärung für BamaChat</h1>
+    <p><small>Stand: 07.06.2026</small></p>
+    <p>BamaChat ist eine KI-Workspace-App für Chat, Workspaces, Tools, Dateien, Sprache, Bildfunktionen und Zusammenarbeit. Diese Datenschutzerklärung erklärt, welche Daten verarbeitet werden und wofür.</p>
+
+    <h2>1. Verantwortlicher</h2>
+    <p>Verantwortlich für diese App ist der Betreiber von BamaChat. Kontakt: <a href="mailto:blackstarr595384@gmail.com">blackstarr595384@gmail.com</a></p>
+
+    <h2>2. Verarbeitete Daten</h2>
+    <p>Je nach Nutzung können folgende Daten verarbeitet werden:</p>
+    <ul>
+      <li>Konto- und Profildaten wie E-Mail-Adresse, Anzeigename, Nutzer-ID und optional Profilbild</li>
+      <li>Chat-Nachrichten, Prompts, Antworten, Workspace-Texte und Einstellungen</li>
+      <li>hochgeladene Dateien, Dokumente, Bilder, Screenshots, Audio- oder Videoinhalte, wenn diese Funktionen genutzt werden</li>
+      <li>technische Daten wie Geräteinformationen, App-Version, Crashlogs, Diagnosedaten und Netzwerkstatus</li>
+      <li>Kauf- und Abonnementinformationen, falls In-App-Käufe oder Abos genutzt werden</li>
+    </ul>
+
+    <h2>3. Zwecke der Verarbeitung</h2>
+    <p>Die Daten werden verwendet, um die App-Funktionen bereitzustellen, Nutzerkonten zu verwalten, Chats und Workspaces zu synchronisieren, KI-Funktionen zu ermöglichen, Fehler zu analysieren, Sicherheit zu gewährleisten und Käufe oder Abos zu verwalten.</p>
+
+    <h2>4. Firebase, Google Cloud und Dienstleister</h2>
+    <p>BamaChat kann Firebase/Google Cloud für Anmeldung, Datenbank, Speicher, Hosting, Cloud Functions, Crashlogs oder Analysefunktionen verwenden. Inhalte können außerdem an KI-, Speech-, Vision- oder Transkriptionsdienste gesendet werden, wenn Nutzer entsprechende Funktionen aktiv verwenden. Daten werden nicht verkauft.</p>
+
+    <h2>5. Kamera, Mikrofon und Dateien</h2>
+    <p>Kamera, Mikrofon und Dateizugriff werden nur verwendet, wenn Nutzer entsprechende Funktionen wie Fotoaufnahme, Bildanalyse, Spracheingabe, Voice Notes oder Dokumentimport aktiv nutzen.</p>
+
+    <h2>6. Standortdaten</h2>
+    <p>BamaChat ist grundsätzlich nicht auf Standortdaten angewiesen. Falls Standortberechtigungen in einer Version vorhanden sind, werden sie nur verwendet, wenn eine entsprechende Funktion aktiv bereitgestellt und vom Nutzer erlaubt wird.</p>
+
+    <h2>7. Datenlöschung</h2>
+    <p>Nutzer können ihr Konto in der App löschen, sofern sie angemeldet sind. Zusätzlich kann eine Löschung über die öffentliche Löschseite angefragt werden: <a href="/delete-account.html">Konto und Daten löschen</a>.</p>
+
+    <h2>8. Aufbewahrung</h2>
+    <p>Daten werden nur so lange gespeichert, wie sie für die App-Funktionen, Sicherheit, gesetzliche Pflichten, Fehleranalyse oder berechtigte technische Zwecke erforderlich sind. Gelöschte Daten können kurzzeitig in Backups oder Logs verbleiben, bevor sie endgültig entfernt werden.</p>
+
+    <h2>9. Sicherheit</h2>
+    <p>Daten werden bei der Übertragung nach Möglichkeit über verschlüsselte Verbindungen übertragen. API-Schlüssel und sensible Zugangsdaten sollten nicht in Chats eingegeben werden.</p>
+
+    <h2>10. Kontakt</h2>
+    <p>Bei Datenschutzfragen oder Löschanfragen: <a href="mailto:blackstarr595384@gmail.com">blackstarr595384@gmail.com</a></p>
+  </main>
+<section>
+  <h2>Externe Bildgeneratoren</h2>
+  <p>BamaChat kann externe Bildgeneratoren wie FreeForAI oder Raphael AI im Browser Ã¶ffnen. Wenn du diese externen Dienste nutzt, gibst du Prompts, Bilder oder andere Inhalte direkt beim jeweiligen Anbieter ein. FÃ¼r diese Verarbeitung gelten die Datenschutz- und Nutzungsbedingungen des jeweiligen Anbieters.</p>
+</section>
+</body>
+</html>

@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -29,9 +30,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.util.LegalPolicy
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 
@@ -43,11 +47,12 @@ fun LegalDisclaimerScreen(
 ) {
     var agreedToPrivacy by remember { mutableStateOf(false) }
     var agreedToTerms by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Rechtliche Hinweise", fontWeight = FontWeight.Bold) },
+                title = { Text("Recht & Datenschutz", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
@@ -67,6 +72,54 @@ fun LegalDisclaimerScreen(
                 .background(Color(0xFF161B26))
                 .padding(padding)
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Bevor du BamaChat nutzt, bestätigst du unsere Datenschutz- und Nutzungsbedingungen.",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.9f),
+                    lineHeight = 18.sp
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = { uriHandler.openUri(LegalPolicy.PRIVACY_POLICY_URL) }
+                    ) {
+                        Text("Datenschutz", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = { uriHandler.openUri(LegalPolicy.TERMS_URL) }
+                    ) {
+                        Text("AGB", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = { uriHandler.openUri(LegalPolicy.ACCOUNT_DELETION_URL) }
+                    ) {
+                        Text("Löschung", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        onClick = { uriHandler.openUri(LegalPolicy.SUPPORT_URL) }
+                    ) {
+                        Text("Support", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Text(
+                    "Die ausführlichen Texte öffnest du online. Telemetrie wird erst nach deiner Freigabe aktiviert.",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    lineHeight = 17.sp
+                )
+            }
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -177,8 +230,8 @@ Datenschutzerklärung für BamaChat
 1. Datenerfassung
    - BamaChat speichert deine Chat-Nachrichten lokal auf deinem Gerät
    - API-Keys werden verschlüsselt in SharedPreferences gespeichert
-   - Firebase wird für Crashlytics und Analytics verwendet
-   - Wir sammeln KEINE persönlichen Informationen ohne Zustimmung
+   - Firebase wird für Crashlytics und Analytics verwendet, aber erst nach Zustimmung
+   - Wir sammeln KEINE persönlichen Informationen ohne deine Freigabe
 
 2. API-Integration
    - Du verknüpfst deine eigenen API-Keys von OpenRouter, Groq, etc.
@@ -196,7 +249,7 @@ Datenschutzerklärung für BamaChat
    - Du kannst die App jederzeit deinstallieren
 
 5. Kontakt
-   - Fragen zur Datenschutz: developer@bamachat.app
+   - Fragen zum Datenschutz: ${LegalPolicy.SUPPORT_EMAIL}
    - Wir antworten innerhalb von 7 Tagen
 """
 

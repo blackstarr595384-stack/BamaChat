@@ -1,4 +1,4 @@
-package com.example.bamachat.ui.screen
+﻿package com.example.bamachat.ui.screen
 
 import android.Manifest
 import android.content.Intent
@@ -19,6 +19,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,11 +47,14 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -67,6 +73,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.component.ChatBubble
+import com.example.bamachat.ui.component.BamaChatBottomNav
 import com.example.bamachat.ui.component.ChatDesignPreset
 import com.example.bamachat.ui.component.ChatDesignTokens
 import com.example.bamachat.ui.component.ChatDrawer
@@ -197,6 +204,7 @@ private fun createChatCameraCaptureUri(context: android.content.Context): Pair<F
 fun ChatScreen(
     viewModel: ChatViewModel,
     settingsViewModel: SettingsViewModel,
+    onBottomNavRoute: (String) -> Unit = {},
     onOpenMiniApps: () -> Unit = {},
     onOpenAgentHub: () -> Unit = {},
     onOpenComposeLab: () -> Unit = {},
@@ -237,9 +245,12 @@ fun ChatScreen(
     val ttsVoiceStyle by settingsViewModel.ttsVoiceStyle.collectAsStateWithLifecycle()
     val ttsProVoiceEnabled by settingsViewModel.ttsProVoiceEnabled.collectAsStateWithLifecycle()
     val cloudVoiceEnabled by settingsViewModel.cloudVoiceEnabled.collectAsStateWithLifecycle()
+    val cloudVoiceProvider by settingsViewModel.cloudVoiceProvider.collectAsStateWithLifecycle()
     val elevenLabsApiKey by settingsViewModel.elevenLabsApiKey.collectAsStateWithLifecycle()
     val elevenLabsVoiceId by settingsViewModel.elevenLabsVoiceId.collectAsStateWithLifecycle()
     val elevenLabsModelId by settingsViewModel.elevenLabsModelId.collectAsStateWithLifecycle()
+    val piperEndpoint by settingsViewModel.piperEndpoint.collectAsStateWithLifecycle()
+    val piperVoiceName by settingsViewModel.piperVoiceName.collectAsStateWithLifecycle()
     val voicePushToTalkEnabled by settingsViewModel.voicePushToTalkEnabled.collectAsStateWithLifecycle()
     val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
     val automationQuickActionsEnabled by settingsViewModel.automationQuickActionsEnabled.collectAsStateWithLifecycle()
@@ -258,10 +269,16 @@ fun ChatScreen(
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsStateWithLifecycle()
     val language by settingsViewModel.language.collectAsStateWithLifecycle()
     val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
-    @Suppress("UNUSED_VARIABLE") val notificationsEnabled by settingsViewModel.notificationsEnabled.collectAsStateWithLifecycle()
 
-    var inputText by remember { mutableStateOf("") }
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var inputText by rememberSaveable { mutableStateOf("") }
+    // P0-2: persist the selected image URI across recreation. We store the URI's
+    // string form; a null draft stays null.
+    var selectedImageUri by rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.Saver<Uri?, String>(
+            save = { it?.toString() ?: "" },
+            restore = { stored -> if (stored.isBlank()) null else Uri.parse(stored) }
+        )
+    ) { mutableStateOf<Uri?>(null) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -343,8 +360,37 @@ fun ChatScreen(
 
     // TTS
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    var isTtsReady by remember { mutableStateOf(false) }
+    var activeSpeechMessageId by remember { mutableStateOf<String?>(null) }
+    var isSpeechPlaybackActive by remember { mutableStateOf(false) }
     val stopActiveDictation = remember { mutableStateOf<() -> Unit>({}) }
     val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
+    val cloudVoiceRequested = ttsProVoiceEnabled && cloudVoiceEnabled
+    val selectedCloudVoiceProvider = remember(cloudVoiceProvider) {
+        CloudVoiceManager.Provider.fromStorage(cloudVoiceProvider)
+    }
+    val cloudVoiceConfig = remember(
+        cloudVoiceRequested,
+        cloudVoiceProvider,
+        elevenLabsApiKey,
+        elevenLabsVoiceId,
+        elevenLabsModelId,
+        piperEndpoint,
+        piperVoiceName
+    ) {
+        if (!cloudVoiceRequested) {
+            null
+        } else {
+            CloudVoiceManager.resolveCloudVoiceConfig(
+                providerValue = cloudVoiceProvider,
+                elevenLabsApiKey = elevenLabsApiKey,
+                elevenLabsVoiceId = elevenLabsVoiceId,
+                elevenLabsModelId = elevenLabsModelId,
+                piperEndpoint = piperEndpoint,
+                piperVoiceName = piperVoiceName
+            )
+        }
+    }
     val ttsLocale = remember(language) {
         when (language) {
             "en" -> Locale.ENGLISH
@@ -362,10 +408,14 @@ fun ChatScreen(
                 ttsInstance.language = ttsLocale
                 ttsInstance.setSpeechRate(ttsSpeed)
                 ttsInstance.setPitch(ttsPitch)
+                isTtsReady = true
+            } else {
+                isTtsReady = false
             }
         }
         tts = ttsInstance
         onDispose {
+            isTtsReady = false
             ttsInstance.stop()
             ttsInstance.shutdown()
             cloudVoiceManager.release()
@@ -400,29 +450,132 @@ fun ChatScreen(
             }
         }
     }
-    val onSpeak: (String) -> Unit = { text ->
+    val monitorSpeechPlayback: (String?) -> Unit = monitor@{ messageId ->
+        if (messageId == null) return@monitor
+        scope.launch {
+            var observedPlayback = false
+            var startWaitedMs = 0L
+
+            while (activeSpeechMessageId == messageId && startWaitedMs < 1500L) {
+                val speakingNow = tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()
+                if (speakingNow) {
+                    observedPlayback = true
+                    break
+                }
+                delay(80)
+                startWaitedMs += 80L
+            }
+
+            var idleChecks = 0
+            while (activeSpeechMessageId == messageId) {
+                val speakingNow = tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()
+                if (speakingNow) {
+                    observedPlayback = true
+                    idleChecks = 0
+                } else if (observedPlayback) {
+                    idleChecks += 1
+                    if (idleChecks >= 2) break
+                } else {
+                    break
+                }
+                delay(140)
+            }
+
+            if (activeSpeechMessageId == messageId) {
+                activeSpeechMessageId = null
+                isSpeechPlaybackActive = false
+            }
+        }
+    }
+    val stopSpeechPlayback: () -> Unit = {
+        activeSpeechMessageId = null
+        isSpeechPlaybackActive = false
+        runCatching { tts?.stop() }
+        scope.launch { runCatching { cloudVoiceManager.stop() } }
+    }
+    val speakMessage: (String?, String, Boolean) -> Unit = { messageId, text, userInitiated ->
         val speakText = sanitizeForSpeech(text)
         scope.launch {
             stopActiveDictation.value.invoke()
-            val useCloudVoice = ttsProVoiceEnabled &&
-                cloudVoiceEnabled &&
-                elevenLabsApiKey.isNotBlank() &&
-                elevenLabsVoiceId.isNotBlank()
-            if (useCloudVoice) {
+            if (messageId != null) {
+                activeSpeechMessageId = messageId
+                isSpeechPlaybackActive = true
+            }
+            if (cloudVoiceRequested) {
+                val config = cloudVoiceConfig
+                if (config == null) {
+                    if (activeSpeechMessageId == messageId) {
+                        activeSpeechMessageId = null
+                        isSpeechPlaybackActive = false
+                    }
+                    if (userInitiated) {
+                        Toast.makeText(
+                            context,
+                            "${selectedCloudVoiceProvider.displayName} ist aktiviert, aber die Konfiguration ist unvollständig.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
+                }
                 val cloudOk = runCatching {
-                    cloudVoiceManager.speakWithElevenLabs(
+                    cloudVoiceManager.speak(
                         text = speakText,
-                        apiKey = elevenLabsApiKey,
-                        voiceId = elevenLabsVoiceId,
-                        modelId = elevenLabsModelId,
+                        config = config,
                         voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
                     )
                 }.getOrDefault(false)
-                if (cloudOk) return@launch
+
+                // P0-3 fix: user may have pressed Stop while we were awaiting the
+                // ElevenLabs HTTP fetch. If activeSpeechMessageId no longer matches,
+                // the playback must be aborted instead of starting after-the-fact.
+                if (cloudOk && activeSpeechMessageId != messageId) {
+                    runCatching { cloudVoiceManager.stop() }
+                    return@launch
+                }
+
+                if (cloudOk) {
+                    monitorSpeechPlayback(messageId)
+                    return@launch
+                }
+
+                if (activeSpeechMessageId == messageId) {
+                    activeSpeechMessageId = null
+                    isSpeechPlaybackActive = false
+                }
+
+                if (userInitiated) {
+                    Toast.makeText(
+                        context,
+                        cloudVoiceManager.lastErrorMessage() ?: "ElevenLabs konnte nicht gestartet werden. Android-Stimme wird nicht genutzt.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+
+                return@launch
             }
-            if (ttsEnabled) {
+            if (ttsEnabled && isTtsReady && tts != null) {
                 speakWithLocalTts(speakText)
+                monitorSpeechPlayback(messageId)
+                return@launch
             }
+            if (activeSpeechMessageId == messageId) {
+                activeSpeechMessageId = null
+                isSpeechPlaybackActive = false
+            }
+            if (userInitiated) {
+                Toast.makeText(
+                    context,
+                    "Sprachausgabe ist nicht bereit. Prüfe Stimme und Berechtigungen.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+    val onSpeak: (String, String) -> Unit = { messageId, text ->
+        if (isSpeechPlaybackActive && activeSpeechMessageId == messageId) {
+            stopSpeechPlayback()
+        } else {
+            speakMessage(messageId, text, true)
         }
     }
 
@@ -433,15 +586,23 @@ fun ChatScreen(
         ttsEnabled,
         ttsProVoiceEnabled,
         cloudVoiceEnabled,
+        cloudVoiceProvider,
         elevenLabsApiKey,
-        elevenLabsVoiceId
+        elevenLabsVoiceId,
+        elevenLabsModelId,
+        piperEndpoint,
+        piperVoiceName
     ) {
-        val canSpeak = ttsEnabled || (ttsProVoiceEnabled && cloudVoiceEnabled && elevenLabsApiKey.isNotBlank() && elevenLabsVoiceId.isNotBlank())
+        val canSpeak = if (cloudVoiceRequested) {
+            cloudVoiceConfig != null
+        } else {
+            ttsEnabled
+        }
         if (canSpeak && messages.isNotEmpty()) {
             val last = messages.last()
             if (!last.isUser && last.text.isNotBlank() && last.id != lastSpokenMessageId) {
                 lastSpokenMessageId = last.id
-                onSpeak(last.text)
+                speakMessage(last.id, last.text, false)
             }
         }
     }
@@ -449,20 +610,28 @@ fun ChatScreen(
     // STT
     val isListeningState = remember { mutableStateOf(false) }
     var isListening by isListeningState
+    var isSpeechStartPending by remember { mutableStateOf(false) }
+    var ignoreNextSpeechClientError by remember { mutableStateOf(false) }
+    var pushToTalkSessionActive by remember { mutableStateOf(false) }
     var lastPartialUpdateAt by remember { mutableLongStateOf(0L) }
     var lastVoiceAutoSendAt by remember { mutableLongStateOf(0L) }
     var lastVoiceAutoSendText by remember { mutableStateOf("") }
     var hasHadVoiceExchange by remember { mutableStateOf(false) }
-    val speechRecognizer = remember { SpeechRecognizer.createSpeechRecognizer(context) }
     val speechRecognitionAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
-    val recognizerIntent = remember(ttsLocale, voiceChatMode) {
-        val completeSilenceMs = if (voiceChatMode) 850L else 1400L
-        val possiblyCompleteSilenceMs = if (voiceChatMode) 550L else 1000L
-        val minimumSpeechMs = if (voiceChatMode) 450L else 900L
+    val speechRecognizer = remember(context, speechRecognitionAvailable) {
+        if (speechRecognitionAvailable) SpeechRecognizer.createSpeechRecognizer(context) else null
+    }
+    val recognizerLanguageTag = remember(ttsLocale) {
+        ttsLocale.toLanguageTag().ifBlank { ttsLocale.toString() }
+    }
+    val recognizerIntent = remember(recognizerLanguageTag, voiceChatMode) {
+        val completeSilenceMs = if (voiceChatMode) 700L else 1200L
+        val possiblyCompleteSilenceMs = if (voiceChatMode) 400L else 800L
+        val minimumSpeechMs = if (voiceChatMode) 300L else 600L
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, ttsLocale)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, ttsLocale.toLanguageTag())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognizerLanguageTag)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, recognizerLanguageTag)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
@@ -474,19 +643,67 @@ fun ChatScreen(
     val latestAutoSendVoice by rememberUpdatedState(autoSendVoice)
     val latestVoiceChatMode by rememberUpdatedState(voiceChatMode)
     val latestIsStreaming by rememberUpdatedState(isStreaming)
-    stopActiveDictation.value = {
-        if (isListeningState.value) {
-            runCatching { speechRecognizer.stopListening() }
+    // P0-6: the recognizer listener is built once for the lifetime of speechRecognizer;
+    // it reads the intent through this updated-state so a voiceChatMode toggle is
+    // picked up on the very next startListening() without recreating the recognizer.
+    val latestRecognizerIntent by rememberUpdatedState(recognizerIntent)
+    val startSpeechRecognition: (Boolean) -> Unit = startSpeech@{ showPrompt ->
+        val recognizer = speechRecognizer ?: return@startSpeech
+        if (isListeningState.value || isSpeechStartPending) return@startSpeech
+        isSpeechStartPending = true
+        ignoreNextSpeechClientError = false
+        scope.launch {
+            runCatching { tts?.stop() }
+            try {
+                cloudVoiceManager.stop()
+            } catch (_: Exception) {
+            }
+            if (showPrompt) {
+                Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
+            }
+            val started = runCatching {
+                recognizer.startListening(recognizerIntent)
+                true
+            }.getOrElse {
+                isSpeechStartPending = false
+                Toast.makeText(
+                    context,
+                    "Spracherkennung konnte nicht gestartet werden.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                false
+            }
+            if (!started) {
+                pushToTalkSessionActive = false
+            }
+        }
+    }
+    val stopSpeechRecognition: (Boolean) -> Unit = stopSpeech@{ forceCancel ->
+        val recognizer = speechRecognizer ?: return@stopSpeech
+        if (!isListeningState.value && !isSpeechStartPending) return@stopSpeech
+        ignoreNextSpeechClientError = true
+        isSpeechStartPending = false
+        runCatching {
+            if (forceCancel || !isListeningState.value) recognizer.cancel() else recognizer.stopListening()
+        }
+        if (forceCancel || !isListeningState.value) {
             isListeningState.value = false
+        }
+    }
+    // P0-5 cleanup: wrap the MutableState write in SideEffect so we don't allocate
+    // a new lambda + State write on every recomposition.
+    SideEffect {
+        stopActiveDictation.value = {
+            if (isListeningState.value || isSpeechStartPending) {
+                stopSpeechRecognition(true)
+            }
         }
     }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            runCatching { tts?.stop() }
-            scope.launch { cloudVoiceManager.stop() }
-            speechRecognizer.startListening(recognizerIntent)
+            startSpeechRecognition(true)
         } else {
             Toast.makeText(
                 context,
@@ -495,111 +712,144 @@ fun ChatScreen(
             ).show()
         }
     }
-    DisposableEffect(Unit) {
-        val listener = object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { isListeningState.value = true }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { isListeningState.value = false }
-            override fun onError(error: Int) {
-                isListeningState.value = false
-                val isSoftSpeechError =
-                    error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-                        error == SpeechRecognizer.ERROR_NO_MATCH
-
-                if (latestVoiceChatMode && hasHadVoiceExchange && isSoftSpeechError) {
-                    scope.launch {
-                        delay(250)
-                        val audioOk = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                        val localSpeaking = tts?.isSpeaking == true
-                        val cloudSpeaking = cloudVoiceManager.isSpeaking()
-                        if (audioOk && !latestIsStreaming && !localSpeaking && !cloudSpeaking && !isListeningState.value) {
-                            speechRecognizer.startListening(recognizerIntent)
-                        }
-                    }
-                    return
+    // P0-6: keying on speechRecognizer only — rebuilding the listener every time the
+    // user toggles voiceChatMode (which changes recognizerIntent) tore down and
+    // recreated the SpeechRecognizer mid-session. The listener captures the current
+    // recognizerIntent via closure; the next startListening() picks up the new intent.
+    DisposableEffect(speechRecognizer) {
+        val recognizer = speechRecognizer
+        if (recognizer == null) {
+            onDispose {}
+        } else {
+            val listener = object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    isSpeechStartPending = false
+                    isListeningState.value = true
                 }
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() { isListeningState.value = false }
+                override fun onError(error: Int) {
+                    val ignoreClientError = ignoreNextSpeechClientError && error == SpeechRecognizer.ERROR_CLIENT
+                    ignoreNextSpeechClientError = false
+                    isSpeechStartPending = false
+                    isListeningState.value = false
+                    pushToTalkSessionActive = false
+                    if (ignoreClientError) return
+                    val isSoftSpeechError =
+                        error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+                            error == SpeechRecognizer.ERROR_NO_MATCH
 
-                val errorMsg = when (error) {
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Netzwerk-Zeitüberschreitung"
-                    SpeechRecognizer.ERROR_NETWORK -> "Netzwerkfehler"
-                    SpeechRecognizer.ERROR_AUDIO -> "Audio-Fehler"
-                    SpeechRecognizer.ERROR_CLIENT -> "Client-Fehler"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Keine Sprache erkannt"
-                    SpeechRecognizer.ERROR_NO_MATCH -> "Nichts erkannt"
-                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Spracherkennung ausgelastet"
-                    SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Keine Mikrofon-Berechtigung"
-                    else -> "Spracherkennungsfehler ($error)"
-                }
-                android.util.Log.w("ChatScreen", "SpeechRecognizer: $errorMsg")
-                Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-            }
-            override fun onResults(results: Bundle?) {
-                val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!data.isNullOrEmpty()) {
-                    val recognizedText = data[0].trim()
-                    inputText = recognizedText
-                    if (latestAutoSendVoice) {
-                        if (recognizedText.isNotBlank()) {
-                            val now = System.currentTimeMillis()
-                            val isDuplicateAutoSend =
-                                recognizedText.equals(lastVoiceAutoSendText, ignoreCase = true) &&
-                                    (now - lastVoiceAutoSendAt) < 1500L
-                            if (isDuplicateAutoSend) {
-                                isListeningState.value = false
-                                return
-                            }
-                            lastVoiceAutoSendText = recognizedText
-                            lastVoiceAutoSendAt = now
-                            val imageUri = selectedImageUri
-                            val accepted = if (imageUri != null) {
-                                viewModel.sendMessageWithImage(recognizedText, imageUri)
-                            } else {
-                                viewModel.sendMessage(recognizedText)
-                            }
-                            if (accepted) {
-                                inputText = ""
-                                if (imageUri != null) {
-                                    selectedImageUri = null
+                    if (latestVoiceChatMode && hasHadVoiceExchange && isSoftSpeechError) {
+                        scope.launch {
+                            delay(250)
+                            val audioOk = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            val localSpeaking = tts?.isSpeaking == true
+                            val cloudSpeaking = cloudVoiceManager.isSpeaking()
+                            if (
+                                audioOk &&
+                                !latestIsStreaming &&
+                                !localSpeaking &&
+                                !cloudSpeaking &&
+                                !isListeningState.value &&
+                                !isSpeechStartPending
+                            ) {
+                                isSpeechStartPending = true
+                                val restarted = runCatching {
+                                    recognizer.startListening(latestRecognizerIntent)
+                                    true
+                                }.getOrDefault(false)
+                                if (!restarted) {
+                                    isSpeechStartPending = false
                                 }
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    "Sprache erkannt, aber nicht gesendet.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
                             }
-                            hasHadVoiceExchange = true
+                        }
+                        return
+                    }
+
+                    val errorMsg = when (error) {
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Netzwerk-Zeitüberschreitung"
+                        SpeechRecognizer.ERROR_NETWORK -> "Netzwerkfehler"
+                        SpeechRecognizer.ERROR_AUDIO -> "Audio-Fehler"
+                        SpeechRecognizer.ERROR_CLIENT -> "Client-Fehler"
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Keine Sprache erkannt"
+                        SpeechRecognizer.ERROR_NO_MATCH -> "Nichts erkannt"
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Spracherkennung ausgelastet"
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Keine Mikrofon-Berechtigung"
+                        else -> "Spracherkennungsfehler ($error)"
+                    }
+                    android.util.Log.w("ChatScreen", "SpeechRecognizer: $errorMsg")
+                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+                }
+                override fun onResults(results: Bundle?) {
+                    isSpeechStartPending = false
+                    val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!data.isNullOrEmpty()) {
+                        val recognizedText = data[0].trim()
+                        inputText = recognizedText
+                        if (latestAutoSendVoice) {
+                            if (recognizedText.isNotBlank()) {
+                                val now = System.currentTimeMillis()
+                                val isDuplicateAutoSend =
+                                    recognizedText.equals(lastVoiceAutoSendText, ignoreCase = true) &&
+                                        (now - lastVoiceAutoSendAt) < 1500L
+                                if (isDuplicateAutoSend) {
+                                    isListeningState.value = false
+                                    return
+                                }
+                                lastVoiceAutoSendText = recognizedText
+                                lastVoiceAutoSendAt = now
+                                val imageUri = selectedImageUri
+                                val accepted = if (imageUri != null) {
+                                    viewModel.sendMessageWithImage(recognizedText, imageUri)
+                                } else {
+                                    viewModel.sendMessage(recognizedText)
+                                }
+                                if (accepted) {
+                                    inputText = ""
+                                    if (imageUri != null) {
+                                        selectedImageUri = null
+                                    }
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Sprache erkannt, aber nicht gesendet.",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                hasHadVoiceExchange = true
+                            }
+                        } else {
+                            Toast.makeText(context, "Erkannt: $recognizedText", Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        Toast.makeText(context, "Erkannt: $recognizedText", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Keine Sprache erkannt.", Toast.LENGTH_SHORT).show()
                     }
-                } else {
-                    Toast.makeText(context, "Keine Sprache erkannt.", Toast.LENGTH_SHORT).show()
+                    pushToTalkSessionActive = false
+                    isListeningState.value = false
                 }
-                isListeningState.value = false
-            }
-            override fun onPartialResults(partialResults: Bundle?) {
-                val data = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val partialText = data?.firstOrNull()?.trim().orEmpty()
-                if (partialText.isBlank()) return
-                val now = System.currentTimeMillis()
-                if ((now - lastPartialUpdateAt) >= 120L) {
-                    inputText = partialText
-                    lastPartialUpdateAt = now
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val data = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val partialText = data?.firstOrNull()?.trim().orEmpty()
+                    if (partialText.isBlank()) return
+                    val now = System.currentTimeMillis()
+                    if ((now - lastPartialUpdateAt) >= 120L) {
+                        inputText = partialText
+                        lastPartialUpdateAt = now
+                    }
                 }
+                override fun onEvent(eventType: Int, params: Bundle?) {}
             }
-            override fun onEvent(eventType: Int, params: Bundle?) {}
+            recognizer.setRecognitionListener(listener)
+            onDispose { recognizer.destroy() }
         }
-        speechRecognizer.setRecognitionListener(listener)
-        onDispose { speechRecognizer.destroy() }
     }
     // Sync state back to Compose
-    LaunchedEffect(isListeningState.value) { isListening = isListeningState.value }
+    // (removed redundant LaunchedEffect: `isListening` is already a delegated MutableState read)
 
     // Continuous voice mode: re-trigger listening when AI and TTS playback are both finished
     LaunchedEffect(isStreaming, voiceChatMode, hasHadVoiceExchange, messages.lastOrNull()?.id) {
@@ -616,8 +866,15 @@ fun ChatScreen(
             context,
             Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
-        if (audioOk && !isListeningState.value) {
-            speechRecognizer.startListening(recognizerIntent)
+        if (audioOk && !isListeningState.value && !isSpeechStartPending) {
+            isSpeechStartPending = true
+            val restarted = runCatching {
+                speechRecognizer?.startListening(recognizerIntent)
+                true
+            }.getOrDefault(false)
+            if (!restarted) {
+                isSpeechStartPending = false
+            }
         }
     }
 
@@ -632,14 +889,27 @@ fun ChatScreen(
         animationSpec = tween(800), label = "themeColor"
     )
 
-    // Auto-scroll
+    // Auto-scroll — P1-6: only auto-scroll when the user is already near the tail,
+    // or when a brand-new message id just arrived. If the user has scrolled up to
+    // re-read older messages, we leave the position alone.
     var autoScrollTailId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(messages.lastOrNull()?.id, isStreaming) {
         val tailId = messages.lastOrNull()?.id ?: return@LaunchedEffect
-        if (tailId != autoScrollTailId || isStreaming) {
-            autoScrollTailId = tailId
+        val targetIndex = messages.lastIndex
+        val isNewTail = tailId != autoScrollTailId
+        autoScrollTailId = tailId
+
+        val layoutInfo = listState.layoutInfo
+        val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val distanceFromTail = targetIndex - lastVisibleIndex
+        // "Near the tail" = within ~2 items of the bottom, OR list was never scrolled yet.
+        val nearTail = lastVisibleIndex < 0 || distanceFromTail <= 2
+
+        // Only follow streaming updates if the user is still pinned near the tail.
+        // For brand-new messages, follow when near-tail OR when the new message is the user's own.
+        val isOwnLastMessage = messages.lastOrNull()?.isUser == true
+        if ((isStreaming && nearTail) || (isNewTail && (nearTail || isOwnLastMessage))) {
             scope.launch {
-                val targetIndex = messages.lastIndex
                 val currentIndex = listState.firstVisibleItemIndex
                 val farDistance = (targetIndex - currentIndex) > 8
                 if (isStreaming || farDistance) {
@@ -740,8 +1010,8 @@ fun ChatScreen(
                 }
             },
             onImageGen = {
+                viewModel.generateImage(inputText)
                 if (inputText.isNotBlank()) {
-                    viewModel.generateImage(inputText)
                     inputText = ""
                 }
             },
@@ -781,17 +1051,14 @@ fun ChatScreen(
                         "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
                         Toast.LENGTH_SHORT
                     ).show()
-                } else if (isListening) {
-                    speechRecognizer.stopListening()
+                } else if (isListening || isSpeechStartPending) {
+                    stopSpeechRecognition(false)
                 } else if (ContextCompat.checkSelfPermission(
                         context,
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    runCatching { tts?.stop() }
-                    scope.launch { cloudVoiceManager.stop() }
-                    Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
-                    speechRecognizer.startListening(recognizerIntent)
+                    startSpeechRecognition(true)
                 } else {
                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
@@ -808,18 +1075,19 @@ fun ChatScreen(
                         Manifest.permission.RECORD_AUDIO
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
-                    if (!isListening) {
-                        runCatching { tts?.stop() }
-                        scope.launch { cloudVoiceManager.stop() }
-                        Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
-                        speechRecognizer.startListening(recognizerIntent)
+                    if (!isListening && !isSpeechStartPending) {
+                        pushToTalkSessionActive = true
+                        startSpeechRecognition(true)
                     }
                 } else {
                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
             onMicPressEnd = {
-                if (isListening) speechRecognizer.stopListening()
+                if (pushToTalkSessionActive) {
+                    pushToTalkSessionActive = false
+                    stopSpeechRecognition(!isListening)
+                }
             },
             themeColor = themeColor,
             personaMood = personaMood,
@@ -836,6 +1104,7 @@ fun ChatScreen(
                 }
             },
             onPersonaClick = { showPersonaDialog = true },
+            onBottomNavRoute = onBottomNavRoute,
             onSearchClick = onSearchClick,
             onMenuClick = { scope.launch { drawerState.open() } },
             onSettingsClick = { showSettingsDialog = true },
@@ -850,8 +1119,10 @@ fun ChatScreen(
                 }
                 context.startActivity(Intent.createChooser(sendIntent, "Chat exportieren"))
             },
-            _onClearClick = { viewModel.clearChat() },
+            onStopGeneration = { viewModel.cancelStream() },
             onSpeak = onSpeak,
+            activeSpeechMessageId = activeSpeechMessageId,
+            isSpeechPlaybackActive = isSpeechPlaybackActive,
             listState = listState,
             snackbarHostState = snackbarHostState,
             showTimestamps = showTimestamps,
@@ -863,6 +1134,7 @@ fun ChatScreen(
             onLoadOlderMessages = { viewModel.loadOlderMessages() },
             uiDesignPreset = uiDesignPreset,
             compactChatHeader = compactChatHeader,
+            activeWorkspaceName = activeWorkspaceName,
             connectChatBottomBars = connectChatBottomBars,
             glassEffectsEnabled = glassEffectsEnabled,
             uiCornerRoundnessScale = uiCornerRoundnessScale,
@@ -920,7 +1192,7 @@ private fun LockScreen(primaryColorInt: Int, onUnlock: () -> Unit) {
 }
 
 @Suppress("UNUSED_PARAMETER")
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ChatContent(
     messages: List<ChatMessage>,
@@ -948,6 +1220,7 @@ private fun ChatContent(
     multiProviderEnabled: Boolean,
     onSelectProvider: (String) -> Unit,
     onPersonaClick: () -> Unit,
+    onBottomNavRoute: (String) -> Unit,
     onSearchClick: () -> Unit,
     onMenuClick: () -> Unit,
     onSettingsClick: () -> Unit,
@@ -955,8 +1228,10 @@ private fun ChatContent(
     onAgentHubClick: () -> Unit,
     onComposeLabClick: () -> Unit,
     onShareClick: () -> Unit,
-    _onClearClick: () -> Unit,
-    onSpeak: (String) -> Unit,
+    onStopGeneration: () -> Unit,
+    onSpeak: (String, String) -> Unit,
+    activeSpeechMessageId: String?,
+    isSpeechPlaybackActive: Boolean,
     listState: androidx.compose.foundation.lazy.LazyListState,
     snackbarHostState: SnackbarHostState,
     showTimestamps: Boolean,
@@ -968,6 +1243,7 @@ private fun ChatContent(
     onLoadOlderMessages: () -> Unit,
     uiDesignPreset: String,
     compactChatHeader: Boolean,
+    activeWorkspaceName: String,
     connectChatBottomBars: Boolean,
     glassEffectsEnabled: Boolean,
     uiCornerRoundnessScale: Float,
@@ -1000,17 +1276,33 @@ private fun ChatContent(
     val surfaceOpacity = uiSurfaceOpacity.coerceIn(0.55f, 1.0f)
     val density = LocalDensity.current
     val isKeyboardOpen = WindowInsets.ime.getBottom(density) > 0
-    var inputBarHeightPx by remember { mutableIntStateOf(0) }
+    var compactInputBarMode by remember { mutableStateOf(false) }
+    var compactBottomNavVisible by remember { mutableStateOf(true) }
     val headerVerticalPadding = if (compactChatHeader) 2.dp else 5.dp
     val headerBottomSpacer = if (compactChatHeader) 0.dp else 2.dp
     val headerTitleStyle = if (compactChatHeader) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge
-    val compactInputBarWhileScrolling = !isKeyboardOpen && listState.isScrollInProgress && messages.isNotEmpty()
-    val inputBarOffsetY by animateDpAsState(
-        targetValue = if (compactInputBarWhileScrolling) 18.dp else 0.dp,
-        animationSpec = tween(durationMillis = 260, easing = LinearOutSlowInEasing),
-        label = "inputBarOffset"
-    )
-
+    val chatScrollCollapseConnection = remember(isKeyboardOpen, messages.isNotEmpty()) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (
+                    source == NestedScrollSource.UserInput &&
+                    !isKeyboardOpen &&
+                    messages.isNotEmpty() &&
+                    available.y != 0f
+                ) {
+                    compactInputBarMode = true
+                    compactBottomNavVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(messages.isEmpty()) {
+        if (messages.isEmpty()) {
+            compactInputBarMode = false
+            compactBottomNavVisible = true
+        }
+    }
     val backgroundGradient = remember(designPalette) {
         Brush.verticalGradient(
             listOf(
@@ -1046,17 +1338,18 @@ private fun ChatContent(
         animationSpec = tween(durationMillis = 120, easing = LinearOutSlowInEasing),
         label = "messageOverlayAlpha"
     )
-    val chatListBottomPadding = with(density) { inputBarHeightPx.toDp() } + 18.dp
+    val chatListBottomPadding = 18.dp
     var topMenuExpanded by remember { mutableStateOf(false) }
     var providerMenuExpanded by remember { mutableStateOf(false) }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        containerColor = Color.Transparent
-    ) { paddingValues ->
-        Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(backgroundGradient)) {
-            Column(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(backgroundGradient)) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            containerColor = Color.Transparent
+        ) { paddingValues ->
+            Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+                Column(modifier = Modifier.fillMaxSize()) {
                 AnimatedVisibility(
                     visible = !isKeyboardOpen,
                     enter = fadeIn(tween(180)) + expandVertically(animationSpec = tween(220)),
@@ -1080,7 +1373,8 @@ private fun ChatContent(
                                         style = headerTitleStyle,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White,
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 },
                                 navigationIcon = {
@@ -1111,6 +1405,14 @@ private fun ChatContent(
                                             expanded = topMenuExpanded,
                                             onDismissRequest = { topMenuExpanded = false }
                                         ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Home-Hub") },
+                                                leadingIcon = { Icon(Icons.Default.Home, null) },
+                                                onClick = {
+                                                    topMenuExpanded = false
+                                                    onBottomNavRoute("home_hub")
+                                                }
+                                            )
                                             DropdownMenuItem(
                                                 text = { Text("Mini-Apps") },
                                                 leadingIcon = { Icon(Icons.Default.Extension, null) },
@@ -1156,19 +1458,25 @@ private fun ChatContent(
                                 },
                                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                             )
-                            Row(
+                            // P1-2: FlowRow so chips wrap on narrow screens instead of overflowing.
+                            FlowRow(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp, vertical = headerVerticalPadding),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Box {
                                     Surface(
                                         shape = RoundedCornerShape(designTokens.chipCornerRadius),
                                         color = Color.White.copy(alpha = designTokens.chipAlpha),
                                         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                                        modifier = Modifier.clickable { providerMenuExpanded = true }
+                                        modifier = Modifier
+                                            .semantics {
+                                                role = Role.Button
+                                                contentDescription = "Provider wechseln"
+                                            }
+                                            .clickable { providerMenuExpanded = true }
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -1209,11 +1517,28 @@ private fun ChatContent(
                                         }
                                         if (multiProviderEnabled) {
                                             HorizontalDivider()
-                                            DropdownMenuItem(
-                                                text = { Text("Auto-Fallback ist aktiv") },
-                                                leadingIcon = { Icon(Icons.Default.Info, null) },
-                                                onClick = { providerMenuExpanded = false }
-                                            )
+                                            // P2-4: render the auto-fallback note as a non-clickable
+                                            // info row instead of a DropdownMenuItem so it isn't
+                                            // mistaken for a selectable provider.
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Info,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                                )
+                                                Text(
+                                                    text = "Auto-Fallback ist aktiv",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -1239,6 +1564,39 @@ private fun ChatContent(
                                         style = MaterialTheme.typography.labelMedium,
                                         maxLines = 1
                                     )
+                                }
+                                // P1-1: Workspace chip — read-only here. Tap opens settings → workspaces.
+                                if (activeWorkspaceName.isNotBlank()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
+                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            Color.White.copy(alpha = 0.22f)
+                                        ),
+                                        modifier = Modifier.clickable { onSettingsClick() }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Folder,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = activeWorkspaceName,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.widthIn(max = 120.dp)
+                                            )
+                                        }
+                                    }
                                 }
                                 Surface(
                                     shape = RoundedCornerShape(designTokens.chipCornerRadius),
@@ -1341,15 +1699,23 @@ private fun ChatContent(
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                    if (messages.isEmpty() && !isLoading) {
-                        Box(modifier = Modifier.fillMaxSize().graphicsLayer(alpha = messageContentAlpha)) {
-                            EmptyChatState(themeColor, selectedPersona)
-                        }
-                    } else {
-                        LazyColumn(
+                    // P1-11: Crossfade between empty state and message list so the first
+                    // send doesn't snap-pop from welcome → typing indicator.
+                    Crossfade(
+                        targetState = messages.isEmpty() && !isLoading,
+                        animationSpec = tween(durationMillis = 220),
+                        label = "emptyStateCrossfade"
+                    ) { showEmpty ->
+                        if (showEmpty) {
+                            Box(modifier = Modifier.fillMaxSize().graphicsLayer(alpha = messageContentAlpha)) {
+                                EmptyChatState(themeColor, selectedPersona)
+                            }
+                        } else {
+                            LazyColumn(
                             state = listState,
                             modifier = Modifier
                                 .fillMaxSize()
+                                .nestedScroll(chatScrollCollapseConnection)
                                 .graphicsLayer(alpha = messageContentAlpha),
                             contentPadding = PaddingValues(
                                 start = designTokens.listHorizontalPadding,
@@ -1383,6 +1749,7 @@ private fun ChatContent(
                                 ChatBubble(
                                     message = message,
                                     onSpeak = onSpeak,
+                                    isSpeaking = isSpeechPlaybackActive && activeSpeechMessageId == message.id,
                                     themeColor = themeColor,
                                     surfaceColor = personaMood.cardSurface,
                                     fontSize = fontSize,
@@ -1400,6 +1767,7 @@ private fun ChatContent(
                             if (isLoading && activeToolCalls.isNotEmpty()) {
                                 item { ToolCallsDisplay(activeToolCalls = activeToolCalls, themeColor = themeColor) }
                             }
+                            }
                         }
                     }
                     if (messageOverlayAlpha > 0f) {
@@ -1410,16 +1778,53 @@ private fun ChatContent(
                         )
                     }
                 }
-
-                // Input bar: schrumpft beim Scrollen auf Quick-Actions und gleitet nach unten.
-                Box(
-                    modifier = Modifier
-                        .onSizeChanged { inputBarHeightPx = it.height }
-                        .graphicsLayer {
-                        translationY = with(density) { inputBarOffsetY.toPx() }
-                    }
-                ) {
-                    ChatInputBar(
+                Box {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // P1-1: Stop button visible only while generation/streaming is in flight.
+                        AnimatedVisibility(
+                            visible = isLoading || isStreaming,
+                            enter = fadeIn(tween(140)) + expandVertically(animationSpec = tween(160)),
+                            exit = fadeOut(tween(100)) + shrinkVertically(animationSpec = tween(140))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(24.dp),
+                                    color = Color.Black.copy(alpha = 0.55f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, themeColor.copy(alpha = 0.6f)),
+                                    onClick = { onStopGeneration() },
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .semantics {
+                                            contentDescription = "Generierung stoppen"
+                                            role = Role.Button
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Stop,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = if (isStreaming) "Streaming stoppen" else "Generierung stoppen",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        ChatInputBar(
                         inputText = inputText,
                         onInputChange = onInputChange,
                         onSend = onSend,
@@ -1445,10 +1850,28 @@ private fun ChatContent(
                         automationQuickActionsEnabled = automationQuickActionsEnabled,
                         selectedExtensionQuickAction = selectedExtensionQuickAction,
                         onSelectExtensionQuickAction = onSelectExtensionQuickAction,
-                        compactMode = compactInputBarWhileScrolling,
+                        compactMode = compactInputBarMode,
+                        onCompactBottomNavVisibilityChange = { compactBottomNavVisible = it },
                         promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
                         onSelectPromptTemplate = {}
                     )
+                    }
+                }
+                AnimatedVisibility(
+                    visible = !isKeyboardOpen && (!compactInputBarMode || compactBottomNavVisible),
+                    enter = fadeIn(tween(160)) + expandVertically(animationSpec = tween(180)),
+                    exit = fadeOut(tween(120)) + shrinkVertically(animationSpec = tween(150))
+                ) {
+                    BamaChatBottomNav(
+                        currentRoute = "chat",
+                        designPreset = uiDesignPreset,
+                        onNavigate = onBottomNavRoute,
+                        attachedToComposer = true,
+                        cornerRoundnessScale = uiCornerScale,
+                        shadowIntensityScale = uiShadowScale,
+                        surfaceOpacity = surfaceOpacity
+                    )
+                }
                 }
             }
         }
@@ -1508,3 +1931,5 @@ private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor
         }
     }
 }
+
+

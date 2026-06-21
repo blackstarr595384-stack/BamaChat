@@ -3,18 +3,20 @@ package com.example.bamachat.ui.component
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -35,34 +37,53 @@ fun OfflineBanner(
         exit = slideOutVertically { -it },
         modifier = modifier
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFFB71C1C))
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color(0xFF162131),
+            border = BorderStroke(1.dp, Color(0xFF7CC6FF).copy(alpha = 0.18f))
         ) {
-            Icon(
-                imageVector = Icons.Default.CloudOff,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Keine Internetverbindung",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
-            )
-            if (pendingCount > 0) {
-                Spacer(modifier = Modifier.width(12.dp))
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF7CC6FF).copy(alpha = 0.16f)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = null,
+                            tint = Color(0xFFBDE1FF),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
                 Text(
-                    text = "$pendingCount ausstehende Vorgänge",
-                    color = Color.White.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.bodySmall
+                    text = "Keine Internetverbindung",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
                 )
+                if (pendingCount > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = Color.White.copy(alpha = 0.08f)
+                    ) {
+                        Text(
+                            text = "$pendingCount ausstehende Vorgänge",
+                            color = Color.White.copy(alpha = 0.88f),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
             }
         }
     }

@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.example.bamachat.data.model.ChatMessage
 import dev.jeziellago.compose.markdowntext.MarkdownText
@@ -43,7 +44,8 @@ import android.widget.Toast
 @Composable
 fun ChatBubble(
     message: ChatMessage,
-    onSpeak: (String) -> Unit,
+    onSpeak: (String, String) -> Unit,
+    isSpeaking: Boolean,
     themeColor: Color,
     surfaceColor: Color,
     fontSize: Float,
@@ -62,6 +64,7 @@ fun ChatBubble(
     var visible by remember(message.id) { mutableStateOf(!animateIn) }
     val hasLiveSources = message.sources.isNotEmpty()
     val showSourcesSection = hasLiveSources && (showLiveSources || sourcesExpandedByUser)
+    val showAssistantActions = !isUser && message.text.isNotBlank()
     LaunchedEffect(message.id, animateIn) {
         if (animateIn) kotlinx.coroutines.delay(animationDelayMs.toLong())
         visible = true
@@ -120,142 +123,108 @@ fun ChatBubble(
             ) { Icon(Icons.Default.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(18.dp)) }
             Spacer(Modifier.width(8.dp))
         }
-        Surface(
+        Column(
             modifier = Modifier.widthIn(max = designTokens.bubbleMaxWidth)
-                .shadow(designTokens.bubbleShadow, bubbleShape, spotColor = if (isUser) themeColor else surfaceColor.copy(alpha = 0.6f)),
-            shape = bubbleShape, color = Color.Transparent
         ) {
-            Box(modifier = Modifier.background(bubbleBrush).padding(14.dp).graphicsLayer(alpha = bubbleAlpha)) {
-                Column {
-                    if (message.imageUrl != null) {
-                        if (isUser) UploadedImageCard(message.imageUrl, message.text, themeColor)
-                        else GeneratedImageCard(message.imageUrl, message.text, themeColor)
-                    } else if (isUser) {
-                        SelectionContainer {
-                            Text(
-                                message.text,
-                                color = Color.White,
-                                fontSize = fontSize.sp,
-                                lineHeight = (fontSize * 1.35f).sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    } else {
-                        if (message.text.isBlank()) BlinkingDot(themeColor)
-                        else {
-                            MarkdownText(
-                                markdown = message.text,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = Color(0xFFEDEEF0),
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        designTokens.bubbleShadow,
+                        bubbleShape,
+                        spotColor = if (isUser) themeColor else surfaceColor.copy(alpha = 0.6f)
+                    ),
+                shape = bubbleShape,
+                color = Color.Transparent
+            ) {
+                Box(modifier = Modifier.background(bubbleBrush).padding(14.dp).graphicsLayer(alpha = bubbleAlpha)) {
+                    Column {
+                        if (message.imageUrl != null) {
+                            if (isUser) UploadedImageCard(message.imageUrl, message.text, themeColor)
+                            else GeneratedImageCard(message.imageUrl, message.text, themeColor)
+                        } else if (isUser) {
+                            SelectionContainer {
+                                Text(
+                                    message.text,
+                                    color = Color.White,
                                     fontSize = fontSize.sp,
-                                    lineHeight = (fontSize * 1.5f).sp
-                                ),
-                                isTextSelectable = true
-                            )
-                            if (showSourcesSection) {
-                                Spacer(Modifier.height(10.dp))
-                                BubbleSourcesSection(message.sources, message.webFetchedAtIso, themeColor)
-                            }
-                            if (hasLiveSources && !showLiveSources) {
-                                Spacer(Modifier.height(6.dp))
-                                AssistChip(
-                                    onClick = { sourcesExpandedByUser = !sourcesExpandedByUser },
-                                    label = {
-                                        Text(
-                                            text = if (sourcesExpandedByUser) "Quellen" else "Quellen (${message.sources.size})",
-                                            fontSize = 10.sp,
-                                            color = Color.White.copy(alpha = 0.85f)
-                                        )
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Public,
-                                            contentDescription = null,
-                                            tint = themeColor,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Icon(
-                                            if (sourcesExpandedByUser) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                            contentDescription = null,
-                                            tint = Color.White.copy(alpha = 0.72f),
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    },
-                                    colors = AssistChipDefaults.assistChipColors(
-                                        containerColor = Color.White.copy(alpha = 0.08f)
-                                    ),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        Color.White.copy(alpha = 0.16f)
-                                    ),
-                                    modifier = Modifier.height(28.dp)
+                                    lineHeight = (fontSize * 1.35f).sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
-                        }
-                        if (message.text.isNotBlank()) {
-                            Spacer(Modifier.height(6.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                IconButton(
-                                    onClick = {
-                                        val copied = copyMessageText(context, composeClipboard, message.text)
-                                        Toast.makeText(
-                                            context,
-                                            if (copied) "Nachricht kopiert" else "Kopieren fehlgeschlagen",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    modifier = Modifier.size(44.dp)
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, "Kopieren", tint = Color.White.copy(alpha = 0.75f), modifier = Modifier.size(16.dp))
+                        } else {
+                            if (message.text.isBlank()) BlinkingDot(themeColor)
+                            else {
+                                MarkdownText(
+                                    markdown = message.text,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        color = Color(0xFFEDEEF0),
+                                        fontSize = fontSize.sp,
+                                        lineHeight = (fontSize * 1.5f).sp
+                                    ),
+                                    // P2-10 Design-Fix: Assistant-Antworten lassen sich gezielt markieren/kopieren.
+                                    isTextSelectable = true
+                                )
+                                if (showSourcesSection) {
+                                    Spacer(Modifier.height(10.dp))
+                                    BubbleSourcesSection(message.sources, message.webFetchedAtIso, themeColor)
                                 }
-                                IconButton(onClick = { onSpeak(message.text) }, modifier = Modifier.size(28.dp)) {
-                                    @Suppress("DEPRECATION")
-                                    Icon(Icons.Default.VolumeUp, "Vorlesen", tint = themeColor, modifier = Modifier.size(16.dp))
-                                }
-                                Box {
-                                    IconButton(onClick = { showMessageActions = true }, modifier = Modifier.size(28.dp)) {
-                                        Icon(Icons.Default.MoreVert, "Mehr", tint = Color.White.copy(alpha = 0.72f), modifier = Modifier.size(16.dp))
-                                    }
-                                    DropdownMenu(
-                                        expanded = showMessageActions,
-                                        onDismissRequest = { showMessageActions = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Nachricht kopieren") },
-                                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                                            onClick = {
-                                                showMessageActions = false
-                                                val copied = copyMessageText(context, composeClipboard, message.text)
-                                                Toast.makeText(
-                                                    context,
-                                                    if (copied) "Nachricht kopiert" else "Kopieren fehlgeschlagen",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Vorlesen") },
-                                            leadingIcon = {
-                                                @Suppress("DEPRECATION")
-                                                Icon(Icons.Default.VolumeUp, contentDescription = null)
-                                            },
-                                            onClick = {
-                                                showMessageActions = false
-                                                onSpeak(message.text)
-                                            }
-                                        )
-                                    }
-                                }
-                                if (showTimestamps) {
-                                    Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
-                                        color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp)
+                                if (hasLiveSources && !showLiveSources) {
+                                    Spacer(Modifier.height(6.dp))
+                                    AssistChip(
+                                        onClick = { sourcesExpandedByUser = !sourcesExpandedByUser },
+                                        label = {
+                                            Text(
+                                                text = if (sourcesExpandedByUser) "Quellen" else "Quellen (${message.sources.size})",
+                                                fontSize = 10.sp,
+                                                color = Color.White.copy(alpha = 0.85f)
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Public,
+                                                contentDescription = null,
+                                                tint = themeColor,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            Icon(
+                                                if (sourcesExpandedByUser) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                contentDescription = null,
+                                                tint = Color.White.copy(alpha = 0.72f),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        },
+                                        colors = AssistChipDefaults.assistChipColors(
+                                            containerColor = Color.White.copy(alpha = 0.08f)
+                                        ),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            Color.White.copy(alpha = 0.16f)
+                                        ),
+                                        modifier = Modifier.height(28.dp)
+                                    )
                                 }
                             }
                         }
                     }
                 }
+            }
+            if (showAssistantActions) {
+                Spacer(Modifier.height(6.dp))
+                AssistantMessageActions(
+                    message = message,
+                    themeColor = themeColor,
+                    surfaceColor = surfaceColor,
+                    composeClipboard = composeClipboard,
+                    context = context,
+                    showTimestamps = showTimestamps,
+                    showMessageActions = showMessageActions,
+                    onShowMessageActionsChange = { showMessageActions = it },
+                    onSpeak = onSpeak,
+                    isSpeaking = isSpeaking
+                )
             }
         }
         if (isUser) {
@@ -302,7 +271,10 @@ fun GeneratedImageCard(imageUrl: String, prompt: String, themeColor: Color) {
         if (prompt.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text("Prompt: $prompt", color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imageUrl))) }, modifier = Modifier.size(28.dp)) {
+            IconButton(
+                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imageUrl))) },
+                modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            ) {
                 Icon(Icons.AutoMirrored.Filled.OpenInNew, "Öffnen", tint = themeColor, modifier = Modifier.size(16.dp))
             }
             Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis())),
@@ -346,6 +318,146 @@ fun BubbleSourcesSection(
     }
 }
 
+@Composable
+private fun AssistantMessageActions(
+    message: ChatMessage,
+    themeColor: Color,
+    surfaceColor: Color,
+    composeClipboard: ComposeClipboardManager,
+    context: Context,
+    showTimestamps: Boolean,
+    showMessageActions: Boolean,
+    onShowMessageActionsChange: (Boolean) -> Unit,
+    onSpeak: (String, String) -> Unit,
+    isSpeaking: Boolean
+) {
+    val speakIcon = if (isSpeaking) Icons.Default.Stop else Icons.Default.PlayArrow
+    val speakLabel = if (isSpeaking) "Stopp" else "Vorlesen"
+    val speakDescription = if (isSpeaking) "Vorlesen stoppen" else "Vorlesen starten"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .zIndex(1f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        val actionStripColor = surfaceColor.copy(alpha = 0.22f)
+        Surface(
+            modifier = Modifier
+                .wrapContentWidth()
+                .shadow(1.dp, RoundedCornerShape(16.dp), spotColor = Color.Black.copy(alpha = 0.18f)),
+            shape = RoundedCornerShape(16.dp),
+            color = actionStripColor,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                CompactActionButton(
+                    icon = Icons.Default.ContentCopy,
+                    contentDescription = "Kopieren",
+                    tint = Color.White.copy(alpha = 0.78f),
+                    onClick = {
+                        val copied = copyMessageText(context, composeClipboard, message.text)
+                        Toast.makeText(
+                            context,
+                            if (copied) "Nachricht kopiert" else "Kopieren fehlgeschlagen",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                )
+                CompactActionDivider()
+                CompactActionButton(
+                    icon = speakIcon,
+                    contentDescription = speakDescription,
+                    tint = themeColor,
+                    onClick = { onSpeak(message.id, message.text) }
+                )
+                CompactActionDivider()
+                Box {
+                    CompactActionButton(
+                        icon = Icons.Default.MoreVert,
+                        contentDescription = "Mehr",
+                        tint = Color.White.copy(alpha = 0.76f),
+                        onClick = { onShowMessageActionsChange(true) }
+                    )
+                    DropdownMenu(
+                        expanded = showMessageActions,
+                        onDismissRequest = { onShowMessageActionsChange(false) }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Nachricht kopieren") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                            onClick = {
+                                onShowMessageActionsChange(false)
+                                val copied = copyMessageText(context, composeClipboard, message.text)
+                                Toast.makeText(
+                                    context,
+                                    if (copied) "Nachricht kopiert" else "Kopieren fehlgeschlagen",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(speakLabel) },
+                            leadingIcon = {
+                                Icon(speakIcon, contentDescription = null)
+                            },
+                            onClick = {
+                                onShowMessageActionsChange(false)
+                                onSpeak(message.id, message.text)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        if (showTimestamps) {
+            Text(
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
+                color = Color.White.copy(alpha = 0.34f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(17.dp)
+        )
+    }
+}
+
+@Composable
+private fun CompactActionDivider() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(14.dp)
+            .background(Color.White.copy(alpha = 0.06f))
+    )
+}
+
 private fun copyMessageText(
     context: Context,
     composeClipboard: ComposeClipboardManager,
@@ -356,9 +468,7 @@ private fun copyMessageText(
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
         if (clipboard == null) return@runCatching false
         clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
-        val clip = clipboard.primaryClip
-        val copiedText = clip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-        copiedText.isNotBlank()
+        true
     }.getOrDefault(false)
 
     val composeCopied = runCatching {

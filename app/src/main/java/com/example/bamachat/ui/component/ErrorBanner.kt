@@ -1,13 +1,15 @@
 package com.example.bamachat.ui.component
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -19,7 +21,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,92 +55,96 @@ fun ErrorBanner(
 
     val animatedBgColor by animateColorAsState(targetValue = bgColor, label = "error_bg")
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(
-                color = animatedBgColor,
-                shape = RoundedCornerShape(10.dp)
-            )
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = animatedBgColor.copy(alpha = 0.96f),
+        border = BorderStroke(1.dp, iconColor.copy(alpha = 0.22f))
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = iconColor,
-            modifier = Modifier.padding(top = 2.dp)
-        )
-
-        Column(
-            modifier = Modifier
-                .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = errorMessage.title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
-            )
-            Text(
-                text = errorMessage.description,
-                fontSize = 12.sp,
-                color = Color.White.copy(alpha = 0.85f)
-            )
-            Text(
-                text = errorMessage.suggestion,
-                fontSize = 11.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                fontStyle = FontStyle.Italic
-            )
-
-            // Action Row
-            if (errorMessage.isRetryable && onRetry != null && errorMessage.actionLabel != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Surface(
+                shape = CircleShape,
+                color = iconColor.copy(alpha = 0.16f)
+            ) {
+                Box(
+                    modifier = Modifier.padding(8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Button(
-                        onClick = onRetry,
-                        modifier = Modifier.height(28.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White.copy(alpha = 0.2f)
-                        ),
-                        shape = RoundedCornerShape(6.dp)
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconColor
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = errorMessage.title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Text(
+                    text = errorMessage.description,
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.88f)
+                )
+                Text(
+                    text = errorMessage.suggestion,
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontStyle = FontStyle.Italic
+                )
+
+                if (errorMessage.isRetryable && onRetry != null && errorMessage.actionLabel != null) {
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.padding(end = 4.dp),
-                            tint = Color.White
-                        )
-                        Text(
-                            text = errorMessage.actionLabel,
-                            fontSize = 10.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Button(
+                            onClick = onRetry,
+                            modifier = Modifier.height(30.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White.copy(alpha = 0.14f),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.padding(end = 4.dp),
+                                tint = Color.White
+                            )
+                            Text(
+                                text = errorMessage.actionLabel,
+                                fontSize = 10.sp,
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        IconButton(
-            onClick = onDismiss,
-            modifier = Modifier
-                .padding(-8.dp)
-                .align(Alignment.Top)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Schließen",
-                tint = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier
-            )
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.padding(top = 0.dp, end = 0.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Schließen",
+                    tint = Color.White.copy(alpha = 0.72f)
+                )
+            }
         }
     }
 }
@@ -153,13 +158,10 @@ fun CompactErrorInfo(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(
-                color = Color(0xFF3A3A4A),
-                shape = RoundedCornerShape(8.dp)
-            ),
-        shape = RoundedCornerShape(8.dp)
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1B2330),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
     ) {
         Column(
             modifier = Modifier.padding(10.dp),
@@ -169,12 +171,12 @@ fun CompactErrorInfo(
                 text = errorMessage.title,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFFFF6B6B)
+                color = Color(0xFFFF8C8C)
             )
             Text(
                 text = errorMessage.suggestion,
                 fontSize = 10.sp,
-                color = Color.White.copy(alpha = 0.7f)
+                color = Color.White.copy(alpha = 0.72f)
             )
         }
     }

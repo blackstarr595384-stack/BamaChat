@@ -55,6 +55,9 @@ class LocalDataSanitizer(context: Context) {
             editor.remove("opencode_endpoint")
             editor.remove("opencode_model")
             editor.remove("elevenlabs_api_key")
+            editor.remove("cloud_voice_provider")
+            editor.remove("piper_endpoint")
+            editor.remove("piper_voice_name")
             editor.remove("live_web_api_token")
             editor.remove("live_web_endpoint")
             editor.remove("live_web_allowed_domains")
@@ -64,5 +67,13 @@ class LocalDataSanitizer(context: Context) {
             editor.remove("photo_ai_cloud_endpoint")
         }
         editor.apply()
+    }
+
+    suspend fun clearAllAppData(clearApiKeys: Boolean = false) {
+        clearGuestSessionData(clearApiKeys = clearApiKeys)
+        if (clearApiKeys) {
+            SecureSettingsStore.clear(appContext)
+        }
+        prefs.edit().clear().apply()
     }
 }

@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -38,11 +38,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.bamachat"
+        applicationId = "de.bamachat.app"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -61,7 +61,7 @@ android {
                     if (keyPassword.isBlank()) add("keyPassword")
                 }
                 if (missing.isNotEmpty()) {
-                    error("keystore.properties ist unvollständig. Fehlende Keys: ${missing.joinToString()}")
+                    error("keystore.properties ist unvollstÃ¤ndig. Fehlende Keys: ${missing.joinToString()}")
                 }
 
                 storeFile = rootProject.file(storeFilePath)
@@ -96,6 +96,7 @@ android {
     
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -125,7 +126,7 @@ dependencies {
     // Lottie Animations
     implementation(libs.airbnb.lottie.compose)
     
-    // Material Design Icons (Icons für UI)
+    // Material Design Icons (Icons fÃ¼r UI)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.security.crypto)
@@ -218,3 +219,5 @@ tasks.register("stabilityCheck") {
     description = "Runs core smoke checks for app stability."
     dependsOn("assembleDebug", "testDebugUnitTest", "lintDebug")
 }
+
+

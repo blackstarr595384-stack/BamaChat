@@ -96,7 +96,7 @@ fun OnboardingAPIKeySetupScreen(
                         )
                         Text(
                             "1. Gehe zu https://openrouter.ai\n2. Melde dich an und erstelle einen API-Key\n3. Kopiere deinen Key hier ein",
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                             color = Color.White.copy(alpha = 0.6f),
                             lineHeight = 18.sp
                         )
@@ -127,7 +127,7 @@ fun OnboardingAPIKeySetupScreen(
                         )
                         Text(
                             "1. Gehe zu https://console.groq.com\n2. Erstelle einen API-Key\n3. Oder überspringe diesen Schritt (du kannst ihn später hinzufügen)",
-                            fontSize = 13.sp,
+                            fontSize = 14.sp,
                             color = Color.White.copy(alpha = 0.6f),
                             lineHeight = 18.sp
                         )

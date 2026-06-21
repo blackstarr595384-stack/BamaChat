@@ -15,3 +15,6 @@ app/google-services.json
 hs_err_pid*.log
 replay_pid*.log
 functions/node_modules/
+
+# Stakpak session files
+.stakpak/session*

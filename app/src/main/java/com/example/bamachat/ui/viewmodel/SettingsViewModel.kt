@@ -11,6 +11,9 @@ import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.util.AgentPresetLibrary
+import com.example.bamachat.util.AppTelemetry
+import com.example.bamachat.util.CloudVoiceManager
+import com.example.bamachat.util.LegalPolicy
 import com.example.bamachat.util.LocalDataSanitizer
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PhotoAiCloudConfigResolver
@@ -44,11 +47,21 @@ class SettingsViewModel @Inject constructor(
         private const val KEY_OPENCODE_ENDPOINT = "opencode_endpoint"
         private const val KEY_OPENCODE_MODEL = "opencode_model"
         private const val KEY_OPENCODE_API_KEY = "opencode_api_key"
+        private const val KEY_CLOUD_VOICE_PROVIDER = "cloud_voice_provider"
+        private const val KEY_PIPER_ENDPOINT = "piper_endpoint"
+        private const val KEY_PIPER_VOICE_NAME = "piper_voice_name"
         private const val LEGACY_OPENCODE_ENDPOINT = "https://api.opencode.ai/v1/"
         private const val LEGACY_OPENCODE_MODEL = "openai/gpt-4.1-mini"
         private const val DEFAULT_OPENCODE_ENDPOINT = "https://opencode.ai/zen/v1/"
         private const val KEY_PHOTO_AI_CLOUD_ENDPOINT = "photo_ai_cloud_endpoint"
         private const val KEY_PHOTO_AI_CLOUD_API_TOKEN = "photo_ai_cloud_api_token"
+        private const val KEY_IMAGE_GENERATION_MODE = "image_generation_mode"
+        const val IMAGE_GENERATION_MODE_DISABLED = "Deaktiviert"
+        const val IMAGE_GENERATION_MODE_EXTERNAL = "Externer Bilddienst"
+        val IMAGE_GENERATION_MODE_OPTIONS = listOf(
+            IMAGE_GENERATION_MODE_DISABLED,
+            IMAGE_GENERATION_MODE_EXTERNAL
+        )
         private const val DEFAULT_LIVE_WEB_ENDPOINT = "https://websearch-xxf7qxk3wq-ew.a.run.app"
         private const val DEFAULT_PHOTO_AI_CLOUD_ENDPOINT =
             "https://europe-west1-bamachat-d07fb.cloudfunctions.net/photoEdit"
@@ -99,6 +112,16 @@ class SettingsViewModel @Inject constructor(
         prefs.getBoolean("onboarding_completed", false)
     )
     val onboardingCompleted: StateFlow<Boolean> = _onboardingCompleted.asStateFlow()
+
+    private val _legalAcknowledgedVersion = MutableStateFlow(
+        prefs.getInt(LegalPolicy.KEY_ACK_VERSION, 0)
+    )
+    val legalAcknowledgedVersion: StateFlow<Int> = _legalAcknowledgedVersion.asStateFlow()
+
+    private val _legalAcknowledgedTimestamp = MutableStateFlow(
+        prefs.getLong(LegalPolicy.KEY_ACK_TIMESTAMP, 0L)
+    )
+    val legalAcknowledgedTimestamp: StateFlow<Long> = _legalAcknowledgedTimestamp.asStateFlow()
 
     private val _isBiometricEnabled = MutableStateFlow(prefs.getBoolean("biometric_enabled", false))
     val isBiometricEnabled: StateFlow<Boolean> = _isBiometricEnabled.asStateFlow()
@@ -153,6 +176,16 @@ class SettingsViewModel @Inject constructor(
     private val _cloudVoiceEnabled = MutableStateFlow(prefs.getBoolean("cloud_voice_enabled", false))
     val cloudVoiceEnabled: StateFlow<Boolean> = _cloudVoiceEnabled.asStateFlow()
 
+    private val _cloudVoiceProvider = MutableStateFlow(
+        normalizeCloudVoiceProvider(
+            prefs.getString(
+                KEY_CLOUD_VOICE_PROVIDER,
+                CloudVoiceManager.Provider.ELEVENLABS.storageValue
+            )
+        )
+    )
+    val cloudVoiceProvider: StateFlow<String> = _cloudVoiceProvider.asStateFlow()
+
     private val _elevenLabsApiKey = MutableStateFlow(secureString("elevenlabs_api_key"))
     val elevenLabsApiKey: StateFlow<String> = _elevenLabsApiKey.asStateFlow()
 
@@ -165,6 +198,16 @@ class SettingsViewModel @Inject constructor(
         prefs.getString("elevenlabs_model_id", "eleven_multilingual_v2") ?: "eleven_multilingual_v2"
     )
     val elevenLabsModelId: StateFlow<String> = _elevenLabsModelId.asStateFlow()
+
+    private val _piperEndpoint = MutableStateFlow(
+        prefs.getString(KEY_PIPER_ENDPOINT, "") ?: ""
+    )
+    val piperEndpoint: StateFlow<String> = _piperEndpoint.asStateFlow()
+
+    private val _piperVoiceName = MutableStateFlow(
+        prefs.getString(KEY_PIPER_VOICE_NAME, "") ?: ""
+    )
+    val piperVoiceName: StateFlow<String> = _piperVoiceName.asStateFlow()
 
     private val _streamingEnabled = MutableStateFlow(prefs.getBoolean("streaming_enabled", true))
     val streamingEnabled: StateFlow<Boolean> = _streamingEnabled.asStateFlow()
@@ -329,6 +372,11 @@ class SettingsViewModel @Inject constructor(
     val photoAiCloudEndpoint: StateFlow<String> = _photoAiCloudEndpoint.asStateFlow()
     private val _photoAiCloudApiToken = MutableStateFlow(secureString(KEY_PHOTO_AI_CLOUD_API_TOKEN))
     val photoAiCloudApiToken: StateFlow<String> = _photoAiCloudApiToken.asStateFlow()
+    private val _imageGenerationMode = MutableStateFlow(
+        prefs.getString(KEY_IMAGE_GENERATION_MODE, IMAGE_GENERATION_MODE_EXTERNAL)
+            ?: IMAGE_GENERATION_MODE_EXTERNAL
+    )
+    val imageGenerationMode: StateFlow<String> = _imageGenerationMode.asStateFlow()
 
     private val _selectedOpenRouterModel = MutableStateFlow(
         prefs.getString("openrouter_model", "google/gemma-3-27b-it:free") ?: "google/gemma-3-27b-it:free"
@@ -403,6 +451,12 @@ class SettingsViewModel @Inject constructor(
 
     private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         when (key) {
+            "onboarding_completed" -> _onboardingCompleted.value =
+                prefs.getBoolean("onboarding_completed", false)
+            LegalPolicy.KEY_ACK_VERSION -> _legalAcknowledgedVersion.value =
+                prefs.getInt(LegalPolicy.KEY_ACK_VERSION, 0)
+            LegalPolicy.KEY_ACK_TIMESTAMP -> _legalAcknowledgedTimestamp.value =
+                prefs.getLong(LegalPolicy.KEY_ACK_TIMESTAMP, 0L)
             KEY_CLOUD_PERSONA_LAST_SYNC_AT -> _cloudPersonaLastSyncAt.value =
                 prefs.getLong(KEY_CLOUD_PERSONA_LAST_SYNC_AT, 0L)
             KEY_CLOUD_PERSONA_LAST_SYNC_STATUS -> _cloudPersonaLastSyncStatus.value =
@@ -443,6 +497,10 @@ class SettingsViewModel @Inject constructor(
             TTS_STYLE_CLEAR -> TTS_STYLE_CLEAR
             else -> TTS_STYLE_NATURAL
         }
+    }
+
+    private fun normalizeCloudVoiceProvider(provider: String?): String {
+        return CloudVoiceManager.Provider.fromStorage(provider).storageValue
     }
 
     private fun buildMcpRemoteUrlWarning(url: String): String {
@@ -631,6 +689,21 @@ class SettingsViewModel @Inject constructor(
         prefs.edit().putBoolean("onboarding_completed", true).apply()
     }
 
+    fun acceptLegalPolicy() {
+        val now = System.currentTimeMillis()
+        _legalAcknowledgedVersion.value = LegalPolicy.CURRENT_ACK_VERSION
+        _legalAcknowledgedTimestamp.value = now
+        prefs.edit()
+            .putInt(LegalPolicy.KEY_ACK_VERSION, LegalPolicy.CURRENT_ACK_VERSION)
+            .putLong(LegalPolicy.KEY_ACK_TIMESTAMP, now)
+            .apply()
+        AppTelemetry.setCollectionEnabled(true)
+        AppTelemetry.logEvent(
+            "legal_accepted",
+            mapOf("version" to LegalPolicy.CURRENT_ACK_VERSION.toString())
+        )
+    }
+
     fun setBiometricEnabled(enabled: Boolean) {
         _isBiometricEnabled.value = enabled
         prefs.edit().putBoolean("biometric_enabled", enabled).apply()
@@ -726,6 +799,12 @@ class SettingsViewModel @Inject constructor(
         prefs.edit().putBoolean("cloud_voice_enabled", enabled).apply()
     }
 
+    fun setCloudVoiceProvider(provider: String) {
+        val clean = normalizeCloudVoiceProvider(provider)
+        _cloudVoiceProvider.value = clean
+        prefs.edit().putString(KEY_CLOUD_VOICE_PROVIDER, clean).apply()
+    }
+
     fun setElevenLabsApiKey(key: String) {
         val clean = key.trim().replace(Regex("[\\r\\n]+"), "")
         _elevenLabsApiKey.value = clean
@@ -742,6 +821,18 @@ class SettingsViewModel @Inject constructor(
         val clean = modelId.trim()
         _elevenLabsModelId.value = clean
         prefs.edit().putString("elevenlabs_model_id", clean).apply()
+    }
+
+    fun setPiperEndpoint(endpoint: String) {
+        val clean = endpoint.trim()
+        _piperEndpoint.value = clean
+        prefs.edit().putString(KEY_PIPER_ENDPOINT, clean).apply()
+    }
+
+    fun setPiperVoiceName(voiceName: String) {
+        val clean = voiceName.trim()
+        _piperVoiceName.value = clean
+        prefs.edit().putString(KEY_PIPER_VOICE_NAME, clean).apply()
     }
 
     fun setStreamingEnabled(enabled: Boolean) {
@@ -1009,6 +1100,16 @@ class SettingsViewModel @Inject constructor(
         persistSecret(KEY_PHOTO_AI_CLOUD_API_TOKEN, clean)
     }
 
+    fun setImageGenerationMode(mode: String) {
+        val normalized = if (IMAGE_GENERATION_MODE_OPTIONS.contains(mode)) {
+            mode
+        } else {
+            IMAGE_GENERATION_MODE_EXTERNAL
+        }
+        _imageGenerationMode.value = normalized
+        prefs.edit().putString(KEY_IMAGE_GENERATION_MODE, normalized).apply()
+    }
+
     fun setSelectedOpenRouterModel(model: String) {
         _selectedOpenRouterModel.value = model
         prefs.edit().putString("openrouter_model", model).apply()
@@ -1105,6 +1206,28 @@ $tools
         return true
     }
 
+    /**
+     * P1-1: Rename an existing workspace. Returns false when the id is unknown,
+     * the new name is blank, or a different workspace already uses that name.
+     */
+    fun renameWorkspace(workspaceId: String, newName: String): Boolean {
+        val cleanName = newName.trim()
+        if (cleanName.isBlank()) return false
+        val current = _projectWorkspaces.value
+        val target = current.firstOrNull { it.id == workspaceId } ?: return false
+        if (target.name == cleanName) return true
+        if (current.any { it.id != workspaceId && it.name.equals(cleanName, ignoreCase = true) }) return false
+        val updated = current.map {
+            if (it.id == workspaceId) it.copy(name = cleanName) else it
+        }
+        _projectWorkspaces.value = updated
+        if (_activeWorkspaceId.value == workspaceId) {
+            _activeWorkspaceName.value = cleanName
+        }
+        persistWorkspaces()
+        return true
+    }
+
     fun setActiveWorkspace(workspaceId: String) {
         val target = _projectWorkspaces.value.firstOrNull { it.id == workspaceId } ?: return
         _activeWorkspaceId.value = target.id
@@ -1188,6 +1311,9 @@ $tools
             chatDao.deleteAllKnowledgeEdges()
             chatDao.deleteAllPersonaTrainingExamples()
             prefs.edit().clear().apply()
+            _onboardingCompleted.value = false
+            _legalAcknowledgedVersion.value = 0
+            _legalAcknowledgedTimestamp.value = 0L
             _isPremiumActive.value = false
             _subscriptionTier.value = MonetizationConfig.PlanTier.FREE.key
             _creditsBalance.value = 0
@@ -1195,6 +1321,8 @@ $tools
             _activeWorkspaceId.value = _projectWorkspaces.value.first().id
             _activeWorkspaceName.value = _projectWorkspaces.value.first().name
             _workspaceChatFilterEnabled.value = false
+            AppTelemetry.setUserId(null)
+            AppTelemetry.setCollectionEnabled(false)
             persistWorkspaces()
         }
     }

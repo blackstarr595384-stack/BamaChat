@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +63,7 @@ fun ProfileScreen(
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
 
     var nameInput by remember(profile?.displayName) { mutableStateOf(profile?.displayName.orEmpty()) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -210,6 +212,18 @@ fun ProfileScreen(
                         Text("Abmelden")
                     }
 
+                    if (!isGuest) {
+                        TextButton(
+                            enabled = !isLoading,
+                            onClick = { showDeleteAccountDialog = true }
+                        ) {
+                            Text(
+                                "Konto löschen",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+
                     if (isLoading) {
                         CircularProgressIndicator()
                     }
@@ -232,6 +246,33 @@ fun ProfileScreen(
                     Spacer(Modifier.height(4.dp))
                 }
             }
+            // P1-1 Design-Fix: Profilaktionen bleiben oberhalb der Overlay-BottomNav erreichbar.
+            Spacer(Modifier.height(104.dp))
+        }
+
+        if (showDeleteAccountDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteAccountDialog = false },
+                title = { Text("Konto endgültig löschen") },
+                text = {
+                    Text(
+                        "Dabei werden dein Cloud-Konto, gespeicherte Profile und lokale App-Daten unwiderruflich entfernt."
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        showDeleteAccountDialog = false
+                        authViewModel.deleteAccount(onDeleted = onRequireLogin)
+                    }) {
+                        Text("Endgültig löschen")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteAccountDialog = false }) {
+                        Text("Abbrechen")
+                    }
+                }
+            )
         }
     }
 }

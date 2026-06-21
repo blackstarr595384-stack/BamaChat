@@ -20,7 +20,7 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            BamaChatTheme {
+            BamaChatTheme(dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.background) {
                     BamaChatApp()
                 }

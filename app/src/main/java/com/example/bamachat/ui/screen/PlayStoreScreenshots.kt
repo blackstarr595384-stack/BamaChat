@@ -78,7 +78,7 @@ fun PlayStoreScreenshot1() {
             )
 
             Text(
-                text = "Dein KI-Chatbot mit grenzenloser Kreativität",
+                text = "Dein KI-Workspace statt nur ein KI-Chat",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
@@ -87,7 +87,7 @@ fun PlayStoreScreenshot1() {
             )
 
             Text(
-                text = "Echtzeit-Zusammenarbeit, multimodale KI-Features und personalisierte Agenten",
+                text = "Agenten, Workspaces, Tools und Zusammenarbeit in einer einzigen Android-App.",
                 fontSize = 16.sp,
                 textAlign = TextAlign.Center,
                 color = Color(0xFF808080),
@@ -113,7 +113,7 @@ fun PlayStoreScreenshot2() {
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text(
-                text = "Funktionen",
+                text = "Arbeiten statt nur chatten",
                 fontSize = 32.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Primary
@@ -121,20 +121,20 @@ fun PlayStoreScreenshot2() {
 
             FeatureRow(
                 icon = Icons.AutoMirrored.Filled.Chat,
-                title = "Intelligente Chats",
-                description = "Chatten Sie mit fortgeschrittenen KI-Modellen in Echtzeit"
+                title = "Mehrere KI-Modelle",
+                description = "OpenRouter, Groq, Cerebras, Together, Gemini und Ollama in einem Chat."
             )
 
             FeatureRow(
                 icon = Icons.Default.SmartToy,
-                title = "Personalisierte Agenten",
-                description = "Erstellen Sie Ihre eigenen KI-Agenten mit Custom-Prompts"
+                title = "Eigene Agenten",
+                description = "Personas, Prompts und Trainingsbeispiele für deinen Stil und deinen Workflow."
             )
 
             FeatureRow(
                 icon = Icons.Default.Groups,
-                title = "Echtzeit-Collab",
-                description = "Arbeiten Sie in Echtzeit mit anderen zusammen"
+                title = "Team-Kollaboration",
+                description = "Workspaces, Präsenz und gemeinsame Sessions direkt in der App."
             )
         }
     }
@@ -154,7 +154,7 @@ fun PlayStoreScreenshot3() {
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             Text(
-                text = "Mehr Möglichkeiten",
+                text = "Tools, Wissen, Workflows",
                 fontSize = 32.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Primary
@@ -162,20 +162,20 @@ fun PlayStoreScreenshot3() {
 
             FeatureRow(
                 icon = Icons.Default.Apps,
-                title = "Mini-Apps im Hub",
-                description = "Browser, Doodle, 2048, Notizen und mehr"
+                title = "Workspace-Hub",
+                description = "Mini-Apps, Projektflächen und Fokus-Tools an einem Ort."
             )
 
             FeatureRow(
                 icon = Icons.Default.Speed,
-                title = "Schneller Support",
-                description = "Live Help Center mit Dokumentation und Tutorials"
+                title = "MCP & Recherche",
+                description = "Externe Tools anbinden und Web-Recherche direkt in den Chat holen."
             )
 
             FeatureRow(
                 icon = Icons.Default.Star,
-                title = "AI-Hub",
-                description = "Entdecken Sie kuratierte KI-Agenten und Features"
+                title = "Voice, Bilder, Dateien",
+                description = "Multimodale Eingaben ohne Medienbruch für alltägliche KI-Arbeit."
             )
         }
     }
@@ -196,7 +196,7 @@ fun PlayStoreScreenshot4() {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Bereit zu starten?",
+                text = "Sofort loslegen",
                 fontSize = 36.sp,
                 fontWeight = FontWeight.ExtraBold,
                 textAlign = TextAlign.Center,
@@ -205,7 +205,7 @@ fun PlayStoreScreenshot4() {
             )
 
             Text(
-                text = "Jetzt herunterladen und kostenlos nutzen",
+                text = "Als Gast testen oder mit Konto für Cloud-Sync und Zusammenarbeit starten.",
                 fontSize = 18.sp,
                 textAlign = TextAlign.Center,
                 color = Color(0xFF808080),
@@ -226,7 +226,7 @@ fun PlayStoreScreenshot4() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     Text(
-                        text = "Im Google Play Store verfügbar",
+                        text = "Jetzt im Google Play Store testen",
                         color = Color.White,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold

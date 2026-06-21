@@ -197,6 +197,7 @@ App-Konfiguration:
 - optional: `settings.live_web_prefer_github` = `true` (empfohlen für technische Queries)
 - optional: `settings.auto_language_detection_enabled` = `true` (ML Kit Language ID für User-Turn-Kontext)
 - optional: `settings.local_ocr_enabled` = `true` (OCR-Text aus Bildern in Bildanalyse-Prompt)
+- optional: `settings.image_generation_mode` = `Externer Bilddienst` oder `Deaktiviert` (Chat-Bildgenerierung; bei leerem Prompt, deaktiviertem Modus oder Providerfehler keine Bildkarte persistieren)
 - optional für Photo AI Cloud:
   - `settings.photo_ai_cloud_endpoint` = `https://europe-west1-<project-id>.cloudfunctions.net/photoEdit`
   - `settings.photo_ai_cloud_api_token` = `<token>` (wenn gesetzt)
@@ -217,10 +218,13 @@ Verhalten:
 - `AuthScreen.kt`
 - `ProfileScreen.kt`
 - Google-Login nutzt `CredentialManager` (`GetGoogleIdOption`); bei Logout wird `clearCredentialState()` aufgerufen.
+- Die Consent-Route (`LegalDisclaimerScreen`) kommt vor `WelcomeScreen` und schaltet Telemetrie erst nach Zustimmung frei (`SettingsViewModel.acceptLegalPolicy()` + `BamaChatApplication`).
+- Die finale Konto-Löschung läuft ueber `AuthViewModel.deleteAccount()` und entfernt Auth, Cloud-Daten und lokale Daten; öffentliche Rechtstexte liegen unter `/privacy-policy/`, `/terms/`, `/delete-account/` und `/support/`.
 
 ## Voice
 - Lokale TTS/STT in `ChatScreen.kt`
 - Cloud-Voice in `CloudVoiceManager.kt`
+- Cloud-Voice Provider aktuell: `ElevenLabs` und `Piper`; die Settings-UI zeigt nur die Felder des gewählten Providers.
 - TTS nutzt Speech-Sanitizing + Chunking mit kurzen Pausen (`sanitizeForSpeech`, `splitSpeechChunks`) fuer natuerlicheres Sprechen.
 - Continuous Voice wartet auf abgeschlossenes Playback (lokal + Cloud), bevor STT neu startet (Anti-Echo/Loop-Schutz).
 - Settings enthalten ein "Natuerliches Preset" fuer TTS-Geschwindigkeit/Stimmhoehe.
@@ -284,6 +288,7 @@ Verhalten:
     - Cloud-Client: `PhotoAiCloudClient.kt` (Endpoint-Auflösung, Auth-Header, Base64 I/O, Fehler-Mapping)
     - Backend: Firebase Function `photoEdit` in `functions/index.js` (Cloud-Pipeline für Background Remove + Upscale)
     - Chat-Komposer: Bild hochladen, Kamera-Foto aufnehmen und Bildgenerierung direkt aus dem Mehr-Menü
+    - Bildgenerierung läuft über `ChatViewModel.generateImage`; Quota wird erst nach erfolgreicher URL-Auflösung verbraucht, Dienstfehler werden als deutsche Fehlermeldung angezeigt.
     - Detailkarten nutzen kompakte Aktionszeilen statt vieler einzelner Buttons
   - Bestehende Apps weiterhin aktiv: `AutomationBoard` + `KnowledgeVault`
   - Persona-Marketplace in `AgentHubScreen.kt`
@@ -396,8 +401,8 @@ Hinweis: DB-Migrationen laufen explizit über definierte Room-Migrationsschritte
   - Firestore/Storage Rules publiziert?
 
 ## Voice-Probleme
-- ElevenLabs Key/Voice-ID prüfen.
-- Bei Cloud-Ausfall fallbackt App auf lokale TTS.
+- ElevenLabs Key/Voice-ID/Model oder Piper Endpoint/Voice prüfen.
+- Wenn Cloud Voice explizit aktiviert ist, zeigt die App Provider-Fehler direkt an statt still auf lokale TTS zurueckzufallen.
 
 ## 13. Security-Hinweise
 - Keine API-Keys hardcoden.

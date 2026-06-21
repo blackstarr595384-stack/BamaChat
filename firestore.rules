@@ -1,4 +1,5 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     function isSignedIn() {
@@ -9,61 +10,133 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    function isParticipantListValid() {
-      return request.resource.data.participants is list &&
-        request.resource.data.participants.size() <= 20;
+    function isParticipant(sessionData) {
+      return isSignedIn()
+        && sessionData.participants is list
+        && request.auth.uid in sessionData.participants;
+    }
+
+    function isSessionOwner(sessionData) {
+      return isSignedIn() && request.auth.uid == sessionData.ownerId;
+    }
+
+    function roleOf(sessionData, uid) {
+      return sessionData.participantRoles[uid];
+    }
+
+    function isOwnerRole(sessionData) {
+      return isSessionOwner(sessionData) || roleOf(sessionData, request.auth.uid) == "OWNER";
+    }
+
+    function isEditor(sessionData) {
+      return roleOf(sessionData, request.auth.uid) == "EDITOR";
+    }
+
+    function participantListValid(data) {
+      return data.participants is list
+        && data.participants.size() >= 1
+        && data.participants.size() <= 20;
+    }
+
+    function baseSessionShapeValid(data) {
+      return data.ownerId is string
+        && data.title is string
+        && participantListValid(data)
+        && data.participantRoles is map
+        && data.participants.hasAny([data.ownerId])
+        && data.participantRoles[data.ownerId] == "OWNER";
+    }
+
+    function canCreateSession() {
+      return isSignedIn()
+        && baseSessionShapeValid(request.resource.data)
+        && request.resource.data.ownerId == request.auth.uid
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participantRoles[request.auth.uid] == "OWNER";
+    }
+
+    // Join-Self: Ein eingeloggter Nutzer darf nur sich selbst als VIEWER/EDITOR hinzufügen.
+    // Er darf ownerId, Titel, Invite-Daten und Policies nicht verändern.
+    function canJoinSelf() {
+      return isSignedIn()
+        && !(request.auth.uid in resource.data.participants)
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants.size() == resource.data.participants.size() + 1
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.title == resource.data.title
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["participants", "participantRoles", "updatedAt"])
+        && request.resource.data.participantRoles.diff(resource.data.participantRoles)
+          .affectedKeys().hasOnly([request.auth.uid])
+        && (
+          request.resource.data.participantRoles[request.auth.uid] == "VIEWER"
+          || request.resource.data.participantRoles[request.auth.uid] == "EDITOR"
+        )
+        && participantListValid(request.resource.data);
+    }
+
+    // Leave-Self: Ein Teilnehmer darf nur sich selbst aus Teilnehmerliste/Rollen entfernen.
+    function canLeaveSelf() {
+      return isSignedIn()
+        && request.auth.uid in resource.data.participants
+        && !(request.auth.uid in request.resource.data.participants)
+        && request.resource.data.participants.size() == resource.data.participants.size() - 1
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.title == resource.data.title
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["participants", "participantRoles", "updatedAt"])
+        && !request.resource.data.participantRoles.keys().hasAny([request.auth.uid])
+        && participantListValid(request.resource.data);
+    }
+
+    function canManageSession() {
+      return isSignedIn()
+        && isOwnerRole(resource.data)
+        && baseSessionShapeValid(request.resource.data)
+        && participantListValid(request.resource.data);
     }
 
     function canWriteMessages(sessionData) {
-      return request.auth.uid == sessionData.ownerId ||
-        sessionData.participantRoles[request.auth.uid] == "OWNER" ||
-        (
-          sessionData.participantRoles[request.auth.uid] == "EDITOR" &&
-          sessionData.editorCanSendMessages != false
+      return isParticipant(sessionData)
+        && (
+          isOwnerRole(sessionData)
+          || (isEditor(sessionData) && sessionData.editorCanSendMessages != false)
         );
     }
 
     function canWriteAiMessages(sessionData) {
-      return sessionData.aiEnabled != false && (
-        request.auth.uid == sessionData.ownerId ||
-        sessionData.participantRoles[request.auth.uid] == "OWNER" ||
-        (
-          sessionData.participantRoles[request.auth.uid] == "EDITOR" &&
-          sessionData.editorCanUseAi != false
-        )
-      );
-    }
-
-    function canWriteWorkspace(sessionData) {
-      return request.auth.uid == sessionData.ownerId ||
-        sessionData.participantRoles[request.auth.uid] == "OWNER" ||
-        (
-          sessionData.participantRoles[request.auth.uid] == "EDITOR" &&
-          sessionData.editorCanEditWorkspace != false
+      return isParticipant(sessionData)
+        && sessionData.aiEnabled != false
+        && (
+          isOwnerRole(sessionData)
+          || (isEditor(sessionData) && sessionData.editorCanUseAi != false)
         );
     }
 
-    // User profile documents (used by Auth/Profile feature)
+    function canWriteWorkspace(sessionData) {
+      return isParticipant(sessionData)
+        && (
+          isOwnerRole(sessionData)
+          || (isEditor(sessionData) && sessionData.editorCanEditWorkspace != false)
+        );
+    }
+
     match /users/{uid} {
       allow read, write: if isOwner(uid);
 
-      // Per-user persona identity profiles (character + autonomy)
       match /persona_profiles/{personaName} {
         allow read, write: if isOwner(uid);
       }
 
-      // Per-user prompt overrides / custom persona prompts
       match /persona_prompts/{personaName} {
         allow read, write: if isOwner(uid);
       }
 
-      // Per-user training examples for fine-tuned persona behavior
       match /persona_training_examples/{exampleId} {
         allow read, write: if isOwner(uid);
       }
     }
 
-    // Per-user memory and RAG docs (for future feature expansions)
     match /user_memory/{uid}/entries/{entryId} {
       allow read, write: if isOwner(uid);
     }
@@ -72,80 +145,71 @@ service cloud.firestore {
       allow read, write: if isOwner(uid);
     }
 
-    // Real-time collaboration sessions
     match /collab_sessions/{sessionId} {
-      allow create: if isSignedIn() &&
-        request.resource.data.ownerId == request.auth.uid &&
-        isParticipantListValid() &&
-        request.resource.data.participants.hasAny([request.auth.uid]) &&
-        request.resource.data.participantRoles[request.auth.uid] == "OWNER";
-      // Session-Metadaten (ID, Titel, Invite-Code) sind für eingeloggte Nutzer lesbar,
-      // damit ein Join per Session-ID/Invite-Link technisch möglich ist.
-      // Nachrichten/Presence bleiben weiterhin strikt auf Teilnehmer begrenzt.
-      allow read: if isSignedIn();
+      allow create: if canCreateSession();
 
-      // Update-Fälle:
-      // 1) Owner kann Session verwalten (Titel, ownerId-Transfer, Teilnehmer)
-      // 2) Join-Self: bisher nicht teilnehmender User fügt sich selbst hinzu
-      // 3) Leave-Self: teilnehmender User entfernt nur sich selbst
+      // Wichtig: Nicht mehr für alle eingeloggten Nutzer lesbar.
+      // Teilnehmer können lesen. Join per Invite sollte idealerweise über eine Function erfolgen.
+      allow read: if isParticipant(resource.data);
+
       allow update: if isSignedIn() && (
-        request.auth.uid == resource.data.ownerId ||
-        (
-          isParticipantListValid() &&
-          !(request.auth.uid in resource.data.participants) &&
-          request.resource.data.participants.hasAny([request.auth.uid]) &&
-          request.resource.data.participants.size() <= resource.data.participants.size() + 1 &&
-          request.resource.data.ownerId == resource.data.ownerId
-        ) ||
-        (
-          isParticipantListValid() &&
-          request.auth.uid in resource.data.participants &&
-          !request.resource.data.participants.hasAny([request.auth.uid]) &&
-          request.resource.data.participants.size() == resource.data.participants.size() - 1 &&
-          request.resource.data.ownerId == resource.data.ownerId
-        )
+        canManageSession()
+        || canJoinSelf()
+        || canLeaveSelf()
       );
-      allow delete: if isSignedIn() &&
-        request.auth.uid == resource.data.ownerId;
+
+      allow delete: if isSessionOwner(resource.data);
 
       match /messages/{messageId} {
-        allow read: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
-        allow create: if isSignedIn() &&
-          request.resource.data.authorId == request.auth.uid &&
-          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants &&
-          (
+        function sessionData() {
+          return get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data;
+        }
+
+        allow read: if isParticipant(sessionData());
+
+        allow create: if isSignedIn()
+          && request.resource.data.authorId == request.auth.uid
+          && isParticipant(sessionData())
+          && (
             (
-              request.resource.data.isAi == true &&
-              canWriteAiMessages(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data)
-            ) ||
-            (
-              request.resource.data.isAi != true &&
-              canWriteMessages(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data)
+              request.resource.data.isAi == true
+              && canWriteAiMessages(sessionData())
+            )
+            || (
+              request.resource.data.isAi != true
+              && canWriteMessages(sessionData())
             )
           );
+
         allow update, delete: if false;
       }
 
       match /presence/{uid} {
-        allow read: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
-        allow create, update, delete: if isSignedIn() &&
-          request.auth.uid == uid &&
-          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
+        function sessionData() {
+          return get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data;
+        }
+
+        allow read: if isParticipant(sessionData());
+
+        allow create, update, delete: if isSignedIn()
+          && request.auth.uid == uid
+          && isParticipant(sessionData());
       }
 
       match /workspace/{docId} {
-        allow read: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants;
-        allow create, update: if isSignedIn() &&
-          request.auth.uid in get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data.participants &&
-          canWriteWorkspace(get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data);
+        function sessionData() {
+          return get(/databases/$(database)/documents/collab_sessions/$(sessionId)).data;
+        }
+
+        allow read: if isParticipant(sessionData());
+
+        allow create, update: if isParticipant(sessionData())
+          && canWriteWorkspace(sessionData());
+
         allow delete: if false;
       }
     }
 
-    // Deny all unspecified access by default.
     match /{document=**} {
       allow read, write: if false;
     }

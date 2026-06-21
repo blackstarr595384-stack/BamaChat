@@ -4,10 +4,15 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,6 +22,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -24,6 +30,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,6 +80,113 @@ fun BamaChatBottomNav(
         bottomEnd = bottomRadius
     )
 
+    if (attachedToComposer) {
+        Surface(
+            modifier = modifier
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .shadow(
+                    elevation = (10f * shadowIntensityScale).coerceIn(2f, 18f).dp,
+                    shape = RoundedCornerShape(20.dp),
+                    clip = false
+                ),
+            shape = RoundedCornerShape(20.dp),
+            color = navContainer.copy(alpha = 0.94f),
+            border = BorderStroke(1.dp, navBorder.copy(alpha = 0.55f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                navItems.forEach { item ->
+                    val isSelected = currentRoute == item.route
+                    val scale by animateFloatAsState(
+                        targetValue = if (isSelected) 1.03f else 1f,
+                        animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+                        label = "compactNavScale"
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics {
+                                // P1-3 Design-Fix: kompakte BottomNav-Items sind explizite Buttons.
+                                role = Role.Button
+                                contentDescription = item.label
+                            }
+                            .clickable { onNavigate(item.route) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .graphicsLayer(
+                                    scaleX = scale,
+                                    scaleY = scale
+                                )
+                                // P1-2 Design-Fix: jeder Navigationsbereich bietet mindestens 48dp Touch-Höhe.
+                                .size(
+                                    width = if (isSelected) 56.dp else 48.dp,
+                                    height = 48.dp
+                                )
+                                .shadow(
+                                    elevation = if (isSelected) 5.dp else 0.dp,
+                                    shape = RoundedCornerShape(18.dp),
+                                    spotColor = if (isSelected) navSelected.copy(alpha = 0.28f) else Color.Transparent
+                                )
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    if (isSelected) {
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.2f),
+                                                navIndicator.copy(alpha = 0.85f),
+                                                navIndicator.copy(alpha = 0.55f)
+                                            )
+                                        )
+                                    } else {
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.08f),
+                                                navIndicator.copy(alpha = 0.18f)
+                                            )
+                                        )
+                                    }
+                                )
+                                .border(
+                                    BorderStroke(
+                                        1.dp,
+                                        if (isSelected) navSelected.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f)
+                                    ),
+                                    RoundedCornerShape(18.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = item.icon,
+                                contentDescription = item.label,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (isSelected) navSelected else navUnselected
+                            )
+                        }
+                        Text(
+                            text = item.label,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
+                            color = if (isSelected) navSelected else navUnselected
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
+
     NavigationBar(
         windowInsets = NavigationBarDefaults.windowInsets,
         modifier = modifier
@@ -111,7 +228,7 @@ fun BamaChatBottomNav(
                                 scaleX = if (isSelected) scale else 1f,
                                 scaleY = if (isSelected) scale else 1f
                             )
-                            .size(38.dp)
+                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                             .shadow(
                                 elevation = if (isSelected) 6.dp else 1.dp,
                                 shape = CircleShape,
@@ -131,7 +248,7 @@ fun BamaChatBottomNav(
                     ) {
                         Icon(
                             imageVector = item.icon,
-                            contentDescription = item.label,
+                            contentDescription = null,
                             modifier = Modifier.size(22.dp),
                             tint = if (isSelected) navSelected else navUnselected
                         )

@@ -17,11 +17,15 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
+import java.net.HttpURLConnection
+import java.net.URL
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
@@ -29,6 +33,8 @@ class AuthViewModel @Inject constructor(
 ) : AndroidViewModel(application) {
     companion object {
         private const val KEY_GUEST_MODE = "guest_mode_enabled"
+        private const val ACCOUNT_DELETE_ENDPOINT =
+            "https://europe-west1-bamachat-d07fb.cloudfunctions.net/deleteAccount"
     }
 
     private val prefs = application.getSharedPreferences("settings", Application.MODE_PRIVATE)
@@ -375,6 +381,47 @@ class AuthViewModel @Inject constructor(
         refreshAuthState()
     }
 
+    fun deleteAccount(onDeleted: () -> Unit = {}) {
+        val firebaseAuth = auth
+        val currentUser = firebaseAuth?.currentUser
+        if (firebaseAuth == null || currentUser == null) {
+            _errorMessage.value = "Konto-Löschung aktuell nicht verfügbar."
+            return
+        }
+
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _statusMessage.value = null
+            val startedAt = System.currentTimeMillis()
+            try {
+                val idToken = currentUser.getIdToken(true).await().token?.trim().orEmpty()
+                if (idToken.isBlank()) {
+                    throw IllegalStateException("Aktuelle Sitzung konnte nicht bestätigt werden.")
+                }
+
+                deleteAccountRemotely(idToken)
+
+                AppTelemetry.logEvent(
+                    "account_delete_success",
+                    mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString())
+                )
+
+                signOut()
+                dataSanitizer.clearAllAppData(clearApiKeys = true)
+                AppTelemetry.setCollectionEnabled(false)
+                _statusMessage.value = "Konto gelöscht."
+                onDeleted()
+            } catch (e: Exception) {
+                AppTelemetry.logError("auth_delete_account", e)
+                _errorMessage.value = e.message ?: "Konto konnte nicht gelöscht werden."
+            } finally {
+                _isLoading.value = false
+                refreshAuthState()
+            }
+        }
+    }
+
     fun clearError() {
         _errorMessage.value = null
     }
@@ -428,6 +475,38 @@ class AuthViewModel @Inject constructor(
 
     private fun refreshAuthState() {
         _isAuthenticated.value = _firebaseUser.value != null || _isGuestMode.value
+    }
+
+    private suspend fun deleteAccountRemotely(idToken: String) {
+        withContext(Dispatchers.IO) {
+            val connection = (URL(ACCOUNT_DELETE_ENDPOINT).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 15_000
+                readTimeout = 60_000
+                doOutput = true
+                setRequestProperty("Authorization", "Bearer $idToken")
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            }
+
+            try {
+                connection.outputStream.use { output ->
+                    output.write("{}".toByteArray(Charsets.UTF_8))
+                }
+
+                val responseCode = connection.responseCode
+                val responseBody = runCatching {
+                    val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+                    stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                }.getOrDefault("")
+
+                if (responseCode !in 200..299) {
+                    val details = responseBody.takeIf { it.isNotBlank() } ?: "HTTP $responseCode"
+                    throw IllegalStateException("Konto-Löschung fehlgeschlagen: $details")
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
     }
 
     override fun onCleared() {

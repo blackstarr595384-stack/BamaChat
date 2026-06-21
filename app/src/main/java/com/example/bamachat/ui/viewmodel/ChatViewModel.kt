@@ -69,6 +69,8 @@ class ChatViewModel @Inject constructor(
         private const val DEV_HISTORY_LIMIT = 40
         private const val KEY_EXTENSION_STATES_JSON = "workspace_extension_states_json"
         private const val KEY_EXTENSION_QUICK_ACTION = "extension_quick_action"
+        private const val KEY_IMAGE_GENERATION_MODE = "image_generation_mode"
+        private const val IMAGE_GENERATION_MODE_DISABLED = "Deaktiviert"
         // Cache system prompts for 5 minutes to reduce API load
         private const val SYSTEM_PROMPT_CACHE_TTL_MS = 5 * 60 * 1000L
 
@@ -186,6 +188,9 @@ class ChatViewModel @Inject constructor(
     val lastAppliedExtensionNames: StateFlow<List<String>> = _lastAppliedExtensionNames
 
     private var messagesJob: Job? = null
+    // P1-1: handle for the currently-running generation/streaming coroutine,
+    // so the UI can request cancellation via cancelStream().
+    private var activeGenerationJob: Job? = null
     private var lastAcceptedTextSend: String? = null
     private var lastAcceptedConversationId: String? = null
     private var lastAcceptedTextSendAtMs: Long = 0L
@@ -297,6 +302,22 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch { repo.clearMessages(convId) }
     }
 
+    /**
+     * P1-1: Cancel the currently running generation/streaming coroutine.
+     * Safe to call when nothing is running (no-op). The launched job's
+     * `finally` block resets `_isLoading` / `_isStreaming`; we also reset them
+     * defensively here in case cancellation happens before any finally runs.
+     */
+    fun cancelStream() {
+        val job = activeGenerationJob
+        if (job != null && job.isActive) {
+            job.cancel()
+        }
+        activeGenerationJob = null
+        _isStreaming.value = false
+        _isLoading.value = false
+    }
+
     // ===== Message Sending =====
     fun sendMessage(text: String, quickAction: ExtensionQuickAction = _selectedExtensionQuickAction.value): Boolean {
         val trimmedText = text.trim()
@@ -338,7 +359,7 @@ class ChatViewModel @Inject constructor(
 
         val userMessage = ChatMessage(id = UUID.randomUUID().toString(), text = trimmedText, isUser = true, timestamp = System.currentTimeMillis())
         _isLoading.value = true
-        viewModelScope.launch {
+        activeGenerationJob = viewModelScope.launch {
             repo.saveMessage(convId, userMessage)
 
             val current = _conversations.value.firstOrNull { it.id == convId }
@@ -393,7 +414,7 @@ class ChatViewModel @Inject constructor(
             isUser = true, timestamp = System.currentTimeMillis(), imageUrl = imageUri.toString())
 
         _isLoading.value = true
-        viewModelScope.launch {
+        activeGenerationJob = viewModelScope.launch {
             repo.saveMessage(convId, userMessage)
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
@@ -417,10 +438,16 @@ class ChatViewModel @Inject constructor(
     }
 
     fun generateImage(prompt: String, skipUserMessage: Boolean = false) {
-        if (prompt.isBlank()) return
-        if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_GENERATION)) return
+        if (prompt.isBlank()) {
+            _errorMessage.value = "Beschreibe zuerst, welches Bild du erstellen möchtest."
+            return
+        }
+        if (prefs.getString(KEY_IMAGE_GENERATION_MODE, "Externer Bilddienst") == IMAGE_GENERATION_MODE_DISABLED) {
+            _errorMessage.value = "Bildgenerierung ist in den Einstellungen deaktiviert. Aktiviere unter KI & Modelle den externen Bilddienst."
+            return
+        }
 
-        viewModelScope.launch {
+        activeGenerationJob = viewModelScope.launch {
             var convId = _currentConversationId.value
             if (convId == null) {
                 val personaName = personaViewModel.selectedPersona.value.name
@@ -440,7 +467,13 @@ class ChatViewModel @Inject constructor(
             _isLoading.value = true
             try {
                 val genReq = mediaService.buildImageGenerationRequest(prompt)
-                val imageUrl = resolveWorkingImageUrl(genReq.candidateUrls) ?: genReq.candidateUrls.first()
+                val imageUrl = resolveWorkingImageUrl(genReq.candidateUrls)
+                if (imageUrl == null) {
+                    // P0-A fix: Keine kaputte Bildkarte speichern, wenn der externe Bilddienst 402/403/Fehler liefert.
+                    _errorMessage.value = "Bildgenerierung ist aktuell nicht erreichbar oder erfordert Auth/Zahlung beim Bilddienst. Bitte später erneut versuchen oder Bild-KI in den Einstellungen konfigurieren."
+                    return@launch
+                }
+                if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_GENERATION)) return@launch
                 repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
                     text = genReq.displayPrompt, isUser = false, timestamp = System.currentTimeMillis(),
                     imageUrl = imageUrl))
@@ -965,6 +998,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
 
     override fun onCleared() {
         messagesJob?.cancel()
+        activeGenerationJob?.cancel()
         prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
         allMessagesBuffer.clear()
         _messageFeedback.value = emptyMap()

@@ -41,7 +41,9 @@
 - Provider-Integration lebt in `data/ApiClient.kt` (OpenRouter/OpenCode/Groq/Cerebras/Together/Gemini/Ollama).
 - OpenCode nutzt standardmäßig die Zen-API (`https://opencode.ai/zen/v1/`, `/messages`, `x-api-key`); Legacy-Endpoint `https://api.opencode.ai/v1/` gilt als veraltet.
 - Billing-Produkt-IDs müssen zwischen `MonetizationConfig.kt` und `PlayBillingManager.kt` konsistent bleiben.
+- Cloud-Voice läuft zentral über `util/CloudVoiceManager.kt`; die Android-Settings halten den Provider kompakt (`ElevenLabs` oder `Piper`) und zeigen nur provider-spezifische Felder.
 - Live-Web-Recherche ist verteilt über `SettingsViewModel` (`live_web_*`, inkl. `live_web_prefer_github`), `ApiManager.runLiveWebResearch`, `ChatViewModel.resolveLiveWebContext` und `functions/index.js`.
+- Chat-Bildgenerierung ist getrennt von Bildanalyse: Modus `settings.image_generation_mode` (`Externer Bilddienst`/`Deaktiviert`) in `SettingsViewModel` + `SettingsDialog`, Ausführung in `ChatViewModel.generateImage`; bei leerem Prompt/deaktiviertem Modus/Providerfehler keine kaputte Bildkarte speichern und Quota erst nach erfolgreicher Bild-URL-Auflösung verbrauchen.
 - Optionaler lokaler Chat-Proxy fuer API-Key-Abschirmung liegt in `server.js` (Root, Endpoint `/api/chat`).
 - Vercel-Proxy-Variante fuer `/api/chat` liegt in `api/chat.js` (CORS/Origin-Checks + optional `x-proxy-token`).
 - Workspace-/Produktivitäts-Features liegen primär in `SettingsViewModel` (`project_workspaces_json`, `active_workspace_id`, `workspace_chat_filter_enabled`), `ChatViewModel` (Workspace-Bindings + Chatfilter) sowie `ui/screen/MiniAppsScreen.kt` (Mini-Apps V2 Discover + Personalisierung + `PromptLabApp`, `VoiceNotesAiApp`, `SmartWorkspaceApp`, `AutomationBoard`, `KnowledgeVault`).

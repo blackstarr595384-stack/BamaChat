@@ -8,9 +8,11 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -36,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -158,24 +164,80 @@ fun designTokensFor(preset: ChatDesignPreset): ChatDesignTokens = when (preset) 
 
 @Composable
 fun EmptyChatState(themeColor: Color, persona: ChatViewModel.Persona) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 80.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+    val starterPrompts = listOf("Briefing starten", "Plan bauen", "To-dos ordnen")
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 56.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = Color(0xFF111B2C).copy(alpha = 0.9f),
+        border = BorderStroke(1.dp, themeColor.copy(alpha = 0.24f))
     ) {
-        Box(
-            modifier = Modifier
-                .size(88.dp)
-                .background(Brush.radialGradient(listOf(themeColor, themeColor.copy(alpha = 0.3f))), CircleShape)
-                .border(1.dp, themeColor.copy(alpha = 0.24f), CircleShape)
-                .clip(CircleShape),
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Text(persona.emoji, fontSize = 44.sp)
+            Box(
+                modifier = Modifier
+                    .size(84.dp)
+                    .background(Brush.radialGradient(listOf(themeColor, themeColor.copy(alpha = 0.3f))), CircleShape)
+                    .border(1.dp, themeColor.copy(alpha = 0.24f), CircleShape)
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(persona.emoji, fontSize = 42.sp)
+            }
+            Text(
+                "Hallo! Ich bin dein ${persona.displayName}",
+                color = Color.White,
+                fontSize = 18.sp,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                "Schreibe eine Aufgabe oder eine Idee. Ich mache daraus einen klaren nächsten Schritt.",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.92f)
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "Zum Start",
+                    color = Color.White.copy(alpha = 0.56f),
+                    fontSize = 11.sp
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    starterPrompts.forEach { prompt ->
+                        EmptyChatSuggestionChip(prompt, themeColor)
+                    }
+                }
+            }
         }
-        Spacer(Modifier.height(20.dp))
-        Text("Hallo! Ich bin dein ${persona.displayName}", color = Color.White, fontSize = 18.sp)
-        Spacer(Modifier.height(8.dp))
-        Text("Worüber möchtest du reden?", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun EmptyChatSuggestionChip(label: String, themeColor: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = Color.White.copy(alpha = 0.06f),
+        border = BorderStroke(1.dp, themeColor.copy(alpha = 0.2f))
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
     }
 }
 

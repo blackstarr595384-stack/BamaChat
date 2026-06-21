@@ -1,176 +1,75 @@
 # BamaChat Play Store Submission Checklist
 
-## ✅ Code & Features (Implemented)
-- [x] Firebase Crashlytics Integration
-- [x] Firebase Analytics
-- [x] Privacy Policy Screen
-- [x] Terms of Service Screen
-- [x] Offline-Mode Support (WorkManager)
-- [x] Backup/Export to Cloud
-- [x] API-Key Setup Onboarding
-- [x] Light Theme Support
-- [x] Google Play In-App Review
-- [x] Better Error Messages
-- [x] Message Search
-- [x] Retry Logic
+## Source of truth
 
-## 📋 Store Metadata (TODO - Do this in Play Console)
+- Store-Texte: `APPSTORE_DESCRIPTION.md`
+- Screenshot-Layouts: `app/src/main/java/com/example/bamachat/ui/screen/PlayStoreScreenshots.kt`
+- Legal-Links: `app/src/main/java/com/example/bamachat/util/LegalPolicy.kt`
+- Monetarisierung: `app/src/main/java/com/example/bamachat/util/MonetizationConfig.kt`
 
-### App Title
-**BamaChat - AI Assistant mit Custom Personas**
+## Store-Metadaten
 
-### Short Description
-Personalisierbare Multi-Persona AI Chat App mit OpenRouter, Groq & mehr. Extensions, Training & Offline-Mode.
+- [ ] Titel: `BamaChat - KI-Workspace mit Agenten`
+- [ ] Kurzbeschreibung: `Chat, Agenten, MCP-Tools und Teamarbeit mit deinen KI-Modellen in einer App.`
+- [ ] Vollbeschreibung direkt aus `APPSTORE_DESCRIPTION.md` übernehmen
+- [ ] Kategorie: `Produktivität`
+- [ ] Support-E-Mail: `support@bamachat.app`
+- [ ] Keine veralteten Preise, Quoten oder Datenschutz-Claims eintragen
 
-### Full Description
-```
-🤖 BamaChat - Dein persönlicher KI-Assistent
+## Screenshots und Assets
 
-Nutze mehrere KI-Modelle mit verschiedenen Personas:
-✨ Developer, Teacher, Chef, Fitness Coach, Therapist & mehr
-🔧 Custom Training: Trainiere Personas mit deinen eigenen Examples
-🔌 Extensions: MCP-Tools, Workflows, Web Search
-🌍 Multi-Model: OpenRouter, Groq, Cerebras, Together, Ollama
-💾 Offline-Mode: Schreib Messages offline, auto-sync online
-🔒 Sicher: API-Keys verschlüsselt, Biometric Auth
-📊 Analytics: Sehe deine Chat-Nutzung & Statistiken
+- [ ] Screenshot 1: KI-Workspace statt nur Chat
+- [ ] Screenshot 2: Mehrere Modelle, Agenten und Kollaboration
+- [ ] Screenshot 3: Workspaces, MCP, Voice, Bilder und Dateien
+- [ ] Screenshot 4: Gastmodus und schneller Einstieg
+- [ ] App-Icon in Play-Store-Größe exportiert
+- [ ] Feature Graphic erstellt oder bewusst ausgelassen
 
-KOSTENLOS:
-- 10 Messages/Tag
-- Standard Models
-- 1 Persona
+## Compliance und Legal
 
-PRO ($3.99/Mo):
-- Unlimited Messages
-- Alle Models
-- Alle Personas + Training
-- Extensions & Tools
-- Cloud Backup
-- No Ads
+- [ ] Datenschutz: `https://bamachat-d07fb.web.app/privacy-policy/`
+- [ ] Nutzungsbedingungen: `https://bamachat-d07fb.web.app/terms/`
+- [ ] Konto-Löschung: `https://bamachat-d07fb.web.app/delete-account/`
+- [ ] Support-Seite: `https://bamachat-d07fb.web.app/support/`
+- [ ] Kontolöschung im App-Flow getestet
+- [ ] Zielgruppe und Content-Rating in der Play Console anhand der echten Funktionen ausgefüllt
 
-Starten: API-Key von OpenRouter (kostenlos auf openrouter.ai)
-```
+## Berechtigungen sauber erklären
 
-### Category
-Produktivität
+- [ ] `INTERNET`: KI-Provider, Cloud-Sync, Hosting-Inhalte
+- [ ] `RECORD_AUDIO`: Spracheingabe und Voice-Features
+- [ ] `CAMERA`: Bildaufnahme für multimodale Eingaben
+- [ ] `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION`: optionale lokale Kontext- und Smart-Features
+- [ ] `USE_BIOMETRIC`: optionaler Geräteschutz
+- [ ] `POST_NOTIFICATIONS`: Status- und Antworthinweise
 
-### Content Rating
-Niedrig - App collected data: Crashes & Analytics only
+## Produkt- und Pricing-Konsistenz
 
-### Screenshots (4 Required)
-1. Chat Screen mit Personas
-2. Settings mit API-Key Setup
-3. Message Search Feature
-4. Backup/Export Screen
+- [ ] In-App-Käufe und Abos in der Play Console stimmen mit der App überein
+- [ ] Produkt-IDs bleiben konsistent zu `MonetizationConfig.kt`
+- [ ] Store-Texte versprechen nicht mehr als der aktuelle Tarif- oder Quotenstand hergibt
 
-### Icon (512x512 PNG)
-- Farbe: BamaChat Blue (#4F8CFF)
-- Text: "B" oder KI-Symbol
+## Technische QA vor Upload
 
-### Feature Graphic (1024x500 PNG)
-"BamaChat - Multi-Persona AI Assistant"
+- [ ] `.\gradlew.bat :app:assembleDebug`
+- [ ] `.\gradlew.bat :app:stabilityCheck`
+- [ ] `.\gradlew.bat :app:bundleRelease`
+- [ ] Onboarding führt über Consent, dann Welcome und Home-Hub
+- [ ] Legal-, Support- und Löschlinks öffnen korrekt
+- [ ] Chat-Komponist und Navigation sind auf echten Geräten geprüft
+- [ ] Gastmodus, Login, Profil und Rücknavigation funktionieren
 
-## 🔒 Compliance & Legal
+## Play-Console-Ablauf
 
-### Privacy Policy URL
-Muss in Settings verlinkt sein ✅
+- [ ] App-Eintrag erstellt oder vorhandenen Eintrag aktualisiert
+- [ ] Testspur angelegt
+- [ ] `app-release.aab` hochgeladen
+- [ ] Releasenotes eingetragen
+- [ ] Tester oder Testgruppe hinzugefügt
+- [ ] Store-Eintrag vollständig ohne Warnungen
 
-### Terms of Service
-Muss in Settings verlinkt sein ✅
+## Nach dem Upload
 
-### Support Email
-developer@bamachat.app (ändern!)
-
-### Developer Contact
-Dein Name & E-Mail
-
-### COPPA Compliance
-- App ist NICHT für Kinder unter 13
-- Setze "Zielgruppe: Kinder" auf NEIN
-
-### Permission Justifications
-- INTERNET: API Calls zu KI-Providern
-- RECORD_AUDIO: Voice Input für Chat
-- CAMERA: Image Upload & Analysis
-- LOCATION: Optional für Context
-- BIOMETRIC: Optional Biometric Lock
-
-## 🧪 Testing Checklist
-
-### Functional Testing
-- [ ] App crasht nicht bei Offline
-- [ ] Messages werden synced wenn Online
-- [ ] API-Key Setup speichert Keys verschlüsselt
-- [ ] Light & Dark Theme funktionieren
-- [ ] Backup/Export funktioniert
-- [ ] In-App Review zeigt sich nach 50 Messages
-
-### Performance Testing
-- [ ] App startet < 3 Sekunden
-- [ ] Messages laden < 1 Sekunde
-- [ ] Keine Memory Leaks (überwache via Profiler)
-- [ ] Battery: < 5% pro Stunde idle
-
-### Security Testing
-- [ ] API-Keys sind verschlüsselt
-- [ ] Keine API-Keys in Logs
-- [ ] Crashes sind anonym
-- [ ] HTTPS only für API Calls
-
-## 📱 Play Console Setup
-
-1. **Create App**
-   - App name: BamaChat
-   - Default language: German
-
-2. **App Access**
-   - Set Testing Accounts (dein Google Account)
-
-3. **Pricing & Distribution**
-   - Countries: All (außer China)
-   - Free + In-App Purchases
-   - Content Rating: Niedrig
-
-4. **Beta Testing**
-   - Create Google Group: bamachat-testers@googlegroups.com
-   - Invite 10-20 Beta Testers
-   - Run for 2 weeks minimum
-
-5. **Release Strategy**
-   - Beta → Production
-   - Staged Rollout: 10% → 25% → 50% → 100%
-
-## 🚀 Release Timeline
-
-**Week 1-2:** Beta Testing
-- Fix crashes & UX issues
-- Collect feedback
-
-**Week 3:** Google Play Review
-- Submit to Play Console
-- Review takes 1-3 days typically
-
-**Week 4:** Launch
-- 10% rollout
-- Monitor crashes
-- Ramp up to 100%
-
-## 📊 Post-Launch Monitoring
-
-Monitor via Firebase:
-- Crashes (should be < 0.1%)
-- Retention (target: > 30% D7)
-- Analytics: User flow, chat metrics
-- Reviews: Respond to feedback < 24h
-
-## 💡 Marketing Ideas
-
-- Twitter: "BamaChat is now on Play Store!"
-- Reddit: r/androidapps, r/productivity
-- ProductHunt: Launch with beta users
-- Friends: Share APK link pre-launch
-
----
-
-**Status:** Ready for Beta Testing ✅
-**Next Step:** Set up Google Play Console account
+- [ ] Interne oder geschlossene Tests auswerten
+- [ ] Crashs und kritische UX-Probleme priorisiert abarbeiten
+- [ ] Erst danach gestaffelten Produktions-Rollout starten

@@ -1,9 +1,10 @@
 package com.example.bamachat.ui.screen
 
 import android.content.Context
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -29,8 +31,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -52,11 +52,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -116,18 +119,17 @@ fun RealtimeCollabScreen(
     val configuration = LocalConfiguration.current
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    val focusManager = LocalFocusManager.current
     val compactLayout = configuration.screenHeightDp <= 760 || configuration.screenWidthDp <= 392
     val listHorizontalPadding = if (compactLayout) 10.dp else 14.dp
     val listVerticalPadding = if (compactLayout) 10.dp else 14.dp
     val listItemSpacing = if (compactLayout) 8.dp else 10.dp
-    val workspaceCardHeight = if (compactLayout) 360.dp else 420.dp
-    val workspaceEditorHeight = if (compactLayout) 96.dp else 110.dp
     val footerCornerRadius = if (compactLayout) 18.dp else 20.dp
 
     var sessionTitle by remember { mutableStateOf("Meine Session") }
     var joinCode by remember { mutableStateOf("") }
     var inviteCodeInput by remember { mutableStateOf("") }
-    var messageInput by remember { mutableStateOf(prefs.getString(KEY_MESSAGE_DRAFT, "").orEmpty()) }
+    var messageInput by rememberSaveable { mutableStateOf(prefs.getString(KEY_MESSAGE_DRAFT, "").orEmpty()) }
     var workspaceDraft by remember { mutableStateOf("") }
     var showSetup by remember { mutableStateOf(true) }
     var showDebug by remember { mutableStateOf(false) }
@@ -351,9 +353,18 @@ fun RealtimeCollabScreen(
                                     onValueChange = { sessionTitle = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     label = { Text("Session-Name") },
-                                    singleLine = true
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = {
+                                        focusManager.clearFocus()
+                                        collabViewModel.createSession(sessionTitle)
+                                    })
                                 )
-                                Button(onClick = { collabViewModel.createSession(sessionTitle) }, enabled = !isLoading) {
+                                Button(
+                                    onClick = { collabViewModel.createSession(sessionTitle) },
+                                    enabled = !isLoading,
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                ) {
                                     Text("Neue Session erstellen")
                                 }
                                 OutlinedTextField(
@@ -361,16 +372,29 @@ fun RealtimeCollabScreen(
                                     onValueChange = { joinCode = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     label = { Text("Session-ID oder Invite-Link") },
-                                    singleLine = true
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                                    keyboardActions = KeyboardActions(onNext = {
+                                        focusManager.moveFocus(FocusDirection.Down)
+                                    })
                                 )
                                 OutlinedTextField(
                                     value = inviteCodeInput,
                                     onValueChange = { inviteCodeInput = it.uppercase() },
                                     modifier = Modifier.fillMaxWidth(),
                                     label = { Text("Invite-Code (optional)") },
-                                    singleLine = true
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = {
+                                        focusManager.clearFocus()
+                                        collabViewModel.joinSession(joinCode, inviteCodeInput)
+                                    })
                                 )
-                                Button(onClick = { collabViewModel.joinSession(joinCode, inviteCodeInput) }, enabled = !isLoading) {
+                                Button(
+                                    onClick = { collabViewModel.joinSession(joinCode, inviteCodeInput) },
+                                    enabled = !isLoading,
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                ) {
                                     Text("Session beitreten")
                                 }
                             }
@@ -420,56 +444,85 @@ fun RealtimeCollabScreen(
                                         )
                                         if (isOwner) {
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 48.dp)
+                                                    .toggleable(
+                                                        value = it.aiEnabled,
+                                                        role = Role.Switch,
+                                                        onValueChange = { checked ->
+                                                            collabViewModel.updateSessionPolicy(aiEnabled = checked)
+                                                        }
+                                                    ),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text("KI im Workspace aktiv", color = Color.White)
                                                 Switch(
                                                     checked = it.aiEnabled,
-                                                    onCheckedChange = { checked ->
-                                                        collabViewModel.updateSessionPolicy(aiEnabled = checked)
-                                                    }
+                                                    onCheckedChange = null
                                                 )
                                             }
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 48.dp)
+                                                    .toggleable(
+                                                        value = it.editorCanUseAi,
+                                                        enabled = it.aiEnabled,
+                                                        role = Role.Switch,
+                                                        onValueChange = { checked ->
+                                                            collabViewModel.updateSessionPolicy(editorCanUseAi = checked)
+                                                        }
+                                                    ),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text("Editoren dürfen KI starten", color = Color.White)
                                                 Switch(
                                                     checked = it.editorCanUseAi,
-                                                    onCheckedChange = { checked ->
-                                                        collabViewModel.updateSessionPolicy(editorCanUseAi = checked)
-                                                    },
+                                                    onCheckedChange = null,
                                                     enabled = it.aiEnabled
                                                 )
                                             }
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 48.dp)
+                                                    .toggleable(
+                                                        value = it.editorCanSendMessages,
+                                                        role = Role.Switch,
+                                                        onValueChange = { checked ->
+                                                            collabViewModel.updateSessionPolicy(editorCanSendMessages = checked)
+                                                        }
+                                                    ),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text("Editoren dürfen Nachrichten senden", color = Color.White)
                                                 Switch(
                                                     checked = it.editorCanSendMessages,
-                                                    onCheckedChange = { checked ->
-                                                        collabViewModel.updateSessionPolicy(editorCanSendMessages = checked)
-                                                    }
+                                                    onCheckedChange = null
                                                 )
                                             }
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 48.dp)
+                                                    .toggleable(
+                                                        value = it.editorCanEditWorkspace,
+                                                        role = Role.Switch,
+                                                        onValueChange = { checked ->
+                                                            collabViewModel.updateSessionPolicy(editorCanEditWorkspace = checked)
+                                                        }
+                                                    ),
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text("Editoren dürfen Workspace bearbeiten", color = Color.White)
                                                 Switch(
                                                     checked = it.editorCanEditWorkspace,
-                                                    onCheckedChange = { checked ->
-                                                        collabViewModel.updateSessionPolicy(editorCanEditWorkspace = checked)
-                                                    }
+                                                    onCheckedChange = null
                                                 )
                                             }
                                         }
@@ -644,19 +697,19 @@ fun RealtimeCollabScreen(
                 }
 
                 item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(workspaceCardHeight),
-                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.08f))
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.08f),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth()
                                 .padding(if (compactLayout) 8.dp else 10.dp)
                         ) {
                             Text("Gemeinsamer Workspace", color = Color.White, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(6.dp))
+                            // P0-3 fix: editor grows with content instead of being clipped to a fixed height.
                             OutlinedTextField(
                                 value = workspaceDraft,
                                 onValueChange = {
@@ -673,7 +726,7 @@ fun RealtimeCollabScreen(
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(workspaceEditorHeight),
+                                    .heightIn(min = 140.dp, max = if (compactLayout) 220.dp else 280.dp),
                                 label = { Text("Live-Notiz (synchron auf allen Geräten)") },
                                 enabled = canEditWorkspace && session != null
                             )
@@ -684,27 +737,27 @@ fun RealtimeCollabScreen(
                             ) {
                                 Text(
                                     text = "Lokal: $localWorkspaceLines Zeilen • Remote: $remoteWorkspaceLines",
-                                    color = Color.White.copy(alpha = 0.72f),
-                                    style = MaterialTheme.typography.bodySmall
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
                                     text = "$workspaceCharCount/$WORKSPACE_SOFT_CHAR_LIMIT Zeichen",
-                                    color = if (workspaceOverSoftLimit) Color(0xFFFFC8C8) else Color.White.copy(alpha = 0.72f),
-                                    style = MaterialTheme.typography.bodySmall
+                                    color = if (workspaceOverSoftLimit) Color(0xFFFFC8C8) else Color.White.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                             if (workspaceOverSoftLimit) {
                                 Text(
-                                    text = "Hinweis: Sehr lange Notizen koennen die Sync-Geschwindigkeit reduzieren.",
+                                    text = "Hinweis: Sehr lange Notizen können die Sync-Geschwindigkeit reduzieren.",
                                     color = Color(0xFFFFD9A8),
-                                    style = MaterialTheme.typography.bodySmall
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                             if (workspaceState.updatedAt > 0L) {
                                 Text(
                                     "Zuletzt geändert von ${workspaceState.updatedBy.ifBlank { "Unbekannt" }} • Rev ${workspaceState.revision}",
-                                    color = Color.White.copy(alpha = 0.75f),
-                                    style = MaterialTheme.typography.bodySmall
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                             if (!remoteWorkspaceAheadMessage.isNullOrBlank()) {
@@ -822,68 +875,73 @@ fun RealtimeCollabScreen(
                                     }
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
-                            if (session != null) {
-                                Text("Presence:", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(if (compactLayout) 72.dp else 84.dp)
-                                ) {
-                                    items(presences, key = { it.userId }) { presence ->
-                                        val roleLabel = collabViewModel.roleLabelFor(presence.userId)
-                                        val typingHint = if (presence.typing && presence.userId != myUserId) {
-                                            " tippt: ${presence.draftPreview}"
-                                        } else {
-                                            ""
-                                        }
-                                        Text(
-                                            "${if (presence.active) "🟢" else "⚪"} ${presence.displayName.ifBlank { presence.userId.take(6) }} [$roleLabel]$typingHint",
-                                            color = Color.White
-                                        )
-                                    }
-                                }
-                            }
-                            LazyColumn(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(if (compactLayout) 6.dp else 8.dp)
-                            ) {
-                                items(messages, key = { it.id }) { msg ->
-                                    val mine = msg.authorId == myUserId
-                                    val status = if (mine) messageDeliveryStatus[msg.id] else null
-                                    Surface(
-                                        color = if (msg.isAi) Color(0xFF3D7DFF).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.18f),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                        }
+                    }
+                }
+
+                // P0-1/P0-2 fix: presence is now a flat item — no nested LazyColumn.
+                if (session != null && presences.isNotEmpty()) {
+                    item {
+                        Text("Presence:", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
+                    items(presences, key = { "presence-${it.userId}" }) { presence ->
+                        val roleLabel = collabViewModel.roleLabelFor(presence.userId)
+                        val typingHint = if (presence.typing && presence.userId != myUserId) {
+                            " tippt: ${presence.draftPreview}"
+                        } else {
+                            ""
+                        }
+                        Text(
+                            "${if (presence.active) "🟢" else "⚪"} ${presence.displayName.ifBlank { presence.userId.take(6) }} [$roleLabel]$typingHint",
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // P0-1/P0-2 fix: messages are now items of the outer LazyColumn — proper
+                // recycling, no nested vertical scrolling, no clipping.
+                if (messages.isEmpty() && session != null) {
+                    item {
+                        Text(
+                            "Noch keine Nachrichten — schreibe die erste oder lade jemanden ein.",
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                items(messages, key = { "msg-${it.id}" }) { msg ->
+                    val mine = msg.authorId == myUserId
+                    val status = if (mine) messageDeliveryStatus[msg.id] else null
+                    Surface(
+                        color = if (msg.isAi) Color(0xFF3D7DFF).copy(alpha = 0.25f) else Color.White.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "${if (msg.isAi) "🤖" else "👤"} ${msg.authorName}",
+                                color = Color.White,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(msg.text, color = Color.White)
+                            if (status != null) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = when (status) {
+                                        CollabViewModel.MessageDeliveryStatus.SENDING -> "Status: sendet ..."
+                                        CollabViewModel.MessageDeliveryStatus.SENT -> "Status: gesendet"
+                                        CollabViewModel.MessageDeliveryStatus.FAILED -> "Status: fehlgeschlagen"
+                                    },
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                if (status == CollabViewModel.MessageDeliveryStatus.FAILED) {
+                                    TextButton(
+                                        onClick = { collabViewModel.retryMessage(msg.id) },
+                                        modifier = Modifier.heightIn(min = 48.dp)
                                     ) {
-                                        Column(modifier = Modifier.padding(10.dp)) {
-                                            Text(
-                                                text = "${if (msg.isAi) "🤖" else "👤"} ${msg.authorName}",
-                                                color = Color.White,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(msg.text, color = Color.White)
-                                            if (status != null) {
-                                                Spacer(Modifier.height(4.dp))
-                                                Text(
-                                                    text = when (status) {
-                                                        CollabViewModel.MessageDeliveryStatus.SENDING -> "Status: sendet ..."
-                                                        CollabViewModel.MessageDeliveryStatus.SENT -> "Status: gesendet"
-                                                        CollabViewModel.MessageDeliveryStatus.FAILED -> "Status: fehlgeschlagen"
-                                                    },
-                                                    color = Color.White.copy(alpha = 0.8f),
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                                if (status == CollabViewModel.MessageDeliveryStatus.FAILED) {
-                                                    TextButton(onClick = { collabViewModel.retryMessage(msg.id) }) {
-                                                        Text("Erneut senden")
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        Text("Erneut senden")
                                     }
                                 }
                             }

@@ -1,21 +1,20 @@
 package com.example.bamachat.ui.screen
 
+import android.app.Activity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -31,9 +30,11 @@ import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
 import com.example.bamachat.ui.viewmodel.ExtensionManagerViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.util.LegalPolicy
 
 private object Routes {
     const val ONBOARDING = "onboarding"
+    const val LEGAL = "legal"
     const val WELCOME = "welcome"
     const val AUTH = "auth"
     const val HOME_HUB = "home_hub"
@@ -42,6 +43,7 @@ private object Routes {
     const val SETTINGS = "settings"
     const val SETTINGS_WITH_SECTION = "settings?section={section}"
     const val HELP = "help"
+    const val HERMES_CODING_ASSISTANT = "hermes_coding_assistant"
     const val REALTIME_COLLAB = "realtime_collab"
     const val MINI_APPS = "mini_apps"
     const val AGENT_HUB = "agent_hub"
@@ -80,6 +82,7 @@ fun BamaChatApp() {
     val designPreset by settingsViewModel.uiDesignPreset.collectAsState()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsState()
     val simpleModeEnabled by settingsViewModel.simpleModeEnabled.collectAsState()
+    val legalAcknowledgedVersion by settingsViewModel.legalAcknowledgedVersion.collectAsState()
     val connectChatBottomBars by settingsViewModel.connectChatBottomBars.collectAsState()
     val uiCornerRoundnessScale by settingsViewModel.uiCornerRoundnessScale.collectAsState()
     val uiShadowIntensityScale by settingsViewModel.uiShadowIntensityScale.collectAsState()
@@ -90,8 +93,51 @@ fun BamaChatApp() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val normalizedRoute = normalizeRoute(currentRoute)
-    val startDestination = remember {
-        if (onboardingCompleted) Routes.WELCOME else Routes.ONBOARDING
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val startDestination = remember(onboardingCompleted, legalAcknowledgedVersion) {
+        when {
+            !onboardingCompleted -> Routes.ONBOARDING
+            legalAcknowledgedVersion < LegalPolicy.CURRENT_ACK_VERSION -> Routes.LEGAL
+            else -> Routes.WELCOME
+        }
+    }
+
+    fun clearStartStackAndNavigate(route: String) {
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                inclusive = true
+            }
+            launchSingleTop = true
+        }
+    }
+
+    fun navigateHomeHub() {
+        if (!navController.popBackStack(Routes.HOME_HUB, false)) {
+            navController.navigate(Routes.HOME_HUB) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    fun navigateTopLevel(route: String) {
+        val normalizedTarget = normalizeRoute(route) ?: route
+        if (normalizedTarget == normalizedRoute && !route.contains("?")) return
+        if (normalizedTarget == Routes.HOME_HUB) {
+            navigateHomeHub()
+            return
+        }
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
+            launchSingleTop = true
+            restoreState = true
+        }
     }
 
     LaunchedEffect(isAuthenticated, normalizedRoute) {
@@ -108,14 +154,14 @@ fun BamaChatApp() {
         }
     }
 
-    val bottomNavRoutes = topLevelRoutes.toSet()
+    val bottomNavRoutes = topLevelRoutes.filterNot { it == Routes.CHAT }.toSet()
     val shouldRenderBottomNav = normalizedRoute in bottomNavRoutes
 
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
             startDestination = startDestination,
-            modifier = Modifier.fillMaxSize().imePadding().systemBarsPadding(),
+            modifier = Modifier.fillMaxSize().statusBarsPadding(),
             enterTransition = {
                 val from = normalizeRoute(initialState.destination.route)
                 val to = normalizeRoute(targetState.destination.route)
@@ -209,14 +255,33 @@ fun BamaChatApp() {
                 OnboardingScreen(
                     onComplete = {
                         settingsViewModel.completeOnboarding()
-                        navController.navigate(Routes.WELCOME) {
-                            popUpTo(Routes.ONBOARDING) { inclusive = true }
+                        val nextRoute = if (legalAcknowledgedVersion >= LegalPolicy.CURRENT_ACK_VERSION) {
+                            Routes.WELCOME
+                        } else {
+                            Routes.LEGAL
                         }
+                        clearStartStackAndNavigate(nextRoute)
                     },
                     onSkip = {
                         settingsViewModel.completeOnboarding()
-                        navController.navigate(Routes.WELCOME) {
-                            popUpTo(Routes.ONBOARDING) { inclusive = true }
+                        val nextRoute = if (legalAcknowledgedVersion >= LegalPolicy.CURRENT_ACK_VERSION) {
+                            Routes.WELCOME
+                        } else {
+                            Routes.LEGAL
+                        }
+                        clearStartStackAndNavigate(nextRoute)
+                    }
+                )
+            }
+            composable(Routes.LEGAL) {
+                LegalDisclaimerScreen(
+                    onAccept = {
+                        settingsViewModel.acceptLegalPolicy()
+                        clearStartStackAndNavigate(Routes.WELCOME)
+                    },
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            activity?.finish()
                         }
                     }
                 )
@@ -263,6 +328,7 @@ fun BamaChatApp() {
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenExtensions = { navController.navigate(Routes.EXTENSIONS) },
                     onOpenRealtimeCollab = { navController.navigate(Routes.REALTIME_COLLAB) },
+                    onOpenHermesCodingAssistant = { navController.navigate(Routes.HERMES_CODING_ASSISTANT) },
                     onOpenKnowledgeGraph = { navController.navigate(Routes.KNOWLEDGE_GRAPH) },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     onOpenHelp = { navController.navigate(Routes.HELP) },
@@ -274,6 +340,7 @@ fun BamaChatApp() {
                 ChatScreen(
                     viewModel = chatViewModel,
                     settingsViewModel = settingsViewModel,
+                    onBottomNavRoute = { route -> navigateTopLevel(route) },
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenComposeLab = { navController.navigate(Routes.COMPOSE_LAB) },
@@ -304,6 +371,9 @@ fun BamaChatApp() {
             }
             composable(Routes.HELP) {
                 HelpCenterScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Routes.HERMES_CODING_ASSISTANT) {
+                HermesCodingAssistantScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.REALTIME_COLLAB) {
                 RealtimeCollabScreen(
@@ -404,15 +474,7 @@ fun BamaChatApp() {
                 cornerRoundnessScale = uiCornerRoundnessScale,
                 shadowIntensityScale = uiShadowIntensityScale,
                 surfaceOpacity = uiSurfaceOpacity,
-                onNavigate = { route ->
-                    navController.navigate(route) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
-                        }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                }
+                onNavigate = { route -> navigateTopLevel(route) }
             )
         }
     }

@@ -1,155 +1,92 @@
-# 🚀 BamaChat Play Store - QUICK START (30 min)
+# BamaChat Play Store Schnellstart
 
-## Was ist fertig? ✅
+## Ziel
 
-- ✅ Firebase Crashlytics (Auto-Fehlerberichte)
-- ✅ Privacy Policy + Terms Screen
-- ✅ Offline-Mode (mit WorkManager)
-- ✅ API-Key Setup Wizard
-- ✅ Light Theme Support
-- ✅ Cloud Backup/Export
-- ✅ In-App Review Prompts
-- ✅ Enhanced Error Messages
+In 30 bis 45 Minuten den aktuellen Build für eine interne oder geschlossene Testspur vorbereiten.
 
-## 3 MUSS-Schritte bis Beta
+## 1. Produktstand verifizieren
 
-### 1️⃣ google-services.json (10 min)
+Lokal ausführen:
 
-**Hole deine Datei:**
-1. Gehe zu: https://console.firebase.google.com
-2. Klick "Add Project" → "BamaChat"
-3. Klick "Add App" → Wähle Android
-4. Package Name: `com.example.bamachat`
-5. SHA-1: `keytool -list -v -keystore ~/.android/debug.keystore`
-6. Download `google-services.json`
-
-**Kopiere Datei:**
-```
-cp google-services.json app/src/main/google-services.json
+```powershell
+.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:stabilityCheck
 ```
 
-### 2️⃣ Integriere Legal Screens (10 min)
+Danach auf einem echten Gerät prüfen:
 
-**In OnboardingScreen.kt, bevor HomeHubScreen angezeigt wird:**
+- Onboarding führt zuerst auf den Legal-Screen und erst danach weiter.
+- Datenschutz, Terms, Support und Konto-Löschung lassen sich aus der App öffnen.
+- Kontolöschung funktioniert vollständig.
+- Chat-Komponist, Grabber und untere Navigation verhalten sich wie vorgesehen.
+- Gastmodus, Anmeldung und Rückweg zum Home-Hub funktionieren.
 
-```kotlin
-var legalAccepted by remember { mutableStateOf(false) }
+## 2. Store-Assets vorbereiten
 
-if (!legalAccepted) {
-    LegalDisclaimerScreen(
-        onAccept = {
-            settingsViewModel.setLegalAccepted(true)
-            legalAccepted = true
-        },
-        onBack = { /* close onboarding */ }
-    )
-    return
-}
+Textquelle:
 
-// Dann zeige API-Key Setup
-var apiKeySetup by remember { mutableStateOf(false) }
-if (!apiKeySetup) {
-    OnboardingAPIKeySetupScreen(
-        onComplete = { openRouter, groq ->
-            settingsViewModel.setOpenRouterApiKey(openRouter)
-            settingsViewModel.setGroqApiKey(groq)
-            apiKeySetup = true
-        },
-        onSkip = { apiKeySetup = true }
-    )
-    return
-}
+- `APPSTORE_DESCRIPTION.md`
 
-// Dann Home
-HomeHubScreen(/* ... */)
+Screenshot-Quelle:
+
+- `app/src/main/java/com/example/bamachat/ui/screen/PlayStoreScreenshots.kt`
+
+Empfohlene Screenshot-Dateien:
+
+1. `1-hero.png`
+2. `2-workspace-features.png`
+3. `3-tools-and-multimodal.png`
+4. `4-get-started.png`
+
+Die Bilder können direkt aus der Android-Studio-Preview exportiert und unter `app/store_listings/de-DE/screenshots/` abgelegt werden.
+
+## 3. Signiertes Release-Bundle bauen
+
+Vorher prüfen:
+
+- `keystore.properties` ist vollständig.
+- Release-Signing in `app/build.gradle.kts` ist korrekt konfiguriert.
+
+Build:
+
+```powershell
+.\gradlew.bat :app:bundleRelease
 ```
 
-### 3️⃣ Build & Test (10 min)
+Ergebnis:
 
-```bash
-# Build Release APK
-cd /c/Users/Black/AndroidStudioProjects/BamaChat
-./gradlew assembleRelease
+- `app/build/outputs/bundle/release/app-release.aab`
 
-# APK location:
-# app/build/outputs/apk/release/app-release-unsigned.apk
-```
+## 4. In die Play Console eintragen
 
-**Test auf Handy:**
-- Offline: Schalte WiFi/Mobile aus → Schreib Nachrichten → Schalte an → Auto-Sync?
-- API-Key Setup: Lädt Wizard beim Start?
-- Legal: Zeigt Legal Screen?
-- Crash: Löse absichtlich einen Crash aus → Firebase hat Log?
+In der Play Console übernehmen:
 
----
+- Titel und Kurzbeschreibung aus `APPSTORE_DESCRIPTION.md`
+- Vollbeschreibung aus `APPSTORE_DESCRIPTION.md`
+- Kategorie: Produktivität
+- Datenschutzerklärung: `https://bamachat-d07fb.web.app/privacy-policy/`
+- Nutzungsbedingungen: `https://bamachat-d07fb.web.app/terms/`
+- Konto-Löschung: `https://bamachat-d07fb.web.app/delete-account/`
+- Support: `https://bamachat-d07fb.web.app/support/`
+- Support-E-Mail: `support@bamachat.app`
 
-## Danach: Play Console (20 min)
+Anschließend:
 
-```
-1. Gehe zu https://play.google.com/console
-2. Zahle $25 Developer Account
-3. "Create App" → BamaChat
-4. Fülle Metadata:
-   - Title: "BamaChat - AI mit Personas"
-   - Description: Kopiere aus APPSTORE_DESCRIPTION.md
-   - Category: Productivity
-   - Content Rating: Niedrig
-   - Privacy Policy: https://bamachat.app/privacy
-   - Terms: https://bamachat.app/terms
-5. Lade APK hoch
-6. "Send to Review"
-```
+1. Interne oder geschlossene Testspur erstellen.
+2. `app-release.aab` hochladen.
+3. Releasenotes ergänzen.
+4. Testerkreis hinzufügen.
 
----
+## Häufige Fehler
 
-## Das war's! 🎉
+`bundleRelease` schlägt fehl:
+- `keystore.properties` prüfen.
 
-Deine App ist jetzt:
-- ✅ Play Store Ready
-- ✅ Datenschutz-konform
-- ✅ Offline-funktionsfähig
-- ✅ Crash-monitored
-- ✅ Backup-ready
+Falsche Rechtslinks im Store:
+- Nur die `web.app`-Links verwenden, solange keine funktionierende Custom Domain live ist.
 
-**Nächste Phase:** Beta Tester sammeln → 2 Wochen testen → Launch!
+Veraltete Store-Texte:
+- Immer `APPSTORE_DESCRIPTION.md` als Quelle verwenden.
 
----
-
-## Falls Fehler auftauchen
-
-**"google-services.json nicht gefunden"**
-```
-Stelle sicher: app/src/main/google-services.json existiert
-Build → Rebuild Project
-```
-
-**"Firebase initialization failed"**
-```
-Prüfe: Ist google-services.json korrekt?
-Prüfe: Stimmt Package Name überein (com.example.bamachat)?
-```
-
-**"WorkManager Dependency Missing"**
-```
-add zu build.gradle.kts:
-implementation("androidx.work:work-runtime-ktx:2.8.1")
-```
-
-**"LegalDisclaimerScreen nicht gefunden"**
-```
-Stelle sicher: LegalDisclaimerScreen.kt wurde erstellt
-Check: Ist die Import-Zeile da?
-```
-
----
-
-## Kontakt für Fragen
-
-- 📧 Falls Fehler: Schreib mir!
-- 🐛 Crashes: Sieh in Firebase Console
-- 📱 Testing: Lade APK auf Handy
-- 🚀 Ready to launch? Gratuliere! 🎉
-
----
-
-**Status: BETA READY ✅**
+APK statt Bundle hochgeladen:
+- Für Google Play das `.aab` verwenden.

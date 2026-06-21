@@ -39,9 +39,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bamachat.ui.theme.AppDesignPalette
+import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
@@ -99,13 +105,14 @@ fun SettingsScreen(
         SettingsEntryItem("Agenten", "Persona-Profil, Regeln, Stil", Icons.Default.Psychology, section = "agents")
     )
     val entries = if (mode == SettingsMode.SIMPLE) simpleEntries else simpleEntries + advancedExtraEntries
+    val palette = remember(design) { AppDesignSystem.paletteForStored(design) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(Color(0xFF7A2F20), Color(0xFF5B273F), Color(0xFF161C2E))
+                    listOf(palette.screenBgTop, palette.screenBgMid, palette.screenBgBottom)
                 )
             )
     ) {
@@ -124,12 +131,12 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Zurück",
-                            tint = Color.White
+                            tint = palette.heroTitle
                         )
                     }
                     Text(
                         text = "Einstellungen",
-                        color = Color.White,
+                        color = palette.heroTitle,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
@@ -140,7 +147,8 @@ fun SettingsScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(18.dp),
-                    color = Color(0xFF1A1A2D).copy(alpha = 0.95f)
+                    color = palette.surface.copy(alpha = 0.95f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, palette.surfaceBorder)
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
@@ -148,19 +156,20 @@ fun SettingsScreen(
                     ) {
                         Text(
                             text = "Hauptbereiche",
-                            color = Color.White,
+                            color = palette.textPrimary,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             text = if (mode == SettingsMode.SIMPLE)
                                 "Einfach zeigt nur die wichtigsten Optionen."
-                            else "Advanced zeigt alle Bereiche für Feintuning.",
-                            color = Color.White.copy(alpha = 0.75f),
+                            else "Erweitert zeigt alle Bereiche für Feintuning.",
+                            color = palette.textSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         SettingsModeToggle(
                             mode = mode,
+                            palette = palette,
                             onModeChange = {
                                 mode = it
                                 settingsViewModel.setSimpleModeEnabled(it == SettingsMode.SIMPLE)
@@ -171,7 +180,8 @@ fun SettingsScreen(
                             SettingsEntry(
                                 title = item.title,
                                 subtitle = item.subtitle,
-                                icon = item.icon
+                                icon = item.icon,
+                                palette = palette
                             ) {
                                 if (item.openProfile) {
                                     onOpenProfile()
@@ -188,36 +198,37 @@ fun SettingsScreen(
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFF223248).copy(alpha = 0.92f)
+                    color = palette.navIndicator.copy(alpha = 0.92f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, palette.surfaceBorder)
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("Aktueller Status", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Aktueller Status", color = palette.textPrimary, fontWeight = FontWeight.SemiBold)
                         Text(
                             "Provider: $provider",
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = palette.textSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
                             "Design: $design",
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = palette.textSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
                             "Workspace: $activeWorkspaceName",
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = palette.textSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
                             "Plan: ${MonetizationConfig.PlanTier.fromKey(tier).label} · Credits: $credits",
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = palette.textSecondary,
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
                             "Tippe oben auf einen Bereich, um direkt dorthin zu springen.",
-                            color = Color.White.copy(alpha = 0.65f),
+                            color = palette.textSecondary.copy(alpha = 0.78f),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -225,7 +236,9 @@ fun SettingsScreen(
             }
 
             item {
-                Spacer(modifier = Modifier.height(20.dp))
+                // P1-1 Design-Fix: BottomNav wird als Overlay gerendert; dieser Spacer hält
+                // die letzten Einstellungen oberhalb von Navigationsleiste und BottomNav.
+                Spacer(modifier = Modifier.height(104.dp))
             }
         }
     }
@@ -234,6 +247,7 @@ fun SettingsScreen(
 @Composable
 private fun SettingsModeToggle(
     mode: SettingsMode,
+    palette: AppDesignPalette,
     onModeChange: (SettingsMode) -> Unit
 ) {
     val selectedSimple = mode == SettingsMode.SIMPLE
@@ -245,12 +259,17 @@ private fun SettingsModeToggle(
         Surface(
             modifier = Modifier
                 .weight(1f)
+                .semantics {
+                    // P1-3 Design-Fix: Modus-Kachel wird als Button mit Status vorgelesen.
+                    role = Role.Button
+                    contentDescription = if (selectedSimple) "Einfacher Modus ausgewählt" else "Einfachen Modus auswählen"
+                }
                 .clickable { onModeChange(SettingsMode.SIMPLE) },
             shape = RoundedCornerShape(10.dp),
             color = Color.Transparent,
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                Color.White.copy(alpha = if (selectedSimple) 0.3f else 0.16f)
+                if (selectedSimple) palette.accent.copy(alpha = 0.72f) else palette.surfaceBorder
             )
         ) {
             Row(
@@ -259,8 +278,8 @@ private fun SettingsModeToggle(
                         Brush.verticalGradient(
                             listOf(
                                 Color.White.copy(alpha = if (selectedSimple) 0.2f else 0.1f),
-                                Color(0xFF3B7BD4).copy(alpha = if (selectedSimple) 0.55f else 0.24f),
-                                Color(0xFF1B2B42).copy(alpha = 0.9f)
+                                palette.accent.copy(alpha = if (selectedSimple) 0.55f else 0.22f),
+                                palette.surface.copy(alpha = 0.9f)
                             )
                         )
                     )
@@ -271,12 +290,12 @@ private fun SettingsModeToggle(
                 Icon(
                     imageVector = Icons.Default.Tune,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = palette.textPrimary,
                     modifier = Modifier.width(16.dp)
                 )
                 Text(
                     text = "Einfach",
-                    color = Color.White,
+                    color = palette.textPrimary,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (selectedSimple) FontWeight.SemiBold else FontWeight.Medium
                 )
@@ -285,12 +304,16 @@ private fun SettingsModeToggle(
         Surface(
             modifier = Modifier
                 .weight(1f)
+                .semantics {
+                    role = Role.Button
+                    contentDescription = if (selectedAdvanced) "Erweiterter Modus ausgewählt" else "Erweiterten Modus auswählen"
+                }
                 .clickable { onModeChange(SettingsMode.ADVANCED) },
             shape = RoundedCornerShape(10.dp),
             color = Color.Transparent,
             border = androidx.compose.foundation.BorderStroke(
                 1.dp,
-                Color.White.copy(alpha = if (selectedAdvanced) 0.3f else 0.16f)
+                if (selectedAdvanced) palette.accentStrong.copy(alpha = 0.72f) else palette.surfaceBorder
             )
         ) {
             Row(
@@ -299,8 +322,8 @@ private fun SettingsModeToggle(
                         Brush.verticalGradient(
                             listOf(
                                 Color.White.copy(alpha = if (selectedAdvanced) 0.2f else 0.1f),
-                                Color(0xFF6A4BC7).copy(alpha = if (selectedAdvanced) 0.55f else 0.24f),
-                                Color(0xFF1B2B42).copy(alpha = 0.9f)
+                                palette.accentStrong.copy(alpha = if (selectedAdvanced) 0.55f else 0.22f),
+                                palette.surface.copy(alpha = 0.9f)
                             )
                         )
                     )
@@ -311,12 +334,12 @@ private fun SettingsModeToggle(
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = palette.textPrimary,
                     modifier = Modifier.width(16.dp)
                 )
                 Text(
-                    text = "Advanced",
-                    color = Color.White,
+                    text = "Erweitert",
+                    color = palette.textPrimary,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (selectedAdvanced) FontWeight.SemiBold else FontWeight.Medium
                 )
@@ -330,11 +353,17 @@ private fun SettingsEntry(
     title: String,
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    palette: AppDesignPalette,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .semantics {
+                // P1-3 Design-Fix: kompletter Eintrag ist ein Button, Icons sind dekorativ.
+                role = Role.Button
+                contentDescription = "$title. $subtitle"
+            }
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -342,21 +371,21 @@ private fun SettingsEntry(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = Color(0xFFFFD7A6)
+            tint = palette.accent
         )
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontWeight = FontWeight.Medium)
+            Text(title, color = palette.textPrimary, fontWeight = FontWeight.Medium)
             Text(
                 subtitle,
-                color = Color.White.copy(alpha = 0.74f),
+                color = palette.textSecondary,
                 style = MaterialTheme.typography.bodySmall
             )
         }
         Icon(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.7f)
+            tint = palette.textSecondary
         )
     }
 }

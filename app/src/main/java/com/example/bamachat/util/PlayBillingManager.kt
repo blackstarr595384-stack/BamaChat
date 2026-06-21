@@ -1,4 +1,4 @@
-package com.example.bamachat.util
+﻿package com.example.bamachat.util
 
 import android.app.Activity
 import android.content.Context
@@ -79,6 +79,7 @@ class PlayBillingManager(
                 .setProductType(BillingClient.ProductType.SUBS)
                 .build()
         }
+
         val creditProducts = CREDIT_PRODUCT_IDS.map { productId ->
             QueryProductDetailsParams.Product.newBuilder()
                 .setProductId(productId)
@@ -86,18 +87,42 @@ class PlayBillingManager(
                 .build()
         }
 
-        val params = QueryProductDetailsParams.newBuilder()
-            .setProductList(subscriptionProducts + creditProducts)
-            .build()
+        val collected = java.util.Collections.synchronizedList(mutableListOf<ProductDetails>())
+        val pendingQueries = java.util.concurrent.atomic.AtomicInteger(0)
 
-        client.queryProductDetailsAsync(params) { result, detailsResult ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                productDetailsCache = detailsResult.productDetailsList ?: emptyList()
+        fun finishOneQuery() {
+            if (pendingQueries.decrementAndGet() == 0) {
+                productDetailsCache = collected
+                    .distinctBy { "${it.productId}:${it.productType}" }
             }
         }
-    }
 
-    fun launchSubscriptionPurchase(activity: Activity, planId: String): Boolean {
+        fun queryProducts(products: List<QueryProductDetailsParams.Product>) {
+            if (products.isEmpty()) return
+            pendingQueries.incrementAndGet()
+
+            val params = QueryProductDetailsParams.newBuilder()
+                .setProductList(products)
+                .build()
+
+            client.queryProductDetailsAsync(params) { result, detailsResult ->
+                if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                    collected.addAll(detailsResult.productDetailsList.orEmpty())
+                }
+                finishOneQuery()
+            }
+        }
+
+        // Google Play Billing erlaubt keine gemischten Produkttypen in einer ProductDetails-Abfrage.
+        // Deshalb werden Abos (SUBS) und EinmalkÃ¤ufe/Credits (INAPP) getrennt abgefragt.
+        queryProducts(subscriptionProducts)
+        queryProducts(creditProducts)
+
+        if (pendingQueries.get() == 0) {
+            productDetailsCache = emptyList()
+        }
+    }
+fun launchSubscriptionPurchase(activity: Activity, planId: String): Boolean {
         val client = billingClient ?: return false
         if (!client.isReady) return false
 
@@ -241,3 +266,4 @@ class PlayBillingManager(
         onBillingReadyChanged(false)
     }
 }
+
