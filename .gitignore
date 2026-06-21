@@ -18,3 +18,37 @@ functions/node_modules/
 
 # Stakpak session files
 .stakpak/session*
+
+# Local build/cache/tooling files
+.firebase/
+.kotlin/
+.stakpak/
+node_modules/
+playstore_reports/
+
+# Local patch/export folders
+BamaChat_*_v1/
+
+# Local backups
+backups/
+*.bak
+*.backup*
+*.backup_*
+*.bak_*
+*.log
+*Fixed.txt
+
+# Signing keys / secrets
+release-key
+*.jks
+*.keystore
+*.p12
+*.env
+apikeys.properties
+local.properties
+
+# Wrong Firebase filename / local copy
+app/google-service.json
+
+# Local patch/export folders with version numbers
+BamaChat_*_v*/
