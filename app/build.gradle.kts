@@ -7,7 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("com.google.gms.google-services") apply false
-    id("com.google.firebase.crashlytics")
+    
     id("io.gitlab.arturbosch.detekt") version "1.23.6"
     id("com.google.dagger.hilt.android")
 }
@@ -36,14 +36,14 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.example.bamachat"
-    compileSdk = 34
+    compileSdk = 34  // ARM64: native aapt2 only available for SDK 34
 
     defaultConfig {
-        applicationId = "com.example.bamachat"
+        applicationId = "de.bamachat.app"
         minSdk = 33
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 2
-        versionName = "1.0.0"
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -124,6 +124,8 @@ android {
 }
 
 dependencies {
+    // Play In-App Review
+    implementation("com.google.android.play:review-ktx:2.0.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     val mlKitTranslateVersion = "17.0.3"
     val mlKitLanguageIdVersion = "17.0.6"

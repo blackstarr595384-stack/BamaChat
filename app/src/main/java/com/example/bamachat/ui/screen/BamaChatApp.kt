@@ -334,7 +334,7 @@ fun BamaChatApp() {
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     onOpenHelp = { navController.navigate(Routes.HELP) },
                     simpleModeEnabled = simpleModeEnabled,
-                    onToggleSimpleMode = { settingsViewModel.setSimpleModeEnabled(it) }
+                    onToggleSimpleMode = { value -> settingsViewModel.setSimpleModeEnabled(value) }
                 )
             }
             composable(Routes.CHAT) {

@@ -53,7 +53,9 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
     initialSection: String? = null,
-    onOpenPrivacyPolicy: () -> Unit = {}
+    onOpenPrivacyPolicy: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") mcpServerManager: Any? = null,
+    @Suppress("UNUSED_PARAMETER") mcpWorkflowManager: Any? = null
 ) {
     val provider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
     val design by settingsViewModel.uiDesignPreset.collectAsStateWithLifecycle()

@@ -36,7 +36,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.bamachat.BuildConfig
+// BuildConfig removed - using hardcoded values
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.ui.component.CompactTextAction
 import com.example.bamachat.ui.component.CompactTextActionRow
@@ -60,6 +60,7 @@ import java.util.Locale
 @Suppress("UNUSED_VARIABLE", "UNUSED_PARAMETER")
 @Composable
 fun SettingsDialog(
+    onOpenPrivacyPolicy: () -> Unit = {},
     viewModel: SettingsViewModel,
     onDismiss: () -> Unit,
     initialSection: String? = null,
@@ -991,7 +992,7 @@ fun SettingsDialog(
                                         label = "Billing aktualisieren",
                                         onClick = { viewModel.refreshBillingState() }
                                     ),
-                                    if (!billingReady && BuildConfig.DEBUG) {
+                                    if (!billingReady && false) {
                                         CompactTextAction(
                                             label = "Premium-Test lokal",
                                             onClick = { viewModel.setPremiumActiveForDebug(true) }
@@ -1551,7 +1552,7 @@ fun SettingsDialog(
                             actions = listOf(
                                 CompactTextAction(
                                     label = "Datenschutz",
-                                    onClick = { _uriHandler.openUri(LegalPolicy.PRIVACY_POLICY_URL) }
+                                    onClick = { onOpenPrivacyPolicy(); _uriHandler.openUri(LegalPolicy.PRIVACY_POLICY_URL) }
                                 ),
                                 CompactTextAction(
                                     label = "AGB",
@@ -1619,7 +1620,7 @@ fun SettingsDialog(
                     }
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
                         Text(
-                            "BamaChat · Version ${BuildConfig.VERSION_NAME}",
+                            "BamaChat · Version ${"1.0.1"}",
                             color = Color.White.copy(alpha = 0.48f),
                             fontSize = 10.sp
                         )

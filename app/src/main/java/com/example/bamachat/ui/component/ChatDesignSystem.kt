@@ -47,6 +47,8 @@ import com.example.bamachat.ui.theme.SurfaceDarkCard
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 
 enum class ChatDesignPreset {
+    NOIR,
+    SOLAR,
     CURRENT,
     GLASS,
     EDITORIAL,
@@ -57,6 +59,8 @@ enum class ChatDesignPreset {
             "Glassmorphism Pro" -> GLASS
             "Editorial Bold" -> EDITORIAL
             "Neo Dashboard" -> DASHBOARD
+            "Noir" -> NOIR
+            "Solar" -> SOLAR
             else -> CURRENT
         }
     }
@@ -100,6 +104,8 @@ fun designTokensFor(preset: ChatDesignPreset): ChatDesignTokens = when (preset) 
         userBubbleRoundness = 12.dp, assistantBubbleRoundness = 12.dp,
         bubbleMaxWidth = 320.dp, bubbleShadow = 7.dp
     )
+    ChatDesignPreset.NOIR -> ChatDesignTokens()
+    ChatDesignPreset.SOLAR -> ChatDesignTokens()
     ChatDesignPreset.CURRENT -> ChatDesignTokens()
 }
 
@@ -258,6 +264,26 @@ fun compactLabel(items: List<String>, maxItems: Int = 2): String {
     if (items.isEmpty()) return ""
     val unique = items.map { it.trim() }.filter { it.isNotBlank() }.distinct()
     if (unique.isEmpty()) return ""
-    if (unique.size <= maxItems) return unique.joinToString(", ")
     return "${unique.take(maxItems).joinToString(", ")} +${unique.size - maxItems}"
+}
+
+fun splitSpeechChunks(text: String, maxChunkChars: Int = 220): List<String> {
+    if (text.length <= maxChunkChars) return listOf(text)
+    val chunks = mutableListOf<String>()
+    val sentences = text.split(Regex("(?<=[.!?])\\s+"))
+    val current = StringBuilder()
+    for (sentence in sentences) {
+        if (current.length + sentence.length > maxChunkChars && current.isNotEmpty()) {
+            chunks.add(current.toString().trim())
+            current.clear()
+        }
+        if (sentence.length > maxChunkChars) {
+            sentence.chunked(maxChunkChars).forEach { chunk -> chunks.add(chunk.trim()) }
+        } else {
+            if (current.isNotEmpty()) current.append(" ")
+            current.append(sentence)
+        }
+    }
+    if (current.isNotEmpty()) chunks.add(current.toString().trim())
+    return chunks
 }

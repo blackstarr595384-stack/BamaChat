@@ -1365,3 +1365,45 @@ private fun ConverterApp(themeColor: Color) {
         }
     }
 }
+
+// ===== Internal helper composables for PhotoStudioComponent =====
+internal enum class MiniAppStatusTone {
+    INFO,
+    SUCCESS,
+    ERROR
+}
+
+@Composable
+internal fun MiniAppStatusBanner(
+    message: String,
+    tone: MiniAppStatusTone,
+    modifier: Modifier = Modifier,
+    isLoading: Boolean = false
+) {
+    if (message.isBlank()) return
+    val background = when (tone) {
+        MiniAppStatusTone.INFO -> Color(0xFF2A3E5C).copy(alpha = 0.72f)
+        MiniAppStatusTone.SUCCESS -> Color(0xFF1F4B38).copy(alpha = 0.74f)
+        MiniAppStatusTone.ERROR -> Color(0xFF5A2B2B).copy(alpha = 0.74f)
+    }
+    val icon = when (tone) {
+        MiniAppStatusTone.INFO -> Icons.Default.Info
+        MiniAppStatusTone.SUCCESS -> Icons.Default.CheckCircle
+        MiniAppStatusTone.ERROR -> Icons.Default.Warning
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = background,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Text(message, color = Color.White, fontSize = 14.sp)
+            }
+            AnimatedVisibility(visible = isLoading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Color.White)
+            }
+        }
+    }
+}

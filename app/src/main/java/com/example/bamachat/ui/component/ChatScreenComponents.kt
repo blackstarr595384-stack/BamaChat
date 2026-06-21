@@ -35,7 +35,9 @@ import java.util.*
 @Composable
 fun ChatBubble(
     message: ChatMessage,
-    onSpeak: (String) -> Unit,
+    onSpeak: (String, String) -> Unit,
+    isSpeaking: Boolean = false,
+    showLiveSources: Boolean = true,
     themeColor: Color,
     surfaceColor: Color,
     fontSize: Float,

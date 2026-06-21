@@ -2,26 +2,16 @@ package com.example.bamachat.util
 
 import android.app.Activity
 
+/**
+ * In-app review is disabled in this build due to removed Play Review dependency.
+ * To enable, add com.google.android.play:review-ktx to dependencies.
+ */
 object InAppReviewManager {
-    
-    fun requestReview(activity: Activity) {
-        try {
-            val manager = com.google.android.play.core.review.ReviewManagerFactory.create(activity)
-            val request = manager.requestReviewFlow()
-            request.addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val reviewInfo = task.result
-                    manager.launchReviewFlow(activity, reviewInfo)
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("InAppReviewManager", "Review request failed", e)
-        }
+    fun init(activity: Activity) {
+        // No-op: Play Review dependency not available
     }
-    
-    fun shouldRequestReview(messageCount: Int, lastReviewPromptAt: Long): Boolean {
-        val timeSinceLastReview = System.currentTimeMillis() - lastReviewPromptAt
-        val thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000L
-        return messageCount % 50 == 0 && timeSinceLastReview > thirtyDaysInMs
+
+    fun requestReview(activity: Activity) {
+        // No-op: Play Review dependency not available
     }
 }

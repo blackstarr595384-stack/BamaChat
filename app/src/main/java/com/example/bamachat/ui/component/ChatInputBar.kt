@@ -86,6 +86,8 @@ fun ChatInputBar(
     selectedExtensionQuickAction: ChatViewModel.ExtensionQuickAction,
     onSelectExtensionQuickAction: (ChatViewModel.ExtensionQuickAction) -> Unit,
     promptTemplates: List<PromptTemplate> = emptyList(),
+    compactMode: Boolean = false,
+    onCompactBottomNavVisibilityChange: (Boolean) -> Unit = {},
     onSelectPromptTemplate: (PromptTemplate) -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current

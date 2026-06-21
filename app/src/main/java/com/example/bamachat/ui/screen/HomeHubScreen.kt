@@ -66,7 +66,10 @@ fun HomeHubScreen(
     onOpenKnowledgeGraph: () -> Unit,
     onOpenHelp: () -> Unit,
     @Suppress("UNUSED_PARAMETER") onOpenMenu: () -> Unit = {},
-    @Suppress("UNUSED_PARAMETER") onOpenProfile: () -> Unit = {}
+    @Suppress("UNUSED_PARAMETER") onOpenProfile: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") onOpenHermesCodingAssistant: () -> Unit = {},
+    @Suppress("UNUSED_PARAMETER") simpleModeEnabled: Boolean = true,
+    @Suppress("UNUSED_PARAMETER") onToggleSimpleMode: (Boolean) -> Unit = {}
 ) {
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
 
