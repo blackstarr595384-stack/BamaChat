@@ -267,7 +267,7 @@ class SettingsViewModel @Inject constructor(
 
     private val _uiDesignPreset = MutableStateFlow(
         AppDesignSystem.normalizePresetLabel(
-            prefs.getString("ui_design_preset", AppDesignPreset.PROFESSIONAL.label)
+            prefs.getString("ui_design_preset", AppDesignPreset.FUTURISTIC.label)
         )
     )
     val uiDesignPreset: StateFlow<String> = _uiDesignPreset.asStateFlow()
@@ -976,7 +976,7 @@ class SettingsViewModel @Inject constructor(
 
     fun resetDisplaySettings() {
         setPrimaryColor(DisplaySettingsPresets.DEFAULT_PRIMARY_COLOR)
-        setUiDesignPreset(AppDesignPreset.PROFESSIONAL.label)
+        setUiDesignPreset(AppDesignPreset.FUTURISTIC.label)
         setShowTimestamps(true)
         setBubbleAnimations(true)
         setStreamingEnabled(true)

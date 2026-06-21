@@ -59,6 +59,7 @@ private object Routes {
 }
 
 private val topLevelRoutes = listOf(
+    Routes.MINI_APPS,
     Routes.HOME_HUB,
     Routes.CHAT,
     Routes.PROFILE,

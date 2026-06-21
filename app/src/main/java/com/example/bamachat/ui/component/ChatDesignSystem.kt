@@ -1,4 +1,5 @@
 package com.example.bamachat.ui.component
+import androidx.compose.material3.Surface
 
 import android.content.Intent
 import android.net.Uri
@@ -8,11 +9,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,36 +29,33 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.ui.theme.NeonPurple
+import com.example.bamachat.ui.theme.NeonCyan
+import com.example.bamachat.ui.theme.SurfaceDarkCard
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 
 enum class ChatDesignPreset {
     CURRENT,
     GLASS,
     EDITORIAL,
-    NOIR,
-    SOLAR,
     DASHBOARD;
 
     companion object {
         fun fromSetting(value: String): ChatDesignPreset = when (value) {
             "Glassmorphism Pro" -> GLASS
             "Editorial Bold" -> EDITORIAL
-            "Noir" -> NOIR
-            "Solar" -> SOLAR
             "Neo Dashboard" -> DASHBOARD
             else -> CURRENT
         }
@@ -85,158 +80,64 @@ data class ChatDesignTokens(
 
 fun designTokensFor(preset: ChatDesignPreset): ChatDesignTokens = when (preset) {
     ChatDesignPreset.GLASS -> ChatDesignTokens(
-        titleSizeSp = 25,
-        subtitleSizeSp = 11,
-        listHorizontalPadding = 14.dp,
-        listVerticalSpacing = 12.dp,
-        headerShadow = 8.dp,
-        chipCornerRadius = 24.dp,
-        chipAlpha = 0.2f,
-        bubbleSurfaceAlpha = 0.66f,
-        inputCornerRadius = 30.dp,
-        userBubbleRoundness = 18.dp,
-        assistantBubbleRoundness = 18.dp,
-        bubbleMaxWidth = 316.dp,
-        bubbleShadow = 5.dp
+        titleSizeSp = 25, subtitleSizeSp = 11, listHorizontalPadding = 14.dp,
+        listVerticalSpacing = 12.dp, headerShadow = 8.dp, chipCornerRadius = 24.dp,
+        chipAlpha = 0.2f, bubbleSurfaceAlpha = 0.66f, inputCornerRadius = 30.dp,
+        userBubbleRoundness = 18.dp, assistantBubbleRoundness = 18.dp,
+        bubbleMaxWidth = 316.dp, bubbleShadow = 5.dp
     )
     ChatDesignPreset.EDITORIAL -> ChatDesignTokens(
-        titleSizeSp = 28,
-        subtitleSizeSp = 12,
-        listHorizontalPadding = 16.dp,
-        listVerticalSpacing = 14.dp,
-        headerShadow = 10.dp,
-        chipCornerRadius = 14.dp,
-        chipAlpha = 0.14f,
-        bubbleSurfaceAlpha = 0.9f,
-        inputCornerRadius = 18.dp,
-        userBubbleRoundness = 10.dp,
-        assistantBubbleRoundness = 10.dp,
-        bubbleMaxWidth = 340.dp,
-        bubbleShadow = 8.dp
+        titleSizeSp = 28, subtitleSizeSp = 12, listHorizontalPadding = 16.dp,
+        listVerticalSpacing = 14.dp, headerShadow = 10.dp, chipCornerRadius = 14.dp,
+        chipAlpha = 0.14f, bubbleSurfaceAlpha = 0.9f, inputCornerRadius = 18.dp,
+        userBubbleRoundness = 10.dp, assistantBubbleRoundness = 10.dp,
+        bubbleMaxWidth = 340.dp, bubbleShadow = 8.dp
     )
     ChatDesignPreset.DASHBOARD -> ChatDesignTokens(
-        titleSizeSp = 24,
-        subtitleSizeSp = 11,
-        listHorizontalPadding = 12.dp,
-        listVerticalSpacing = 10.dp,
-        headerShadow = 12.dp,
-        chipCornerRadius = 10.dp,
-        chipAlpha = 0.18f,
-        bubbleSurfaceAlpha = 0.84f,
-        inputCornerRadius = 16.dp,
-        userBubbleRoundness = 12.dp,
-        assistantBubbleRoundness = 12.dp,
-        bubbleMaxWidth = 320.dp,
-        bubbleShadow = 7.dp
-    )
-    ChatDesignPreset.NOIR -> ChatDesignTokens(
-        titleSizeSp = 24,
-        subtitleSizeSp = 11,
-        listHorizontalPadding = 13.dp,
-        listVerticalSpacing = 10.dp,
-        headerShadow = 14.dp,
-        chipCornerRadius = 18.dp,
-        chipAlpha = 0.16f,
-        bubbleSurfaceAlpha = 0.82f,
-        inputCornerRadius = 18.dp,
-        userBubbleRoundness = 14.dp,
-        assistantBubbleRoundness = 14.dp,
-        bubbleMaxWidth = 325.dp,
-        bubbleShadow = 9.dp
-    )
-    ChatDesignPreset.SOLAR -> ChatDesignTokens(
-        titleSizeSp = 26,
-        subtitleSizeSp = 11,
-        listHorizontalPadding = 14.dp,
-        listVerticalSpacing = 11.dp,
-        headerShadow = 11.dp,
-        chipCornerRadius = 20.dp,
-        chipAlpha = 0.18f,
-        bubbleSurfaceAlpha = 0.86f,
-        inputCornerRadius = 22.dp,
-        userBubbleRoundness = 16.dp,
-        assistantBubbleRoundness = 16.dp,
-        bubbleMaxWidth = 332.dp,
-        bubbleShadow = 8.dp
+        titleSizeSp = 24, subtitleSizeSp = 11, listHorizontalPadding = 12.dp,
+        listVerticalSpacing = 10.dp, headerShadow = 12.dp, chipCornerRadius = 10.dp,
+        chipAlpha = 0.18f, bubbleSurfaceAlpha = 0.84f, inputCornerRadius = 16.dp,
+        userBubbleRoundness = 12.dp, assistantBubbleRoundness = 12.dp,
+        bubbleMaxWidth = 320.dp, bubbleShadow = 7.dp
     )
     ChatDesignPreset.CURRENT -> ChatDesignTokens()
 }
 
 @Composable
 fun EmptyChatState(themeColor: Color, persona: ChatViewModel.Persona) {
-    val starterPrompts = listOf("Briefing starten", "Plan bauen", "To-dos ordnen")
-
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 56.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = Color(0xFF111B2C).copy(alpha = 0.9f),
-        border = BorderStroke(1.dp, themeColor.copy(alpha = 0.24f))
+            .padding(top = 80.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(84.dp)
-                    .background(Brush.radialGradient(listOf(themeColor, themeColor.copy(alpha = 0.3f))), CircleShape)
-                    .border(1.dp, themeColor.copy(alpha = 0.24f), CircleShape)
-                    .clip(CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(persona.emoji, fontSize = 42.sp)
-            }
-            Text(
-                "Hallo! Ich bin dein ${persona.displayName}",
-                color = Color.White,
-                fontSize = 18.sp,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                "Schreibe eine Aufgabe oder eine Idee. Ich mache daraus einen klaren nächsten Schritt.",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(0.92f)
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    "Zum Start",
-                    color = Color.White.copy(alpha = 0.56f),
-                    fontSize = 11.sp
+        Box(
+            modifier = Modifier
+                .size(100.dp)
+                .shadow(16.dp, CircleShape, spotColor = NeonPurple.copy(alpha = 0.3f))
+                .background(
+                    Brush.radialGradient(
+                        listOf(NeonPurple, NeonPurple.copy(alpha = 0.3f))
+                    ),
+                    CircleShape
                 )
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    starterPrompts.forEach { prompt ->
-                        EmptyChatSuggestionChip(prompt, themeColor)
-                    }
-                }
-            }
+                .border(1.5f.dp, NeonPurple.copy(alpha = 0.3f), CircleShape)
+                .clip(CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(persona.emoji, fontSize = 48.sp)
         }
-    }
-}
-
-@Composable
-private fun EmptyChatSuggestionChip(label: String, themeColor: Color) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = Color.White.copy(alpha = 0.06f),
-        border = BorderStroke(1.dp, themeColor.copy(alpha = 0.2f))
-    ) {
+        Spacer(Modifier.height(24.dp))
         Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            color = Color.White.copy(alpha = 0.92f),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
+            "Hallo! Ich bin ${persona.displayName}",
+            color = Color.White,
+            fontSize = 20.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Worüber möchtest du sprechen?",
+            color = Color.White.copy(alpha = 0.5f),
+            fontSize = 14.sp
         )
     }
 }
@@ -245,12 +146,16 @@ private fun EmptyChatSuggestionChip(label: String, themeColor: Color) {
 fun BlinkingDot(themeColor: Color) {
     val infiniteTransition = rememberInfiniteTransition(label = "blink")
     val alpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
+        initialValue = 0.3f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
         label = "alpha"
     )
-    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(themeColor.copy(alpha = alpha)))
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(themeColor.copy(alpha = alpha))
+    )
 }
 
 @Composable
@@ -258,25 +163,38 @@ fun TypingIndicator(themeColor: Color, animated: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
-                .size(32.dp)
+                .size(36.dp)
                 .clip(CircleShape)
-                .background(Brush.radialGradient(listOf(themeColor, themeColor.copy(alpha = 0.5f)))),
+                .background(
+                    Brush.radialGradient(
+                        listOf(NeonPurple, NeonPurple.copy(alpha = 0.4f))
+                    )
+                )
+                .border(1.dp, NeonPurple.copy(alpha = 0.3f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Filled.AutoAwesome, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Icon(
+                Icons.Filled.AutoAwesome,
+                null,
+                tint = Color.White,
+                modifier = Modifier.size(20.dp)
+            )
         }
-        Spacer(Modifier.width(8.dp))
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF272A2F)),
-            shape = RoundedCornerShape(4.dp, 20.dp, 20.dp, 20.dp)
+        Spacer(Modifier.width(10.dp))
+        Surface(
+            color = SurfaceDarkCard,
+            shape = RoundedCornerShape(4.dp, 20.dp, 20.dp, 20.dp),
+            shadowElevation = 4.dp
         ) {
-            Row(modifier = Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
                 repeat(3) { i ->
                     if (animated) {
                         val infiniteTransition = rememberInfiniteTransition(label = "dot$i")
                         val scale by infiniteTransition.animateFloat(
-                            initialValue = 0.5f,
-                            targetValue = 1f,
+                            initialValue = 0.5f, targetValue = 1f,
                             animationSpec = infiniteRepeatable(
                                 tween(600, delayMillis = i * 150),
                                 RepeatMode.Reverse
@@ -285,16 +203,16 @@ fun TypingIndicator(themeColor: Color, animated: Boolean = true) {
                         )
                         Box(
                             modifier = Modifier
-                                .size((6 * scale).dp)
+                                .size((7 * scale).dp)
                                 .clip(CircleShape)
-                                .background(themeColor.copy(alpha = scale))
+                                .background(NeonPurple.copy(alpha = scale))
                         )
                     } else {
                         Box(
                             modifier = Modifier
-                                .size(6.dp)
+                                .size(7.dp)
                                 .clip(CircleShape)
-                                .background(themeColor.copy(alpha = 0.7f))
+                                .background(NeonPurple.copy(alpha = 0.7f))
                         )
                     }
                 }
@@ -307,76 +225,34 @@ fun TypingIndicator(themeColor: Color, animated: Boolean = true) {
 fun VoiceVisualizer(color: Color) {
     val infiniteTransition = rememberInfiniteTransition(label = "voice")
     val progress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
+        initialValue = 0f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1000, easing = LinearEasing), RepeatMode.Reverse),
         label = "progress"
     )
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
         repeat(3) { index ->
             val height = 4.dp + (16.dp * (progress * (index + 1) % 1f))
-            Box(modifier = Modifier.width(3.dp).height(height).background(color, RoundedCornerShape(2.dp)))
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(height)
+                    .background(color, RoundedCornerShape(2.dp))
+            )
         }
     }
 }
 
 fun sanitizeForSpeech(text: String): String = text
-    .replace(Regex("```[\\s\\S]*?```"), " Der folgende Code wurde ausgelassen. ")
+    .replace(Regex("```[\\s\\S]*?```"), " ")
     .replace(Regex("`([^`]+)`"), "$1")
     .replace(Regex("\\[(.*?)\\]\\((.*?)\\)"), "$1")
     .replace(Regex("https?://\\S+"), " ")
     .replace(Regex("Quellen \\(Live-Recherche\\):[\\s\\S]*"), " ")
-    .replace(Regex("^\\s{0,3}#{1,6}\\s*", setOf(RegexOption.MULTILINE)), "")
-    .replace(Regex("^\\s*[-*+]\\s+", setOf(RegexOption.MULTILINE)), "")
-    .replace(Regex("^\\s*\\d+\\.\\s+", setOf(RegexOption.MULTILINE)), "")
-    .replace("->", " zu ")
-    .replace("&", " und ")
-    .replace("%", " Prozent")
-    .replace(Regex("\\s*[\\r\\n]+\\s*"), ". ")
-    .replace(Regex("([.!?])(?=\\S)"), "$1 ")
     .replace(Regex("\\s+"), " ")
     .trim()
-
-fun splitSpeechChunks(text: String, maxChunkChars: Int = 220): List<String> {
-    val cleaned = text.trim()
-    if (cleaned.isBlank()) return emptyList()
-
-    val sentences = cleaned
-        .split(Regex("(?<=[.!?])\\s+"))
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-
-    if (sentences.isEmpty()) return listOf(cleaned.take(maxChunkChars))
-
-    val chunks = mutableListOf<String>()
-    val current = StringBuilder()
-    for (sentence in sentences) {
-        if (sentence.length > maxChunkChars) {
-            if (current.isNotBlank()) {
-                chunks += current.toString().trim()
-                current.clear()
-            }
-            sentence.chunked(maxChunkChars).forEach { part ->
-                chunks += part.trim()
-            }
-            continue
-        }
-
-        val needsSeparator = current.isNotBlank()
-        val projectedLength = current.length + (if (needsSeparator) 1 else 0) + sentence.length
-        if (projectedLength > maxChunkChars && current.isNotBlank()) {
-            chunks += current.toString().trim()
-            current.clear()
-        }
-        if (current.isNotBlank()) current.append(' ')
-        current.append(sentence)
-    }
-
-    if (current.isNotBlank()) {
-        chunks += current.toString().trim()
-    }
-    return chunks
-}
 
 fun compactLabel(items: List<String>, maxItems: Int = 2): String {
     if (items.isEmpty()) return ""

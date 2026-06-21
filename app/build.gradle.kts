@@ -1,14 +1,15 @@
-﻿import java.util.Properties
+import java.util.Properties
 
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.google.services) apply false
-    alias(libs.plugins.firebase.crashlytics)
-    alias(libs.plugins.detekt)
-    alias(libs.plugins.hilt.android)
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.20"
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
+    id("com.google.gms.google-services") apply false
+    id("com.google.firebase.crashlytics")
+    id("io.gitlab.arturbosch.detekt") version "1.23.6"
+    id("com.google.dagger.hilt.android")
 }
 
 val googleServicesFiles = listOf(
@@ -35,15 +36,27 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.example.bamachat"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
-        applicationId = "de.bamachat.app"
+        applicationId = "com.example.bamachat"
         minSdk = 33
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 2
-        versionName = "1.0.1"
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    bundle {
+        language {
+            enableSplit = false
+        }
+        density {
+            enableSplit = true
+        }
+        abi {
+            enableSplit = true
+        }
     }
 
     signingConfigs {
@@ -61,7 +74,7 @@ android {
                     if (keyPassword.isBlank()) add("keyPassword")
                 }
                 if (missing.isNotEmpty()) {
-                    error("keystore.properties ist unvollstÃ¤ndig. Fehlende Keys: ${missing.joinToString()}")
+                    error("keystore.properties ist unvollständig. Fehlende Keys: ${missing.joinToString()}")
                 }
 
                 storeFile = rootProject.file(storeFilePath)
@@ -96,7 +109,8 @@ android {
     
     buildFeatures {
         compose = true
-        buildConfig = true
+    }
+    ksp {
     }
 
     testOptions {
@@ -110,108 +124,111 @@ android {
 }
 
 dependencies {
-    implementation(project(":sharedCore"))
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.activity.compose)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    val mlKitTranslateVersion = "17.0.3"
+    val mlKitLanguageIdVersion = "17.0.6"
+    val mlKitSmartReplyVersion = "17.0.4"
+    val bouncyCastleVersion = "1.84"
+    val credentialsVersion = "1.2.0-rc01"
 
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.androidx.navigation.compose)
+    implementation(project(":sharedCore"))
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.activity:activity-compose:1.9.3")
+
+    implementation(platform("androidx.compose:compose-bom:2024.10.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.navigation:navigation-compose:2.8.5")
     
     // Lottie Animations
-    implementation(libs.airbnb.lottie.compose)
+    implementation("com.airbnb.android:lottie-compose:6.4.1")
     
-    // Material Design Icons (Icons fÃ¼r UI)
-    implementation(libs.androidx.biometric)
-    implementation(libs.androidx.fragment.ktx)
-    implementation(libs.androidx.security.crypto)
+    // Material Design Icons (Icons für UI)
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     
     // Room Database
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
+    val roomVersion = "2.8.4"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
     
     // Markdown support
-    implementation(libs.compose.markdown)
-    implementation(libs.coil.compose)
+    implementation("com.github.jeziellago:compose-markdown:0.7.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
     
     // Retrofit + OkHttp
-    implementation(libs.retrofit.core)
-    implementation(libs.retrofit.converter.gson)
-    implementation(libs.okhttp.core)
-    implementation(libs.okhttp.logging)
-    implementation(libs.google.gson)
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.kotlinx.coroutines.core)
-    implementation(libs.kotlinx.coroutines.play.services)
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.google.code.gson:gson:2.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     // Gemini AI
-    implementation(libs.google.generativeai)
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
     // ML Kit Translation & Language ID
-    implementation(libs.mlkit.translate)
-    implementation(libs.mlkit.language.id)
-    implementation(libs.mlkit.text.recognition)
+    implementation("com.google.mlkit:translate:$mlKitTranslateVersion")
+    implementation("com.google.mlkit:language-id:$mlKitLanguageIdVersion")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     // ML Kit Smart Reply
-    implementation(libs.mlkit.smart.reply) {
+    implementation("com.google.mlkit:smart-reply:$mlKitSmartReplyVersion") {
         // Prevent duplicate classes with language-id-common from gms beta artifact.
         exclude(group = "com.google.android.gms", module = "play-services-mlkit-language-id")
     }
 
     // Jsoup for Link Previews
-    implementation(libs.jsoup)
-    implementation(libs.pdfbox.android)
-    implementation(libs.bouncycastle.bcprov)
-    implementation(libs.bouncycastle.bcpkix)
-    implementation(libs.bouncycastle.bcutil)
+    implementation("org.jsoup:jsoup:1.18.3")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.bouncycastle:bcprov-jdk15to18:$bouncyCastleVersion")
+    implementation("org.bouncycastle:bcpkix-jdk15to18:$bouncyCastleVersion")
+    implementation("org.bouncycastle:bcutil-jdk15to18:$bouncyCastleVersion")
 
     // Location Services
-    implementation(libs.play.services.location)
-    implementation(libs.play.services.auth)
-    implementation(libs.androidx.credentials)
-    implementation(libs.androidx.credentials.play.services.auth)
-    implementation(libs.googleid)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation("androidx.credentials:credentials:$credentialsVersion")
+    implementation("androidx.credentials:credentials-play-services-auth:$credentialsVersion")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
 
     // Google Play Billing (Abo/Paywall Vorbereitung)
-    implementation(libs.billing.ktx)
-    
-    // Google Play In-App Review
-    implementation(libs.google.play.review.ktx)
-
-    // WorkManager for Offline Sync
-    implementation(libs.androidx.work.runtime.ktx)
+    implementation("com.android.billingclient:billing-ktx:8.3.0")
 
     // Hilt DI
-    implementation(libs.google.hilt.android)
-    ksp(libs.google.hilt.compiler)
-    implementation(libs.androidx.hilt.navigation.compose)
+    val hiltVersion = "2.54"
+    implementation("com.google.dagger:hilt-android:$hiltVersion")
+    ksp("com.google.dagger:hilt-compiler:$hiltVersion")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Firebase (Auth / Profile / Storage)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth)
-    implementation(libs.firebase.firestore)
-    implementation(libs.firebase.storage)
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.crashlytics)
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage")
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-crashlytics")
 
-    testImplementation(libs.junit4)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.junit4)
-    androidTestImplementation(libs.androidx.test.core.ktx)
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.rules)
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    androidTestImplementation(libs.androidx.test.ext.junit)
-    androidTestImplementation(libs.androidx.test.espresso.core)
-    androidTestImplementation(libs.androidx.test.uiautomator)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
-    detektPlugins(libs.detekt.formatting)
+    detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
 }
 
 tasks.register("stabilityCheck") {
@@ -220,4 +237,11 @@ tasks.register("stabilityCheck") {
     dependsOn("assembleDebug", "testDebugUnitTest", "lintDebug")
 }
 
-
+// Fix Room/KSP kotlinx-serialization compatibility
+kotlin {
+    sourceSets {
+        debug {
+            kotlin.srcDir("build/generated/ksp/debug/kotlin")
+        }
+    }
+}
