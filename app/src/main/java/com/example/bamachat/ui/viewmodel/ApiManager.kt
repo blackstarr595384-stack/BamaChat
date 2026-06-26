@@ -48,6 +48,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 import java.io.IOException
+import java.util.LinkedHashMap
 import java.io.ByteArrayOutputStream
 import java.util.*
 import java.util.concurrent.CancellationException
@@ -68,7 +69,12 @@ class ApiManager(
 ) {
     private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val webClient = OkHttpClient.Builder().build()
-    private val researchCache = mutableMapOf<String, CachedResearch>()
+    // Size-bounded cache: evicts oldest entry when limit reached (prevents OOM)
+    private val researchCache = object : LinkedHashMap<String, CachedResearch>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedResearch>?): Boolean {
+            return size > MAX_RESEARCH_CACHE_SIZE
+        }
+    }
 
     data class WebSource(
         val title: String,
@@ -1019,10 +1025,11 @@ class ApiManager(
         systemPrompt: String,
         userText: String
     ): ApiResponse {
-        // Placeholder: würde Bitmap benötigen
+        // Gemini Vision is not yet fully implemented.
+        // Return a clear user-facing message so the fallback chain can report this properly.
         return ApiResponse(
             success = false,
-            error = "Gemini Vision not implemented yet",
+            error = "Gemini Vision ist aktuell noch nicht implementiert. Bitte nutze OpenRouter für Bildanalyse oder konfiguriere einen Vision-fähigen Provider in den Einstellungen.",
             retryable = false
         )
     }
@@ -1257,7 +1264,7 @@ class ApiManager(
     }
 
     private fun pruneResearchCache(now: Long, ttlMs: Long) {
-        val iterator = researchCache.iterator()
+        val iterator = researchCache.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next()
             if (now - entry.value.cachedAtMs > ttlMs) {
@@ -1295,6 +1302,7 @@ class ApiManager(
         private const val KEY_LIVE_WEB_CACHE_TTL_MINUTES = "live_web_cache_ttl_minutes"
         private const val DEFAULT_ALLOWED_DOMAINS =
             "wikipedia.org,reuters.com,tagesschau.de,bundesregierung.de,heise.de,github.com"
+        private const val MAX_RESEARCH_CACHE_SIZE = 50
         private val WEATHER_ALLOWED_DOMAINS = setOf(
             "dwd.de",
             "wetteronline.de",

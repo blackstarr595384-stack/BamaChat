@@ -42,7 +42,10 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.*
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
 import javax.inject.Inject
+import kotlin.concurrent.read
+import kotlin.concurrent.write
 
 data class ToolCallProgress(
     val toolName: String,
@@ -121,6 +124,7 @@ class ChatViewModel @Inject constructor(
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
     private val allMessagesBuffer = mutableListOf<ChatMessage>()
+    private val bufferLock = ReentrantLock()
     private val _visibleMessageLimit = MutableStateFlow(INITIAL_VISIBLE_MESSAGE_LIMIT)
     private val _hasOlderMessages = MutableStateFlow(false)
     val hasOlderMessages: StateFlow<Boolean> = _hasOlderMessages
@@ -265,14 +269,16 @@ class ChatViewModel @Inject constructor(
         _messages.value = emptyList()
         _visibleMessageLimit.value = currentInitialVisibleMessageLimit()
         _hasOlderMessages.value = false
-        allMessagesBuffer.clear()
+        bufferLock.write { allMessagesBuffer.clear() }
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
             repo.getMessages(id).collectLatest { items ->
-                allMessagesBuffer.clear()
-                allMessagesBuffer.addAll(items)
+                bufferLock.write {
+                    allMessagesBuffer.clear()
+                    allMessagesBuffer.addAll(items)
+                }
                 publishVisibleMessages()
-                syncFeedbackForMessages(allMessagesBuffer)
+                bufferLock.read { syncFeedbackForMessages(allMessagesBuffer) }
             }
         }
     }
@@ -909,7 +915,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     }
 
     private fun publishVisibleMessages() {
-        val all = allMessagesBuffer
+        val all = bufferLock.read { allMessagesBuffer.toList() }
         if (all.isEmpty()) { _messages.value = emptyList(); _hasOlderMessages.value = false; return }
         val visible = computeWindowedMessages(all, _visibleMessageLimit.value)
         _messages.value = visible
@@ -1000,7 +1006,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         messagesJob?.cancel()
         activeGenerationJob?.cancel()
         prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
-        allMessagesBuffer.clear()
+        bufferLock.write { allMessagesBuffer.clear() }
         _messageFeedback.value = emptyMap()
         systemPromptCache = null
         super.onCleared()
