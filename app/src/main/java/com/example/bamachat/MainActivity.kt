@@ -20,7 +20,7 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            BamaChatTheme(dynamicColor = false) {
+            BamaChatTheme() {  // dynamicColor defaults to true (Material You on S25 Ultra)
                 Surface(color = MaterialTheme.colorScheme.background) {
                     BamaChatApp()
                 }

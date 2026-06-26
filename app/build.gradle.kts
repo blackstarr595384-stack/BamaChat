@@ -36,7 +36,7 @@ if (hasReleaseKeystore) {
 
 android {
     namespace = "com.example.bamachat"
-    compileSdk = 34  // ARM64: native aapt2 only available for SDK 34
+    compileSdk = 35  // Android 15 (SDK 35) – required for targetSdk 35 + Galaxy S25 Ultra compat
 
     defaultConfig {
         applicationId = "de.bamachat.app"
