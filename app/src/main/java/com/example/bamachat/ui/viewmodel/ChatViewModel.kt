@@ -220,10 +220,10 @@ class ChatViewModel @Inject constructor(
         ASSISTANT("Assistent", "🤖", "Du bist BamaChat, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
         DEVELOPER("Entwickler", "💻", "Du bist ein erfahrener Software-Entwickler. Hilf mit Code-Beispielen und technischen Erklärungen. Nutze Markdown-Codeblöcke. Antworte auf Deutsch."),
         TEACHER("Lehrer", "🎓", "Du bist ein geduldiger Lehrer. Erkläre Dinge einfach und verständlich, mit Beispielen. Antworte auf Deutsch."),
-        TRANSLATOR("Übersetzer", "🌍", "Du bist ein professioneller Übersetzer. Übersetze den Text des Benutzers. Wenn er Deutsch ist, übersetze ins Englische. Wenn nicht, ins Deutsche. Erkläre kurz Schwierigkeiten."),
+        TRANSLATOR("Übersetzer", "🌍", "Du bist ein professioneller Übersetzer. Übersetze den Text des Benutzers. Wenn er Deutsch ist, übersetze ins Englische. Wenn nicht, ins Deutsche. Erkläre auch kurz, warum du diese Übersetzung gewählt hast."),
         CHEF("Koch", "👨‍🍳", "Du bist ein kreativer Koch. Hilf mit Rezepten, Zutaten-Tipps und Kochtechniken. Antworte auf Deutsch, locker und enthusiastisch."),
         FITNESS("Fitness-Coach", "💪", "Du bist ein motivierender Fitness-Coach. Gib Tipps zu Training, Ernährung und Motivation. Antworte auf Deutsch, energiegeladen."),
-        THERAPIST("Reflexions-Begleiter", "🧘", "Du bist ein einfühlsamer Gesprächspartner. Höre zu, stelle hilfreiche Rückfragen und hilf beim Reflektieren. Du bist KEIN Ersatz für echte Therapie. Antworte auf Deutsch, warm und respektvoll."),
+        THERAPIST("Reflexions-Begleiter", "🧘", "Du bist ein einfühlsamer Gesprächspartner. Höre zu, stelle hilfreiche Rückfragen und hilf beim Reflektieren. Du bist KEIN Ersatz für echte professionelle Hilfe."),
         CUSTOM("Eigene Persona", "✨", "")
     }
 
@@ -269,13 +269,17 @@ class ChatViewModel @Inject constructor(
         _messages.value = emptyList()
         _visibleMessageLimit.value = currentInitialVisibleMessageLimit()
         _hasOlderMessages.value = false
-        bufferLock.write { allMessagesBuffer.clear() }
+        bufferLock.write {
+            allMessagesBuffer.clear()
+            Unit
+        }
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
             repo.getMessages(id).collectLatest { items ->
                 bufferLock.write {
                     allMessagesBuffer.clear()
                     allMessagesBuffer.addAll(items)
+                    Unit
                 }
                 publishVisibleMessages()
                 bufferLock.read { syncFeedbackForMessages(allMessagesBuffer) }
@@ -476,7 +480,7 @@ class ChatViewModel @Inject constructor(
                 val imageUrl = resolveWorkingImageUrl(genReq.candidateUrls)
                 if (imageUrl == null) {
                     // P0-A fix: Keine kaputte Bildkarte speichern, wenn der externe Bilddienst 402/403/Fehler liefert.
-                    _errorMessage.value = "Bildgenerierung ist aktuell nicht erreichbar oder erfordert Auth/Zahlung beim Bilddienst. Bitte später erneut versuchen oder Bild-KI in den Einstellungen konfigurieren."
+                    _errorMessage.value = "Bildgenerierung ist aktuell nicht erreichbar oder erfordert Auth/Zahlung beim Bilddienst. Bitte später erneut versuchen oder Bild-KI in den Einstellungen deaktivieren."
                     return@launch
                 }
                 if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_GENERATION)) return@launch
@@ -998,17 +1002,4 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
 
     fun resetPromptForPersona(persona: Persona) { personaViewModel.resetPromptForPersona(persona); systemPromptCache = null }
     fun getPersonaProfile(persona: Persona): PersonaCharacterProfile = getPersonaCharacterProfile(persona)
-
-    data class PersonaCharacterProfile(val empathy: Int = 50, val creativity: Int = 50, val directness: Int = 50)
-    data class AutonomyProfile(val coreBelief: String = "", val instinct: String = "", val signatureOpinionStyle: String = "", val selfCorrectionStrictness: Int = 50)
-
-    override fun onCleared() {
-        messagesJob?.cancel()
-        activeGenerationJob?.cancel()
-        prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
-        bufferLock.write { allMessagesBuffer.clear() }
-        _messageFeedback.value = emptyMap()
-        systemPromptCache = null
-        super.onCleared()
-    }
 }
