@@ -1349,7 +1349,10 @@ private fun ChatContent(
             containerColor = Color.Transparent
         ) { paddingValues ->
             Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                Column(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
+                    .navigationBarsPadding()) {
                 AnimatedVisibility(
                     visible = !isKeyboardOpen,
                     enter = fadeIn(tween(180)) + expandVertically(animationSpec = tween(220)),

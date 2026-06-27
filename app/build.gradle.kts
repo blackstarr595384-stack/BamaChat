@@ -40,8 +40,8 @@ android {
 
     defaultConfig {
         applicationId = "de.bamachat.app"
-        minSdk = 33
-        targetSdk = 35
+        minSdk = 24      // Android 7.0 (Nougat)
+        targetSdk = 34   // Android 14 (stabil für Play Store)
         versionCode = 2
         versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
