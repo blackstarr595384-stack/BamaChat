@@ -33,6 +33,8 @@ import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.util.UserErrorMessage
 import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
+import com.example.bamachat.data.toAiChatRequestForValidation
+import com.example.bamachat.shared.core.AiProviderId
 import dagger.hilt.android.lifecycle.HiltViewModel
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.Job
@@ -598,6 +600,24 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                     toolChoice = "auto",
                     maxTokens = 2048
                 )
+                runCatching {
+                    messages.toAiChatRequestForValidation(
+                        provider = AiProviderId.OPENROUTER,
+                        model = selectedModel.value,
+                        maxTokens = 2048,
+                        stream = false
+                    )
+                }.onSuccess { dryRunRequest ->
+                    AppTelemetry.logEvent(
+                        "ai_request_builder_dry_run",
+                        mapOf(
+                            "provider" to dryRunRequest.provider.name,
+                            "message_count" to dryRunRequest.messages.size.toString()
+                        )
+                    )
+                }.onFailure { error ->
+                    AppTelemetry.logError("ai_request_builder_dry_run_failed", error)
+                }
 
                 val response = apiManager.oneShotChatCompletion(request, fullSystemPrompt)
                 if (response == null) {
