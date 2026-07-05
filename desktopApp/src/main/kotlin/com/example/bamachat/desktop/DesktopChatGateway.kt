@@ -1,7 +1,10 @@
 package com.example.bamachat.desktop
 
 import com.example.bamachat.shared.core.AiChatMessage
+import com.example.bamachat.shared.core.AiChatRequest
+import com.example.bamachat.shared.core.AiChatResponse
 import com.example.bamachat.shared.core.AiChatRole
+import com.example.bamachat.shared.core.AiProviderId
 import com.example.bamachat.shared.core.AiPromptEngine
 import com.example.bamachat.shared.core.ExtensionRuntimeDecision
 import com.example.bamachat.shared.core.QuickActionSuggestion
@@ -30,49 +33,38 @@ class DesktopChatGateway(
         quickAction: QuickActionSuggestion,
         runtimeDecision: ExtensionRuntimeDecision?
     ): String = withContext(Dispatchers.IO) {
-        when (settings.provider) {
-            DesktopProvider.OPENROUTER -> requestOpenRouter(
-                settings = settings,
-                chatHistory = chatHistory,
-                quickAction = quickAction,
-                runtimeDecision = runtimeDecision
-            )
-            DesktopProvider.OLLAMA -> requestOllama(
-                settings = settings,
-                chatHistory = chatHistory,
-                quickAction = quickAction,
-                runtimeDecision = runtimeDecision
-            )
-        }
-    }
-
-    private fun requestOpenRouter(
-        settings: DesktopUserSettings,
-        chatHistory: List<AiChatMessage>,
-        quickAction: QuickActionSuggestion,
-        runtimeDecision: ExtensionRuntimeDecision?
-    ): String {
-        val apiKey = settings.openRouterApiKey.trim()
-        if (apiKey.isBlank()) {
-            throw IllegalStateException("OpenRouter API-Key fehlt in den Desktop-Einstellungen.")
-        }
-        val model = settings.openRouterModel.trim().ifBlank { DEFAULT_OPENROUTER_MODEL }
-        val messages = buildProviderMessages(
+        val request = settings.toAiChatRequest(
             chatHistory = chatHistory,
             quickAction = quickAction,
             runtimeDecision = runtimeDecision
         )
+        val response = when (request.provider) {
+            AiProviderId.OPENROUTER -> requestOpenRouter(settings, request)
+            AiProviderId.OLLAMA -> requestOllama(settings, request)
+        }
+        response.message.text
+    }
+
+    private fun requestOpenRouter(
+        settings: DesktopUserSettings,
+        request: AiChatRequest
+    ): AiChatResponse {
+        val apiKey = settings.openRouterApiKey.trim()
+        if (apiKey.isBlank()) {
+            throw IllegalStateException("OpenRouter API-Key fehlt in den Desktop-Einstellungen.")
+        }
+        val messages = buildProviderMessages(request)
 
         val body = gson.toJson(
             mapOf(
-                "model" to model,
+                "model" to request.model,
                 "messages" to messages,
-                "max_tokens" to 1200,
-                "temperature" to 0.7
+                "max_tokens" to request.maxTokens,
+                "temperature" to request.temperature
             )
         )
 
-        val request = HttpRequest.newBuilder()
+        val httpRequest = HttpRequest.newBuilder()
             .uri(URI.create("https://openrouter.ai/api/v1/chat/completions"))
             .timeout(Duration.ofSeconds(90))
             .header("Authorization", "Bearer $apiKey")
@@ -83,35 +75,35 @@ class DesktopChatGateway(
             .build()
 
         val response = httpClient.send(
-            request,
+            httpRequest,
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
         )
         ensureSuccess("OpenRouter", response.statusCode(), response.body())
-        return parseOpenRouterResponse(response.body())
+        return AiChatResponse(
+            provider = request.provider,
+            model = request.model,
+            message = AiChatMessage(
+                role = AiChatRole.ASSISTANT,
+                text = parseOpenRouterResponse(response.body())
+            )
+        )
     }
 
     private fun requestOllama(
         settings: DesktopUserSettings,
-        chatHistory: List<AiChatMessage>,
-        quickAction: QuickActionSuggestion,
-        runtimeDecision: ExtensionRuntimeDecision?
-    ): String {
+        request: AiChatRequest
+    ): AiChatResponse {
         val baseUrl = normalizeBaseUrl(settings.ollamaBaseUrl)
-        val model = settings.ollamaModel.trim().ifBlank { DEFAULT_OLLAMA_MODEL }
-        val messages = buildProviderMessages(
-            chatHistory = chatHistory,
-            quickAction = quickAction,
-            runtimeDecision = runtimeDecision
-        )
+        val messages = buildProviderMessages(request)
         val body = gson.toJson(
             mapOf(
-                "model" to model,
+                "model" to request.model,
                 "messages" to messages,
-                "stream" to false
+                "stream" to request.stream
             )
         )
 
-        val request = HttpRequest.newBuilder()
+        val httpRequest = HttpRequest.newBuilder()
             .uri(URI.create("${baseUrl}api/chat"))
             .timeout(Duration.ofSeconds(120))
             .header("Content-Type", "application/json")
@@ -119,22 +111,27 @@ class DesktopChatGateway(
             .build()
 
         val response = httpClient.send(
-            request,
+            httpRequest,
             HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
         )
         ensureSuccess("Ollama", response.statusCode(), response.body())
-        return parseOllamaResponse(response.body())
+        return AiChatResponse(
+            provider = request.provider,
+            model = request.model,
+            message = AiChatMessage(
+                role = AiChatRole.ASSISTANT,
+                text = parseOllamaResponse(response.body())
+            )
+        )
     }
 
     private fun buildProviderMessages(
-        chatHistory: List<AiChatMessage>,
-        quickAction: QuickActionSuggestion,
-        runtimeDecision: ExtensionRuntimeDecision?
+        request: AiChatRequest
     ): List<Map<String, String>> {
         val messagePayload = mutableListOf<Map<String, String>>()
-        val systemPrompt = buildSystemPrompt(quickAction, runtimeDecision)
+        val systemPrompt = buildSystemPrompt(request.quickAction, request.runtimeDecision)
         messagePayload += mapOf("role" to "system", "content" to systemPrompt)
-        chatHistory.forEach { message ->
+        request.messages.forEach { message ->
             messagePayload += mapOf(
                 "role" to message.role.asProviderRole(),
                 "content" to message.text
@@ -195,6 +192,28 @@ class DesktopChatGateway(
             "http://$trimmed"
         }
         return if (withScheme.endsWith("/")) withScheme else "$withScheme/"
+    }
+
+    private fun DesktopUserSettings.toAiChatRequest(
+        chatHistory: List<AiChatMessage>,
+        quickAction: QuickActionSuggestion,
+        runtimeDecision: ExtensionRuntimeDecision?
+    ): AiChatRequest {
+        val provider = when (this.provider) {
+            DesktopProvider.OPENROUTER -> AiProviderId.OPENROUTER
+            DesktopProvider.OLLAMA -> AiProviderId.OLLAMA
+        }
+        val model = when (this.provider) {
+            DesktopProvider.OPENROUTER -> openRouterModel.trim().ifBlank { DEFAULT_OPENROUTER_MODEL }
+            DesktopProvider.OLLAMA -> ollamaModel.trim().ifBlank { DEFAULT_OLLAMA_MODEL }
+        }
+        return AiChatRequest(
+            provider = provider,
+            model = model,
+            messages = chatHistory,
+            quickAction = quickAction,
+            runtimeDecision = runtimeDecision
+        )
     }
 
     private fun AiChatRole.asProviderRole(): String = when (this) {
