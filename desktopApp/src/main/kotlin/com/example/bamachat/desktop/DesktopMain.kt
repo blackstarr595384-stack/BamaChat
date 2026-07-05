@@ -60,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.example.bamachat.shared.core.ExtensionRuntimeOrchestrator
+import com.example.bamachat.shared.core.AiChatMessage
+import com.example.bamachat.shared.core.AiChatRole
 import com.example.bamachat.shared.core.PromptDraft
 import com.example.bamachat.shared.core.PromptDrafts
 import com.example.bamachat.shared.core.QuickActionInterpreter
@@ -325,7 +327,7 @@ private fun DesktopChatWorkspace(
     var isSending by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     val draftHistory = remember { mutableStateListOf<PromptDraft>() }
-    val chatHistory = remember { mutableStateListOf<DesktopChatMessage>() }
+    val chatHistory = remember { mutableStateListOf<AiChatMessage>() }
     val quickActionSuggestion = remember(prompt) { QuickActionInterpreter.suggest(prompt) }
     val activeExtensions = remember(settings.enabledExtensionIds) {
         DesktopExtensionCatalog.all
@@ -445,8 +447,8 @@ private fun DesktopChatWorkspace(
 
                     localError = null
                     prompt = ""
-                    chatHistory += DesktopChatMessage(
-                        role = DesktopChatRole.USER,
+                    chatHistory += AiChatMessage(
+                        role = AiChatRole.USER,
                         text = userText
                     )
 
@@ -473,16 +475,16 @@ private fun DesktopChatWorkspace(
                                 quickAction = selectedQuickAction,
                                 runtimeDecision = runtimeDecision
                             )
-                            chatHistory += DesktopChatMessage(
-                                role = DesktopChatRole.ASSISTANT,
+                            chatHistory += AiChatMessage(
+                                role = AiChatRole.ASSISTANT,
                                 text = reply
                             )
                             onStatusChange("Antwort erhalten (${settings.provider.label()}).")
                         } catch (t: Throwable) {
                             val message = t.message ?: "Unbekannter Fehler"
                             localError = message
-                            chatHistory += DesktopChatMessage(
-                                role = DesktopChatRole.ASSISTANT,
+                            chatHistory += AiChatMessage(
+                                role = AiChatRole.ASSISTANT,
                                 text = "Fehler: $message"
                             )
                             onStatusChange("Anfrage fehlgeschlagen.")
@@ -546,7 +548,7 @@ private fun DesktopChatWorkspace(
                     } else {
                         val clipboardManager = LocalClipboardManager.current
                         chatHistory.forEach { item ->
-                            val cardColor = if (item.role == DesktopChatRole.USER) {
+                            val cardColor = if (item.role == AiChatRole.USER) {
                                 Color(0xFF2C4C7D)
                             } else {
                                 Color(0xFF1E3256)
@@ -1216,7 +1218,7 @@ private fun DesktopProvider.label(): String = when (this) {
     DesktopProvider.OLLAMA -> "Ollama"
 }
 
-private fun DesktopChatRole.label(): String = when (this) {
-    DesktopChatRole.USER -> "User"
-    DesktopChatRole.ASSISTANT -> "Assistant"
+private fun AiChatRole.label(): String = when (this) {
+    AiChatRole.USER -> "User"
+    AiChatRole.ASSISTANT -> "Assistant"
 }

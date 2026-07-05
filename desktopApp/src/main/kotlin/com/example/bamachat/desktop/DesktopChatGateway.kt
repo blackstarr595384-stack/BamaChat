@@ -1,7 +1,9 @@
 package com.example.bamachat.desktop
 
-import com.example.bamachat.shared.core.ExtensionRuntimeDecision
+import com.example.bamachat.shared.core.AiChatMessage
+import com.example.bamachat.shared.core.AiChatRole
 import com.example.bamachat.shared.core.AiPromptEngine
+import com.example.bamachat.shared.core.ExtensionRuntimeDecision
 import com.example.bamachat.shared.core.QuickActionSuggestion
 import com.google.gson.Gson
 import com.google.gson.JsonArray
@@ -16,16 +18,6 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 
-enum class DesktopChatRole {
-    USER,
-    ASSISTANT
-}
-
-data class DesktopChatMessage(
-    val role: DesktopChatRole,
-    val text: String
-)
-
 class DesktopChatGateway(
     private val httpClient: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(20))
@@ -34,7 +26,7 @@ class DesktopChatGateway(
 ) {
     suspend fun requestAssistantReply(
         settings: DesktopUserSettings,
-        chatHistory: List<DesktopChatMessage>,
+        chatHistory: List<AiChatMessage>,
         quickAction: QuickActionSuggestion,
         runtimeDecision: ExtensionRuntimeDecision?
     ): String = withContext(Dispatchers.IO) {
@@ -56,7 +48,7 @@ class DesktopChatGateway(
 
     private fun requestOpenRouter(
         settings: DesktopUserSettings,
-        chatHistory: List<DesktopChatMessage>,
+        chatHistory: List<AiChatMessage>,
         quickAction: QuickActionSuggestion,
         runtimeDecision: ExtensionRuntimeDecision?
     ): String {
@@ -100,7 +92,7 @@ class DesktopChatGateway(
 
     private fun requestOllama(
         settings: DesktopUserSettings,
-        chatHistory: List<DesktopChatMessage>,
+        chatHistory: List<AiChatMessage>,
         quickAction: QuickActionSuggestion,
         runtimeDecision: ExtensionRuntimeDecision?
     ): String {
@@ -135,7 +127,7 @@ class DesktopChatGateway(
     }
 
     private fun buildProviderMessages(
-        chatHistory: List<DesktopChatMessage>,
+        chatHistory: List<AiChatMessage>,
         quickAction: QuickActionSuggestion,
         runtimeDecision: ExtensionRuntimeDecision?
     ): List<Map<String, String>> {
@@ -205,9 +197,9 @@ class DesktopChatGateway(
         return if (withScheme.endsWith("/")) withScheme else "$withScheme/"
     }
 
-    private fun DesktopChatRole.asProviderRole(): String = when (this) {
-        DesktopChatRole.USER -> "user"
-        DesktopChatRole.ASSISTANT -> "assistant"
+    private fun AiChatRole.asProviderRole(): String = when (this) {
+        AiChatRole.USER -> "user"
+        AiChatRole.ASSISTANT -> "assistant"
     }
 
     private fun JsonObject.getString(key: String): String? {
