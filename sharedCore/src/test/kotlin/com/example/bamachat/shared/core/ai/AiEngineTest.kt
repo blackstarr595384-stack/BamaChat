@@ -18,17 +18,37 @@ import org.junit.Test
 
 class AiEngineTest {
     @Test
-    fun selectReturnsRegisteredProvider() {
+    fun registryRegistersProvider() {
         val provider = FakeProvider(AiProviderId.OPENROUTER)
-        val engine = AiEngine(listOf(provider))
+        val registry = AiProviderRegistry().register(provider)
 
-        assertSame(provider, engine.select(AiProviderId.OPENROUTER))
+        assertTrue(registry.contains(AiProviderId.OPENROUTER))
+        assertSame(provider, registry.provider(AiProviderId.OPENROUTER))
+        assertEquals(listOf(provider), registry.providers())
     }
 
     @Test
-    fun chatDelegatesToSelectedProvider() = runTest {
+    fun registryRemovesProvider() {
+        val provider = FakeProvider(AiProviderId.OPENROUTER)
+        val registry = AiProviderRegistry(listOf(provider))
+
+        assertSame(provider, registry.unregister(AiProviderId.OPENROUTER))
+        assertFalse(registry.contains(AiProviderId.OPENROUTER))
+    }
+
+    @Test
+    fun registryReturnsDefaultProvider() {
+        val openRouter = FakeProvider(AiProviderId.OPENROUTER)
+        val ollama = FakeProvider(AiProviderId.OLLAMA)
+        val registry = AiProviderRegistry(listOf(openRouter, ollama))
+
+        assertSame(openRouter, registry.defaultProvider())
+    }
+
+    @Test
+    fun chatDelegatesThroughRegistry() = runTest {
         val provider = FakeProvider(AiProviderId.OLLAMA)
-        val engine = AiEngine(listOf(provider))
+        val engine = AiEngine(AiProviderRegistry(listOf(provider)))
         val response = engine.chat(request(AiProviderId.OLLAMA))
 
         assertEquals(AiProviderId.OLLAMA, response.provider)
@@ -37,7 +57,9 @@ class AiEngineTest {
 
     @Test
     fun streamRejectsProviderWithoutStreamingSupport() {
-        val engine = AiEngine(listOf(FakeProvider(AiProviderId.OPENROUTER, streaming = false)))
+        val engine = AiEngine(
+            AiProviderRegistry(listOf(FakeProvider(AiProviderId.OPENROUTER, streaming = false)))
+        )
 
         assertThrows(IllegalStateException::class.java) {
             engine.stream(request(AiProviderId.OPENROUTER))
@@ -47,10 +69,10 @@ class AiEngineTest {
     @Test
     fun supportsStreamingReflectsProviderCapability() {
         val engine = AiEngine(
-            listOf(
+            AiProviderRegistry(listOf(
                 FakeProvider(AiProviderId.OPENROUTER, streaming = true),
                 FakeProvider(AiProviderId.OLLAMA, streaming = false)
-            )
+            ))
         )
 
         assertTrue(engine.supportsStreaming(AiProviderId.OPENROUTER))
