@@ -37,8 +37,11 @@ fun List<OpenRouterMessage>.toAiChatRequestForValidation(
 fun OpenRouterMessage.toAiChatMessageOrNull(): AiChatMessage? {
     val content = content ?: return null
     val mappedRole = when (role.trim().lowercase()) {
+        "system" -> AiChatRole.SYSTEM
         "user" -> AiChatRole.USER
         "assistant" -> AiChatRole.ASSISTANT
+        // Developer messages are not part of the current shared role model yet.
+        // Tool messages carry call results and stay out of this production dry-run mapping.
         else -> return null
     }
     return AiChatMessage(role = mappedRole, text = content)

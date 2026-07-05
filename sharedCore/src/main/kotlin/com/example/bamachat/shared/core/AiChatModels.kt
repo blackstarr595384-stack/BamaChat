@@ -1,6 +1,7 @@
 package com.example.bamachat.shared.core
 
 enum class AiChatRole {
+    SYSTEM,
     USER,
     ASSISTANT
 }

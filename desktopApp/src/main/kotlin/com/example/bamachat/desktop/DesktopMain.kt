@@ -1219,6 +1219,7 @@ private fun DesktopProvider.label(): String = when (this) {
 }
 
 private fun AiChatRole.label(): String = when (this) {
+    AiChatRole.SYSTEM -> "System"
     AiChatRole.USER -> "User"
     AiChatRole.ASSISTANT -> "Assistant"
 }

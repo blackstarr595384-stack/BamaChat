@@ -229,6 +229,7 @@ class DesktopChatGateway(
     }
 
     private fun AiChatRole.asProviderRole(): String = when (this) {
+        AiChatRole.SYSTEM -> "system"
         AiChatRole.USER -> "user"
         AiChatRole.ASSISTANT -> "assistant"
     }
