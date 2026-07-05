@@ -8,6 +8,7 @@ import com.example.bamachat.shared.core.AiProviderId
 import com.example.bamachat.shared.core.AiPromptEngine
 import com.example.bamachat.shared.core.ExtensionRuntimeDecision
 import com.example.bamachat.shared.core.QuickActionSuggestion
+import com.example.bamachat.shared.core.ai.AiEngine
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -38,7 +39,9 @@ class DesktopChatGateway(
             quickAction = quickAction,
             runtimeDecision = runtimeDecision
         )
-        val response = DesktopAiProviderAdapter(settings, this@DesktopChatGateway).chat(request)
+        val response = AiEngine(
+            listOf(DesktopAiProviderAdapter(settings, this@DesktopChatGateway))
+        ).chat(request)
         response.message.text
     }
 
