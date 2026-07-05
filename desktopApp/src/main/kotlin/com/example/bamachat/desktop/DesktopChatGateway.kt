@@ -53,6 +53,7 @@ class DesktopChatGateway(
         when (request.provider) {
             AiProviderId.OPENROUTER -> requestOpenRouter(settings, request)
             AiProviderId.OLLAMA -> requestOllama(settings, request)
+            else -> throw IllegalStateException("Desktop provider is not supported: ${request.provider}")
         }
     }
 

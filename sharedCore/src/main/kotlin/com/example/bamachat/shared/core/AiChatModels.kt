@@ -12,7 +12,11 @@ data class AiChatMessage(
 
 enum class AiProviderId {
     OPENROUTER,
-    OLLAMA
+    OLLAMA,
+    GROQ,
+    CEREBRAS,
+    TOGETHER,
+    OPENCODE
 }
 
 data class AiChatRequest(
