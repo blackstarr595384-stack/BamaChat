@@ -38,11 +38,18 @@ class DesktopChatGateway(
             quickAction = quickAction,
             runtimeDecision = runtimeDecision
         )
-        val response = when (request.provider) {
+        val response = DesktopAiProviderAdapter(settings, this@DesktopChatGateway).chat(request)
+        response.message.text
+    }
+
+    suspend fun chat(
+        settings: DesktopUserSettings,
+        request: AiChatRequest
+    ): AiChatResponse = withContext(Dispatchers.IO) {
+        when (request.provider) {
             AiProviderId.OPENROUTER -> requestOpenRouter(settings, request)
             AiProviderId.OLLAMA -> requestOllama(settings, request)
         }
-        response.message.text
     }
 
     private fun requestOpenRouter(
@@ -200,8 +207,8 @@ class DesktopChatGateway(
         runtimeDecision: ExtensionRuntimeDecision?
     ): AiChatRequest {
         val provider = when (this.provider) {
-            DesktopProvider.OPENROUTER -> AiProviderId.OPENROUTER
-            DesktopProvider.OLLAMA -> AiProviderId.OLLAMA
+            DesktopProvider.OPENROUTER -> DesktopProvider.OPENROUTER.toAiProviderId()
+            DesktopProvider.OLLAMA -> DesktopProvider.OLLAMA.toAiProviderId()
         }
         val model = when (this.provider) {
             DesktopProvider.OPENROUTER -> openRouterModel.trim().ifBlank { DEFAULT_OPENROUTER_MODEL }
