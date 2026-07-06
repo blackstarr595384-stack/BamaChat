@@ -809,7 +809,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
             val orchestrator = AndroidAiOrchestrator(
                 isExperimentalEnabled = {
-                    prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+                    AndroidAiOrchestrator.isSharedAiPilotEnabled(
+                        sharedAiExperimental = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false),
+                        developerModeEnabled = prefs.getBoolean("developer_mode_enabled", false)
+                    )
                 },
                 chatCompletion = service::chatCompletion
             )

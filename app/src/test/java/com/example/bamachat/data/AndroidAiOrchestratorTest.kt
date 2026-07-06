@@ -14,6 +14,50 @@ import org.junit.Test
 
 class AndroidAiOrchestratorTest {
     @Test
+    fun sharedAiPilotGateIsOffWhenBothFlagsAreFalse() {
+        assertEquals(
+            false,
+            AndroidAiOrchestrator.isSharedAiPilotEnabled(
+                sharedAiExperimental = false,
+                developerModeEnabled = false
+            )
+        )
+    }
+
+    @Test
+    fun sharedAiPilotGateIsOffWhenOnlyExperimentalFlagIsTrue() {
+        assertEquals(
+            false,
+            AndroidAiOrchestrator.isSharedAiPilotEnabled(
+                sharedAiExperimental = true,
+                developerModeEnabled = false
+            )
+        )
+    }
+
+    @Test
+    fun sharedAiPilotGateIsOffWhenOnlyDeveloperModeIsTrue() {
+        assertEquals(
+            false,
+            AndroidAiOrchestrator.isSharedAiPilotEnabled(
+                sharedAiExperimental = false,
+                developerModeEnabled = true
+            )
+        )
+    }
+
+    @Test
+    fun sharedAiPilotGateIsOnWhenBothFlagsAreTrue() {
+        assertEquals(
+            true,
+            AndroidAiOrchestrator.isSharedAiPilotEnabled(
+                sharedAiExperimental = true,
+                developerModeEnabled = true
+            )
+        )
+    }
+
+    @Test
     fun flagOffKeepsLegacyPathByReturningNullWithoutCallingCompletion() = runBlocking {
         var completionCalls = 0
         val orchestrator = AndroidAiOrchestrator(

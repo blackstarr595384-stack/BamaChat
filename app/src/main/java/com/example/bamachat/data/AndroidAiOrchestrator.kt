@@ -57,5 +57,10 @@ class AndroidAiOrchestrator(
 
     companion object {
         const val KEY_SHARED_AI_EXPERIMENTAL = "shared.ai.experimental"
+
+        fun isSharedAiPilotEnabled(
+            sharedAiExperimental: Boolean,
+            developerModeEnabled: Boolean
+        ): Boolean = sharedAiExperimental && developerModeEnabled
     }
 }
