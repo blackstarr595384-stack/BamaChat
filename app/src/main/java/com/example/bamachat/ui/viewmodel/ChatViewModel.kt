@@ -554,13 +554,25 @@ class ChatViewModel @Inject constructor(
             if (canResearch) chatEngine.resolveLiveWebContext(text, forceByExtension = forceWebResearch) else null
         } else null
 
+        val messages = chatEngine.buildOpenRouterHistory(
+            _messages.value, latestUserText = text,
+            liveWebContext = webContext?.promptContext,
+            runtimeContext = mergedRuntimeContext,
+            historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
+        )
+        val pilotContent = runExperimentalNonStreamingChat(systemPrompt, messages)
+        if (!pilotContent.isNullOrBlank()) {
+            saveExperimentalNonStreamingResponse(convId, pilotContent, webContext)
+            return
+        }
+
         val toolDefs = mcpServerManager.getToolDefinitionsOpenAI() + mcpWorkflowManager.getOpenAIToolDefinitions()
         val hasTools = toolDefs.isNotEmpty()
 
         if (hasTools) {
             runAgentLoop(convId, text, systemPrompt, startedAt, webContext, toolDefs)
         } else {
-            runStreamingChat(convId, text, systemPrompt, mergedRuntimeContext, webContext, forceWebResearch, startedAt)
+            runStreamingChat(convId, systemPrompt, messages, webContext, startedAt)
         }
     }
 
@@ -709,33 +721,9 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     }
 
     private suspend fun runStreamingChat(
-        convId: String, text: String, systemPrompt: String,
-        mergedRuntimeContext: String?, webContext: ChatEngine.LiveWebContext?,
-        forceWebResearch: Boolean, startedAt: Long
+        convId: String, systemPrompt: String, messages: List<OpenRouterMessage>,
+        webContext: ChatEngine.LiveWebContext?, startedAt: Long
     ) {
-        val messages = chatEngine.buildOpenRouterHistory(
-            _messages.value, latestUserText = text,
-            liveWebContext = webContext?.promptContext,
-            runtimeContext = mergedRuntimeContext,
-            historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
-        )
-
-        val pilotContent = runExperimentalNonStreamingChat(systemPrompt, messages)
-        if (!pilotContent.isNullOrBlank()) {
-            val assistantMsg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = pilotContent,
-                isUser = false,
-                timestamp = System.currentTimeMillis(),
-                sources = webContext?.sources.orEmpty(),
-                webFetchedAtIso = webContext?.fetchedAtIso
-            )
-            repo.saveMessage(convId, assistantMsg, touchConversation = true)
-            clearRetryContext()
-            notificationService.show("BamaChat", pilotContent, prefs.getBoolean("notifications_enabled", true))
-            return
-        }
-
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
@@ -792,6 +780,14 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         systemPrompt: String,
         messages: List<OpenRouterMessage>
     ): String? {
+        val sharedAiExperimental = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+        val developerModeEnabled = prefs.getBoolean("developer_mode_enabled", false)
+        val pilotEnabled = AndroidAiOrchestrator.isSharedAiPilotEnabled(
+            sharedAiExperimental = sharedAiExperimental,
+            developerModeEnabled = developerModeEnabled
+        )
+        if (!pilotEnabled) return null
+
         val apiKey = SecureSettingsStore
             .getString(appContext, prefs, "openrouter_api_key")
             .takeIf { it.length > 10 }
@@ -808,18 +804,31 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 )
             val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
             val orchestrator = AndroidAiOrchestrator(
-                isExperimentalEnabled = {
-                    AndroidAiOrchestrator.isSharedAiPilotEnabled(
-                        sharedAiExperimental = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false),
-                        developerModeEnabled = prefs.getBoolean("developer_mode_enabled", false)
-                    )
-                },
+                isExperimentalEnabled = { pilotEnabled },
                 chatCompletion = service::chatCompletion
             )
             orchestrator.chatOrNull(request)?.message?.text?.trim()?.takeIf { it.isNotBlank() }
         }.onFailure { error ->
             AppTelemetry.logError("android_ai_orchestrator_pilot_failed", error)
         }.getOrNull()
+    }
+
+    private suspend fun saveExperimentalNonStreamingResponse(
+        convId: String,
+        content: String,
+        webContext: ChatEngine.LiveWebContext?
+    ) {
+        val assistantMsg = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            text = content,
+            isUser = false,
+            timestamp = System.currentTimeMillis(),
+            sources = webContext?.sources.orEmpty(),
+            webFetchedAtIso = webContext?.fetchedAtIso
+        )
+        repo.saveMessage(convId, assistantMsg, touchConversation = true)
+        clearRetryContext()
+        notificationService.show("BamaChat", content, prefs.getBoolean("notifications_enabled", true))
     }
 
     fun getConversationsForWorkspace(activeWorkspaceName: String, onlyActiveWorkspace: Boolean): List<com.example.bamachat.data.local.ConversationEntity> {

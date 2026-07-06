@@ -16,14 +16,19 @@ class SharedAiPilotDebugToggleReceiver : BroadcastReceiver() {
             enabled = intent.getBooleanExtra(SharedAiPilotDebugToggle.EXTRA_ENABLED, false)
         ) ?: return
 
-        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-            .edit()
+        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val committed = prefs.edit()
             .putBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, enabled)
-            .apply()
+            .commit()
+        val stored = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
 
         AppTelemetry.logEvent(
             "debug_shared_ai_pilot_toggled",
-            mapOf("enabled" to enabled.toString())
+            mapOf(
+                "enabled" to enabled.toString(),
+                "stored" to stored.toString(),
+                "committed" to committed.toString()
+            )
         )
     }
 }
