@@ -14,19 +14,32 @@ class SharedAiPilotDebugToggleReceiver : BroadcastReceiver() {
         val enabled = SharedAiPilotDebugToggle.resolveRequestedEnabled(
             hasEnabledExtra = intent.hasExtra(SharedAiPilotDebugToggle.EXTRA_ENABLED),
             enabled = intent.getBooleanExtra(SharedAiPilotDebugToggle.EXTRA_ENABLED, false)
-        ) ?: return
+        )
+        val streamingEnabled = SharedAiPilotDebugToggle.resolveRequestedStreamingEnabled(
+            hasStreamingEnabledExtra = intent.hasExtra(SharedAiPilotDebugToggle.EXTRA_STREAMING_ENABLED),
+            streamingEnabled = intent.getBooleanExtra(SharedAiPilotDebugToggle.EXTRA_STREAMING_ENABLED, false)
+        )
+        if (enabled == null && streamingEnabled == null) return
 
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val committed = prefs.edit()
-            .putBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, enabled)
-            .commit()
+        val editor = prefs.edit()
+        if (enabled != null) {
+            editor.putBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, enabled)
+        }
+        if (streamingEnabled != null) {
+            editor.putBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_STREAMING_PILOT, streamingEnabled)
+        }
+        val committed = editor.commit()
         val stored = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+        val streamingStored = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_STREAMING_PILOT, false)
 
         AppTelemetry.logEvent(
             "debug_shared_ai_pilot_toggled",
             mapOf(
-                "enabled" to enabled.toString(),
+                "enabled" to enabled?.toString(),
                 "stored" to stored.toString(),
+                "streaming_enabled" to streamingEnabled?.toString(),
+                "streaming_stored" to streamingStored.toString(),
                 "committed" to committed.toString()
             )
         )

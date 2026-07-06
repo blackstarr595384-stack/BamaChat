@@ -2,14 +2,25 @@ package com.example.bamachat.data
 
 import com.example.bamachat.shared.core.AiChatMessage
 import com.example.bamachat.shared.core.AiChatRequest
+import com.example.bamachat.shared.core.AiChatResponse
 import com.example.bamachat.shared.core.AiChatRole
 import com.example.bamachat.shared.core.AiProviderId
 import com.example.bamachat.shared.core.QuickActionSuggestion
+import com.example.bamachat.shared.core.ai.AiStreamCompleted
+import com.example.bamachat.shared.core.ai.AiStreamDelta
+import com.example.bamachat.shared.core.ai.AiStreamError
+import com.example.bamachat.shared.core.ai.AiStreamEvent
+import com.example.bamachat.shared.core.ai.AiStreamFinished
+import com.example.bamachat.shared.core.ai.AiStreamStarted
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AndroidAiOrchestratorTest {
@@ -55,6 +66,15 @@ class AndroidAiOrchestratorTest {
                 developerModeEnabled = true
             )
         )
+    }
+
+    @Test
+    fun streamingPilotGateRequiresAllFlags() {
+        assertEquals(false, AndroidAiOrchestrator.isStreamingPilotEnabled(false, false, false))
+        assertEquals(false, AndroidAiOrchestrator.isStreamingPilotEnabled(true, false, true))
+        assertEquals(false, AndroidAiOrchestrator.isStreamingPilotEnabled(false, true, true))
+        assertEquals(false, AndroidAiOrchestrator.isStreamingPilotEnabled(true, true, false))
+        assertEquals(true, AndroidAiOrchestrator.isStreamingPilotEnabled(true, true, true))
     }
 
     @Test
@@ -152,6 +172,115 @@ class AndroidAiOrchestratorTest {
         }
     }
 
+    @Test
+    fun streamFlagOffUsesLegacyFallback() = runBlocking {
+        var legacyCalls = 0
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = false,
+            legacyStreamEvents = {
+                legacyCalls++
+                flowOf(completedEvent("legacy"))
+            }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertEquals(1, legacyCalls)
+        assertEquals("legacy", events.completedText())
+    }
+
+    @Test
+    fun streamFlagOnEmitsSharedAiStreamEvents() = runBlocking {
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = { flowOf("Hel", "lo") },
+            legacyStreamEvents = { flowOf(completedEvent("legacy")) }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertTrue(events.first() is AiStreamStarted)
+        assertEquals(listOf("Hel", "lo"), events.filterIsInstance<AiStreamDelta>().map { it.text })
+        assertEquals("Hello", events.completedText())
+        assertTrue(events.last() is AiStreamFinished)
+    }
+
+    @Test
+    fun streamProviderErrorFallsBackToLegacyStream() = runBlocking {
+        var legacyCalls = 0
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = {
+                flow {
+                    emit("partial")
+                    throw IllegalStateException("provider down")
+                }
+            },
+            legacyStreamEvents = {
+                legacyCalls++
+                flowOf(completedEvent("legacy after error"))
+            }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertEquals(1, legacyCalls)
+        assertEquals("legacy after error", events.completedText())
+        assertEquals(emptyList<AiStreamError>(), events.filterIsInstance<AiStreamError>())
+    }
+
+    @Test
+    fun streamEmptyPilotFallsBackToLegacyStream() = runBlocking {
+        var legacyCalls = 0
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = { flowOf() },
+            legacyStreamEvents = {
+                legacyCalls++
+                flowOf(completedEvent("legacy after empty"))
+            }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertEquals(1, legacyCalls)
+        assertEquals("legacy after empty", events.completedText())
+    }
+
+    @Test
+    fun streamCancellationIsNotSwallowed() {
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = { flow { throw CancellationException("cancel stream") } },
+            legacyStreamEvents = { flowOf(completedEvent("legacy")) }
+        )
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking { orchestrator.streamEvents(sampleRequest()).toList() }
+        }
+    }
+
+    @Test
+    fun streamFallbackTelemetryIsEmitted() = runBlocking {
+        val eventsLog = mutableListOf<String>()
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = {
+                flow {
+                    throw IllegalStateException("provider down")
+                }
+            },
+            legacyStreamEvents = { flowOf(completedEvent("legacy")) },
+            logEvent = { name, _ -> eventsLog.add(name) }
+        )
+
+        orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertTrue(eventsLog.contains("stream_pilot_attempt"))
+        assertTrue(eventsLog.contains("stream_pilot_error"))
+        assertTrue(eventsLog.contains("stream_pilot_fallback"))
+    }
+
     private fun sampleRequest(): AiChatRequest {
         return AiChatRequest(
             provider = AiProviderId.OPENROUTER,
@@ -165,6 +294,39 @@ class AndroidAiOrchestratorTest {
             temperature = 0.25,
             stream = false
         )
+    }
+
+    private fun streamOrchestrator(
+        isStreamingEnabled: Boolean,
+        streamTextChunks: ((OpenRouterChatRequest) -> kotlinx.coroutines.flow.Flow<String>)? = { flowOf("pilot") },
+        legacyStreamEvents: (AiChatRequest) -> kotlinx.coroutines.flow.Flow<AiStreamEvent> = {
+            flowOf(completedEvent("legacy"))
+        },
+        logEvent: (String, Map<String, Any?>) -> Unit = ::ignoreEvent
+    ): AndroidAiOrchestrator {
+        return AndroidAiOrchestrator(
+            isExperimentalEnabled = { false },
+            chatCompletion = { OpenRouterChatResponse(choices = emptyList()) },
+            isStreamingExperimentalEnabled = { isStreamingEnabled },
+            streamTextChunks = streamTextChunks,
+            legacyStreamEvents = legacyStreamEvents,
+            logEvent = logEvent,
+            logError = ::ignoreError
+        )
+    }
+
+    private fun completedEvent(text: String): AiStreamCompleted {
+        return AiStreamCompleted(
+            AiChatResponse(
+                provider = AiProviderId.OPENROUTER,
+                model = "openrouter/pilot",
+                message = AiChatMessage(AiChatRole.ASSISTANT, text)
+            )
+        )
+    }
+
+    private fun List<AiStreamEvent>.completedText(): String? {
+        return filterIsInstance<AiStreamCompleted>().single().response.message.text
     }
 
     private fun ignoreEvent(name: String, params: Map<String, Any?>) {

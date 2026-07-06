@@ -36,4 +36,36 @@ class SharedAiPilotDebugToggleTest {
             )
         )
     }
+
+    @Test
+    fun missingStreamingExtraDoesNotChangeStreamingPreference() {
+        assertNull(
+            SharedAiPilotDebugToggle.resolveRequestedStreamingEnabled(
+                hasStreamingEnabledExtra = false,
+                streamingEnabled = true
+            )
+        )
+    }
+
+    @Test
+    fun streamingExtraCanActivateStreamingPilotFlag() {
+        assertEquals(
+            true,
+            SharedAiPilotDebugToggle.resolveRequestedStreamingEnabled(
+                hasStreamingEnabledExtra = true,
+                streamingEnabled = true
+            )
+        )
+    }
+
+    @Test
+    fun streamingExtraCanDeactivateStreamingPilotFlagImmediately() {
+        assertEquals(
+            false,
+            SharedAiPilotDebugToggle.resolveRequestedStreamingEnabled(
+                hasStreamingEnabledExtra = true,
+                streamingEnabled = false
+            )
+        )
+    }
 }

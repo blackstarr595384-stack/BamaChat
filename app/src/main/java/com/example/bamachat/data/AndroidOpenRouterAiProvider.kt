@@ -12,6 +12,7 @@ import com.example.bamachat.shared.core.ai.AiStreamEvent
 import com.example.bamachat.shared.core.ai.AiStreamFinished
 import com.example.bamachat.shared.core.ai.AiStreamStarted
 import com.example.bamachat.shared.core.ai.AiProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
@@ -93,6 +94,8 @@ class AndroidOpenRouterAiProvider(
                     )
                 )
             )
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             emit(
                 AiStreamError(
