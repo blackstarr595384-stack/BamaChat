@@ -1,0 +1,29 @@
+package com.example.bamachat.debug
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import com.example.bamachat.data.AndroidAiOrchestrator
+import com.example.bamachat.data.SharedAiPilotDebugToggle
+import com.example.bamachat.util.AppTelemetry
+
+class SharedAiPilotDebugToggleReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != SharedAiPilotDebugToggle.ACTION_SET_ENABLED) return
+
+        val enabled = SharedAiPilotDebugToggle.resolveRequestedEnabled(
+            hasEnabledExtra = intent.hasExtra(SharedAiPilotDebugToggle.EXTRA_ENABLED),
+            enabled = intent.getBooleanExtra(SharedAiPilotDebugToggle.EXTRA_ENABLED, false)
+        ) ?: return
+
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, enabled)
+            .apply()
+
+        AppTelemetry.logEvent(
+            "debug_shared_ai_pilot_toggled",
+            mapOf("enabled" to enabled.toString())
+        )
+    }
+}

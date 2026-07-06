@@ -3,5 +3,13 @@
     xmlns:tools="http://schemas.android.com/tools">
     <application
         android:usesCleartextTraffic="true"
-        tools:replace="android:usesCleartextTraffic" />
+        tools:replace="android:usesCleartextTraffic">
+        <receiver
+            android:name=".debug.SharedAiPilotDebugToggleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.bamachat.debug.SET_SHARED_AI_PILOT" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>
