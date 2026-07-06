@@ -11,10 +11,10 @@ class AndroidAiProviderRegistryFactoryTest {
     @Test
     fun createsRegistryWithOpenRouterProviderRegistered() {
         var chatWasCalled = false
-        val openRouterProvider = AndroidOpenRouterAiProvider {
+        val openRouterProvider = AndroidOpenRouterAiProvider(chatCompletion = {
             chatWasCalled = true
             OpenRouterChatResponse(choices = emptyList())
-        }
+        })
 
         val registry = AndroidAiProviderRegistryFactory.create(openRouterProvider)
 
