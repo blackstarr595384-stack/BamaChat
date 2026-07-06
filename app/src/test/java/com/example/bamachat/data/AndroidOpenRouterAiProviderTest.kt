@@ -8,8 +8,11 @@ import com.example.bamachat.shared.core.QuickActionSuggestion
 import com.example.bamachat.shared.core.ai.AiStreamCompleted
 import com.example.bamachat.shared.core.ai.AiStreamDelta
 import com.example.bamachat.shared.core.ai.AiStreamError
+import com.example.bamachat.shared.core.ai.AiStreamEvent
 import com.example.bamachat.shared.core.ai.AiStreamFinished
 import com.example.bamachat.shared.core.ai.AiStreamStarted
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
@@ -195,6 +198,34 @@ class AndroidOpenRouterAiProviderTest {
         assertTrue(events.last() is AiStreamFinished)
         assertEquals(AiProviderId.OPENROUTER, events.last().provider)
         assertEquals("test-model", events.last().model)
+    }
+
+    @Test
+    fun streamEventsDoesNotEmitFinishedForCancellation() {
+        val provider = AndroidOpenRouterAiProvider(
+            chatCompletion = { OpenRouterChatResponse(choices = emptyList()) },
+            streamTextChunks = {
+                flow {
+                    emit("partial")
+                    throw CancellationException("cancelled")
+                }
+            }
+        )
+        val events = mutableListOf<AiStreamEvent>()
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                provider.streamEvents(sampleRequest()).collect { event ->
+                    events.add(event)
+                }
+            }
+        }
+
+        assertTrue(events.first() is AiStreamStarted)
+        assertEquals(listOf("partial"), events.filterIsInstance<AiStreamDelta>().map { it.text })
+        assertEquals(emptyList<AiStreamCompleted>(), events.filterIsInstance<AiStreamCompleted>())
+        assertEquals(emptyList<AiStreamError>(), events.filterIsInstance<AiStreamError>())
+        assertEquals(emptyList<AiStreamFinished>(), events.filterIsInstance<AiStreamFinished>())
     }
 
     private fun sampleRequest(provider: AiProviderId = AiProviderId.OPENROUTER): AiChatRequest {

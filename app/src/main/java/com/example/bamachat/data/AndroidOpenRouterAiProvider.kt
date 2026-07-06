@@ -67,6 +67,7 @@ class AndroidOpenRouterAiProvider(
             ?: throw UnsupportedOperationException("Android OpenRouter stream events are not wired to transport yet.")
         val streamRequest = request.toOpenRouterChatRequest(stream = true)
         val accumulated = StringBuilder()
+        var cancelled = false
 
         emit(AiStreamStarted(provider = AiProviderId.OPENROUTER, model = request.model))
         try {
@@ -95,6 +96,7 @@ class AndroidOpenRouterAiProvider(
                 )
             )
         } catch (error: CancellationException) {
+            cancelled = true
             throw error
         } catch (error: Exception) {
             emit(
@@ -106,7 +108,9 @@ class AndroidOpenRouterAiProvider(
                 )
             )
         } finally {
-            emit(AiStreamFinished(provider = AiProviderId.OPENROUTER, model = request.model))
+            if (!cancelled) {
+                emit(AiStreamFinished(provider = AiProviderId.OPENROUTER, model = request.model))
+            }
         }
     }
 

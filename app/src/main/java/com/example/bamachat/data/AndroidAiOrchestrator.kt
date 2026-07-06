@@ -14,7 +14,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 
 /**
@@ -28,7 +27,13 @@ class AndroidAiOrchestrator(
     private val chatCompletion: suspend (OpenRouterChatRequest) -> OpenRouterChatResponse,
     private val isStreamingExperimentalEnabled: () -> Boolean = { false },
     private val streamTextChunks: ((OpenRouterChatRequest) -> Flow<String>)? = null,
-    private val legacyStreamEvents: (AiChatRequest) -> Flow<AiStreamEvent> = { emptyFlow() },
+    private val legacyStreamEvents: (AiChatRequest) -> Flow<AiStreamEvent> = { request ->
+        flow {
+            throw IllegalStateException(
+                "Legacy stream fallback is not configured for ${request.provider.name}/${request.model}."
+            )
+        }
+    },
     private val logEvent: (String, Map<String, Any?>) -> Unit = { name, params ->
         AppTelemetry.logEvent(name, params)
     },

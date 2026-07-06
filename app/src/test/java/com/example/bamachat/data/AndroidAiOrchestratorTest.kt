@@ -261,6 +261,41 @@ class AndroidAiOrchestratorTest {
     }
 
     @Test
+    fun streamMissingLegacyFallbackFailsClearly() {
+        val orchestrator = AndroidAiOrchestrator(
+            isExperimentalEnabled = { false },
+            chatCompletion = { OpenRouterChatResponse(choices = emptyList()) },
+            isStreamingExperimentalEnabled = { false },
+            logEvent = ::ignoreEvent,
+            logError = ::ignoreError
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            runBlocking { orchestrator.streamEvents(sampleRequest()).toList() }
+        }
+
+        assertTrue(error.message.orEmpty().contains("Legacy stream fallback is not configured"))
+    }
+
+    @Test
+    fun streamLegacyFallbackExceptionPropagates() {
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = false,
+            legacyStreamEvents = {
+                flow {
+                    throw IllegalStateException("legacy stream failed")
+                }
+            }
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            runBlocking { orchestrator.streamEvents(sampleRequest()).toList() }
+        }
+
+        assertEquals("legacy stream failed", error.message)
+    }
+
+    @Test
     fun streamFallbackTelemetryIsEmitted() = runBlocking {
         val eventsLog = mutableListOf<String>()
         val orchestrator = streamOrchestrator(
