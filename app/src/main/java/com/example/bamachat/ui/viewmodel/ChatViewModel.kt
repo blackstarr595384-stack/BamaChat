@@ -29,6 +29,8 @@ import com.example.bamachat.util.McpContentItem
 import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.McpWorkflowStatus
 import com.example.bamachat.util.MonetizationConfig
+import com.example.bamachat.data.AndroidAiOrchestrator
+import com.example.bamachat.data.ApiClient
 import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.util.UserErrorMessage
 import com.example.bamachat.data.OpenRouterChatRequest
@@ -718,6 +720,22 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
         )
 
+        val pilotContent = runExperimentalNonStreamingChat(systemPrompt, messages)
+        if (!pilotContent.isNullOrBlank()) {
+            val assistantMsg = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                text = pilotContent,
+                isUser = false,
+                timestamp = System.currentTimeMillis(),
+                sources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso
+            )
+            repo.saveMessage(convId, assistantMsg, touchConversation = true)
+            clearRetryContext()
+            notificationService.show("BamaChat", pilotContent, prefs.getBoolean("notifications_enabled", true))
+            return
+        }
+
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
@@ -768,6 +786,37 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             handleError(e)
             repo.deleteMessage(assistantMsg.id)
         }
+    }
+
+    private suspend fun runExperimentalNonStreamingChat(
+        systemPrompt: String,
+        messages: List<OpenRouterMessage>
+    ): String? {
+        val apiKey = SecureSettingsStore
+            .getString(appContext, prefs, "openrouter_api_key")
+            .takeIf { it.length > 10 }
+            ?: return null
+
+        return runCatching {
+            val request = (listOf(OpenRouterMessage("system", systemPrompt)) + messages)
+                .toAiChatRequestForValidation(
+                    provider = AiProviderId.OPENROUTER,
+                    model = selectedModel.value,
+                    maxTokens = 1024,
+                    temperature = 0.7,
+                    stream = false
+                )
+            val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
+            val orchestrator = AndroidAiOrchestrator(
+                isExperimentalEnabled = {
+                    prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+                },
+                chatCompletion = service::chatCompletion
+            )
+            orchestrator.chatOrNull(request)?.message?.text?.trim()?.takeIf { it.isNotBlank() }
+        }.onFailure { error ->
+            AppTelemetry.logError("android_ai_orchestrator_pilot_failed", error)
+        }.getOrNull()
     }
 
     fun getConversationsForWorkspace(activeWorkspaceName: String, onlyActiveWorkspace: Boolean): List<com.example.bamachat.data.local.ConversationEntity> {
