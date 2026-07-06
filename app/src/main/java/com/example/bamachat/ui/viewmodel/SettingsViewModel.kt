@@ -75,6 +75,9 @@ class SettingsViewModel @Inject constructor(
         private const val CLEAR_TTS_SPEED = 1.0f
         private const val CLEAR_TTS_PITCH = 0.96f
         private const val DEFAULT_OPENCODE_MODEL = ApiClient.OPENCODE_DEFAULT_MODEL
+        internal fun resolveDeveloperModePreference(storedValue: Boolean?): Boolean {
+            return storedValue ?: false
+        }
         const val TTS_STYLE_NATURAL = "natural"
         const val TTS_STYLE_CLEAR = "clear"
         val DISPLAY_PRESET_OPTIONS = DisplaySettingsPresets.options
@@ -211,7 +214,12 @@ class SettingsViewModel @Inject constructor(
 
     private val _streamingEnabled = MutableStateFlow(prefs.getBoolean("streaming_enabled", true))
     val streamingEnabled: StateFlow<Boolean> = _streamingEnabled.asStateFlow()
-    private val _developerModeEnabled = MutableStateFlow(prefs.getBoolean("developer_mode_enabled", false))
+    private val _developerModeEnabled = MutableStateFlow(
+        resolveDeveloperModePreference(
+            prefs.takeIf { it.contains("developer_mode_enabled") }
+                ?.getBoolean("developer_mode_enabled", false)
+        )
+    )
     val developerModeEnabled: StateFlow<Boolean> = _developerModeEnabled.asStateFlow()
     private val _developerUnlimitedTraining = MutableStateFlow(prefs.getBoolean("developer_unlimited_training", false))
     val developerUnlimitedTraining: StateFlow<Boolean> = _developerUnlimitedTraining.asStateFlow()
@@ -473,11 +481,7 @@ class SettingsViewModel @Inject constructor(
         ensurePhotoAiTokenBaseline()
         ensureAgentProfileBaseline()
         ensureWorkspaceBaseline()
-        // Developer-Training standardmäßig freischalten (lokale App-Nutzung).
-        _developerModeEnabled.value = true
-        prefs.edit().putBoolean("developer_mode_enabled", true).apply()
-        _developerUnlimitedTraining.value = true
-        prefs.edit().putBoolean("developer_unlimited_training", true).apply()
+
         prefs.edit().putString("ui_design_preset", _uiDesignPreset.value).apply()
         prefs.edit().putString("ui_display_preset", _displayPreset.value).apply()
         billingManager.connect()
