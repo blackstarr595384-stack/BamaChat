@@ -1,7 +1,7 @@
 package com.example.bamachat.shared.core.ai
 
 import com.example.bamachat.shared.core.AiProviderId
-import kotlinx.coroutines.flow.single
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,10 +37,13 @@ class AiEngineTest {
             AiProviderRegistry(listOf(FakeAiProvider(AiProviderId.OPENROUTER, streaming = true)))
         )
 
-        val response = engine.stream(aiTestRequest(AiProviderId.OPENROUTER)).single()
+        val events = engine.stream(aiTestRequest(AiProviderId.OPENROUTER)).toList()
+        val completed = events.filterIsInstance<AiStreamCompleted>().single()
 
-        assertEquals(AiProviderId.OPENROUTER, response.provider)
-        assertEquals("stream reply", response.message.text)
+        assertTrue(events.first() is AiStreamStarted)
+        assertTrue(events.last() is AiStreamFinished)
+        assertEquals(AiProviderId.OPENROUTER, completed.response.provider)
+        assertEquals("stream reply", completed.response.message.text)
     }
 
     @Test

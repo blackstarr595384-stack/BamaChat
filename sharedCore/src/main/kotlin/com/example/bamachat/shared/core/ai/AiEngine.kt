@@ -12,12 +12,12 @@ class AiEngine(
         return registry.provider(request.provider).chat(request)
     }
 
-    fun stream(request: AiChatRequest): Flow<AiChatResponse> {
+    fun stream(request: AiChatRequest): Flow<AiStreamEvent> {
         val provider = registry.provider(request.provider)
         if (!provider.supportsStreaming()) {
             throw IllegalStateException("AI provider does not support streaming: ${request.provider}")
         }
-        return provider.stream(request)
+        return provider.streamEvents(request)
     }
 
     fun supportsStreaming(providerId: AiProviderId): Boolean {
