@@ -13,6 +13,58 @@ import org.junit.Test
 
 class AndroidOpenRouterAiProviderTest {
     @Test
+    fun chatMapsAiChatRequestThroughOpenRouterDtoAndFakeCompletion() = runBlocking {
+        var captured: OpenRouterChatRequest? = null
+        val provider = AndroidOpenRouterAiProvider { request ->
+            captured = request
+            OpenRouterChatResponse(
+                choices = listOf(
+                    OpenRouterChoice(
+                        OpenRouterMessage(
+                            role = request.messages.last().role,
+                            content = "Antwort auf: ${request.messages.last().content}"
+                        )
+                    )
+                )
+            )
+        }
+        val request = AiChatRequest(
+            provider = AiProviderId.OPENROUTER,
+            model = "openrouter/test-model",
+            messages = listOf(
+                AiChatMessage(AiChatRole.SYSTEM, "Du bist knapp."),
+                AiChatMessage(AiChatRole.USER, "Erklaere Compose."),
+                AiChatMessage(AiChatRole.ASSISTANT, "Compose ist deklarativ."),
+                AiChatMessage(AiChatRole.USER, "Und State?")
+            ),
+            quickAction = QuickActionSuggestion.AUTO,
+            maxTokens = 777,
+            temperature = 0.35,
+            stream = false
+        )
+
+        val response = provider.chat(request)
+
+        val openRouterRequest = requireNotNull(captured)
+        assertEquals("openrouter/test-model", openRouterRequest.model)
+        assertEquals(777, openRouterRequest.maxTokens)
+        assertEquals(0.35f, openRouterRequest.temperature)
+        assertEquals(false, openRouterRequest.stream)
+        assertEquals(
+            listOf("system", "user", "assistant", "user"),
+            openRouterRequest.messages.map { it.role }
+        )
+        assertEquals(
+            listOf("Du bist knapp.", "Erklaere Compose.", "Compose ist deklarativ.", "Und State?"),
+            openRouterRequest.messages.map { it.content }
+        )
+        assertEquals(AiProviderId.OPENROUTER, response.provider)
+        assertEquals("openrouter/test-model", response.model)
+        assertEquals(AiChatRole.USER, response.message.role)
+        assertEquals("Antwort auf: Und State?", response.message.text)
+    }
+
+    @Test
     fun exposesOpenRouterProviderIdAndNoStreamingSupportYet() {
         val provider = AndroidOpenRouterAiProvider { OpenRouterChatResponse(choices = emptyList()) }
 
