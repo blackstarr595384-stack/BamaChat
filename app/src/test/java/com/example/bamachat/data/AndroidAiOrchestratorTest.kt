@@ -5,9 +5,11 @@ import com.example.bamachat.shared.core.AiChatRequest
 import com.example.bamachat.shared.core.AiChatRole
 import com.example.bamachat.shared.core.AiProviderId
 import com.example.bamachat.shared.core.QuickActionSuggestion
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class AndroidAiOrchestratorTest {
@@ -19,7 +21,9 @@ class AndroidAiOrchestratorTest {
             chatCompletion = {
                 completionCalls++
                 OpenRouterChatResponse(choices = emptyList())
-            }
+            },
+            logEvent = ::ignoreEvent,
+            logError = ::ignoreError
         )
 
         val response = orchestrator.chatOrNull(sampleRequest())
@@ -40,7 +44,9 @@ class AndroidAiOrchestratorTest {
                         OpenRouterChoice(OpenRouterMessage(role = "assistant", content = "Pilot antwortet."))
                     )
                 )
-            }
+            },
+            logEvent = ::ignoreEvent,
+            logError = ::ignoreError
         )
 
         val response = orchestrator.chatOrNull(sampleRequest())
@@ -60,12 +66,46 @@ class AndroidAiOrchestratorTest {
     fun flagOnFallsBackToLegacyPathWhenCompletionFails() = runBlocking {
         val orchestrator = AndroidAiOrchestrator(
             isExperimentalEnabled = { true },
-            chatCompletion = { throw IllegalStateException("provider down") }
+            chatCompletion = { throw IllegalStateException("provider down") },
+            logEvent = ::ignoreEvent,
+            logError = ::ignoreError
         )
 
         val response = orchestrator.chatOrNull(sampleRequest())
 
         assertNull(response)
+    }
+
+    @Test
+    fun flagOnFallsBackToLegacyPathWhenCompletionReturnsEmptyResponse() = runBlocking {
+        val orchestrator = AndroidAiOrchestrator(
+            isExperimentalEnabled = { true },
+            chatCompletion = {
+                OpenRouterChatResponse(
+                    choices = listOf(OpenRouterChoice(OpenRouterMessage(role = "assistant", content = "")))
+                )
+            },
+            logEvent = ::ignoreEvent,
+            logError = ::ignoreError
+        )
+
+        val response = orchestrator.chatOrNull(sampleRequest())
+
+        assertNull(response)
+    }
+
+    @Test
+    fun flagOnDoesNotSwallowCancellationException() {
+        val orchestrator = AndroidAiOrchestrator(
+            isExperimentalEnabled = { true },
+            chatCompletion = { throw CancellationException("cancelled") },
+            logEvent = ::ignoreEvent,
+            logError = ::ignoreError
+        )
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking { orchestrator.chatOrNull(sampleRequest()) }
+        }
     }
 
     private fun sampleRequest(): AiChatRequest {
@@ -81,5 +121,13 @@ class AndroidAiOrchestratorTest {
             temperature = 0.25,
             stream = false
         )
+    }
+
+    private fun ignoreEvent(name: String, params: Map<String, Any?>) {
+        Unit
+    }
+
+    private fun ignoreError(name: String, error: Throwable?) {
+        Unit
     }
 }
