@@ -75,10 +75,11 @@ class AndroidAiOrchestrator(
 
     fun streamEvents(request: AiChatRequest): Flow<AiStreamEvent> = flow {
         if (!isStreamingExperimentalEnabled()) {
-            emitAll(fallbackStream(request, "flag_off"))
+            emitAll(fallbackStream(request, "flag_disabled"))
             return@flow
         }
 
+        val startedAtMs = System.currentTimeMillis()
         logEvent("stream_pilot_attempt", mapOf("provider" to request.provider.name, "model" to request.model))
 
         try {
@@ -93,14 +94,10 @@ class AndroidAiOrchestrator(
             }
 
             val error = events.filterIsInstance<AiStreamError>().firstOrNull()
-            val hasTextDelta = events.filterIsInstance<AiStreamDelta>().any { it.text.isNotBlank() }
-            val completedText = events
-                .filterIsInstance<AiStreamCompleted>()
-                .lastOrNull()
-                ?.response
-                ?.message
-                ?.text
-                .orEmpty()
+            val deltas = events.filterIsInstance<AiStreamDelta>().filter { it.text.isNotBlank() }
+            val completed = events.filterIsInstance<AiStreamCompleted>().lastOrNull()
+            val completedText = completed?.response?.message?.text.orEmpty()
+            val durationMs = System.currentTimeMillis() - startedAtMs
             when {
                 error != null -> {
                     logEvent(
@@ -108,15 +105,32 @@ class AndroidAiOrchestrator(
                         mapOf(
                             "provider" to request.provider.name,
                             "model" to request.model,
-                            "exception" to (error.exceptionClass ?: "AiStreamError")
+                            "exception" to (error.exceptionClass ?: "AiStreamError"),
+                            "duration_ms" to durationMs,
+                            "stream_duration_ms" to durationMs,
+                            "delta_count" to deltas.size,
+                            "final_length" to completedText.length,
+                            "final_text_length" to completedText.length
                         )
                     )
                     emitAll(fallbackStream(request, "provider_error"))
                 }
-                events.isEmpty() -> emitAll(fallbackStream(request, "empty_stream"))
-                !hasTextDelta && completedText.isBlank() -> emitAll(fallbackStream(request, "empty_stream"))
+                deltas.isEmpty() -> emitAll(fallbackStream(request, "empty_response"))
+                completed == null -> emitAll(fallbackStream(request, "empty_response"))
+                completedText.isBlank() -> emitAll(fallbackStream(request, "empty_response"))
                 else -> {
-                    logEvent("stream_pilot_success", mapOf("provider" to request.provider.name, "model" to request.model))
+                    logEvent(
+                        "stream_pilot_success",
+                        mapOf(
+                            "provider" to request.provider.name,
+                            "model" to request.model,
+                            "duration_ms" to durationMs,
+                            "stream_duration_ms" to durationMs,
+                            "delta_count" to deltas.size,
+                            "final_length" to completedText.length,
+                            "final_text_length" to completedText.length
+                        )
+                    )
                     events.forEach { emit(it) }
                 }
             }
@@ -128,24 +142,39 @@ class AndroidAiOrchestrator(
                 mapOf(
                     "provider" to request.provider.name,
                     "model" to request.model,
-                    "exception" to error::class.java.simpleName
+                    "exception" to error::class.java.simpleName,
+                    "duration_ms" to (System.currentTimeMillis() - startedAtMs)
                 )
             )
             logError("android_ai_orchestrator_stream_pilot_failed", error)
-            emitAll(fallbackStream(request, "exception"))
+            emitAll(fallbackStream(request, "provider_error"))
         }
     }
 
     private fun fallbackStream(request: AiChatRequest, reason: String): Flow<AiStreamEvent> {
+        return flow {
+            logStreamFallback(request, reason)
+            try {
+                emitAll(legacyStreamEvents(request))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                logStreamFallback(request, "legacy_exception")
+                throw error
+            }
+        }
+    }
+
+    private fun logStreamFallback(request: AiChatRequest, reason: String) {
         logEvent(
             "stream_pilot_fallback",
             mapOf(
                 "provider" to request.provider.name,
                 "model" to request.model,
-                "reason" to reason
+                "reason" to reason,
+                "fallback_reason" to reason
             )
         )
-        return legacyStreamEvents(request)
     }
 
     companion object {

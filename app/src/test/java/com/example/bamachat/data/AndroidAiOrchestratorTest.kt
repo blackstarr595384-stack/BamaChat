@@ -191,10 +191,12 @@ class AndroidAiOrchestratorTest {
 
     @Test
     fun streamFlagOnEmitsSharedAiStreamEvents() = runBlocking {
+        val telemetry = mutableListOf<Pair<String, Map<String, Any?>>>()
         val orchestrator = streamOrchestrator(
             isStreamingEnabled = true,
             streamTextChunks = { flowOf("Hel", "lo") },
-            legacyStreamEvents = { flowOf(completedEvent("legacy")) }
+            legacyStreamEvents = { flowOf(completedEvent("legacy")) },
+            logEvent = { name, params -> telemetry.add(name to params) }
         )
 
         val events = orchestrator.streamEvents(sampleRequest()).toList()
@@ -203,10 +205,33 @@ class AndroidAiOrchestratorTest {
         assertEquals(listOf("Hel", "lo"), events.filterIsInstance<AiStreamDelta>().map { it.text })
         assertEquals("Hello", events.completedText())
         assertTrue(events.last() is AiStreamFinished)
+
+        val success = telemetry.single { it.first == "stream_pilot_success" }.second
+        assertEquals(AiProviderId.OPENROUTER.name, success["provider"])
+        assertEquals(2, success["delta_count"])
+        assertEquals(5, success["final_length"])
+        assertEquals(5, success["final_text_length"])
+        assertTrue((success["duration_ms"] as Long) >= 0L)
+        assertTrue((success["stream_duration_ms"] as Long) >= 0L)
+    }
+
+    @Test
+    fun streamSingleDeltaCanSucceed() = runBlocking {
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = { flowOf("single") },
+            legacyStreamEvents = { flowOf(completedEvent("legacy")) }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertEquals(listOf("single"), events.filterIsInstance<AiStreamDelta>().map { it.text })
+        assertEquals("single", events.completedText())
     }
 
     @Test
     fun streamProviderErrorFallsBackToLegacyStream() = runBlocking {
+        val telemetry = mutableListOf<Pair<String, Map<String, Any?>>>()
         var legacyCalls = 0
         val orchestrator = streamOrchestrator(
             isStreamingEnabled = true,
@@ -219,7 +244,8 @@ class AndroidAiOrchestratorTest {
             legacyStreamEvents = {
                 legacyCalls++
                 flowOf(completedEvent("legacy after error"))
-            }
+            },
+            logEvent = { name, params -> telemetry.add(name to params) }
         )
 
         val events = orchestrator.streamEvents(sampleRequest()).toList()
@@ -227,10 +253,12 @@ class AndroidAiOrchestratorTest {
         assertEquals(1, legacyCalls)
         assertEquals("legacy after error", events.completedText())
         assertEquals(emptyList<AiStreamError>(), events.filterIsInstance<AiStreamError>())
+        assertEquals("provider_error", telemetry.lastFallbackReason())
     }
 
     @Test
     fun streamEmptyPilotFallsBackToLegacyStream() = runBlocking {
+        val telemetry = mutableListOf<Pair<String, Map<String, Any?>>>()
         var legacyCalls = 0
         val orchestrator = streamOrchestrator(
             isStreamingEnabled = true,
@@ -238,13 +266,36 @@ class AndroidAiOrchestratorTest {
             legacyStreamEvents = {
                 legacyCalls++
                 flowOf(completedEvent("legacy after empty"))
-            }
+            },
+            logEvent = { name, params -> telemetry.add(name to params) }
         )
 
         val events = orchestrator.streamEvents(sampleRequest()).toList()
 
         assertEquals(1, legacyCalls)
         assertEquals("legacy after empty", events.completedText())
+        assertEquals("empty_response", telemetry.lastFallbackReason())
+    }
+
+    @Test
+    fun streamCompletedWithoutTextFallsBackToLegacyStream() = runBlocking {
+        val telemetry = mutableListOf<Pair<String, Map<String, Any?>>>()
+        var legacyCalls = 0
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = { flowOf("   ") },
+            legacyStreamEvents = {
+                legacyCalls++
+                flowOf(completedEvent("legacy after blank"))
+            },
+            logEvent = { name, params -> telemetry.add(name to params) }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertEquals(1, legacyCalls)
+        assertEquals("legacy after blank", events.completedText())
+        assertEquals("empty_response", telemetry.lastFallbackReason())
     }
 
     @Test
@@ -279,13 +330,15 @@ class AndroidAiOrchestratorTest {
 
     @Test
     fun streamLegacyFallbackExceptionPropagates() {
+        val telemetry = mutableListOf<Pair<String, Map<String, Any?>>>()
         val orchestrator = streamOrchestrator(
             isStreamingEnabled = false,
             legacyStreamEvents = {
                 flow {
                     throw IllegalStateException("legacy stream failed")
                 }
-            }
+            },
+            logEvent = { name, params -> telemetry.add(name to params) }
         )
 
         val error = assertThrows(IllegalStateException::class.java) {
@@ -293,6 +346,8 @@ class AndroidAiOrchestratorTest {
         }
 
         assertEquals("legacy stream failed", error.message)
+        assertEquals("flag_disabled", telemetry.firstFallbackReason())
+        assertEquals("legacy_exception", telemetry.lastFallbackReason())
     }
 
     @Test
@@ -314,6 +369,26 @@ class AndroidAiOrchestratorTest {
         assertTrue(eventsLog.contains("stream_pilot_attempt"))
         assertTrue(eventsLog.contains("stream_pilot_error"))
         assertTrue(eventsLog.contains("stream_pilot_fallback"))
+    }
+
+    @Test
+    fun streamManyDeltasSucceedWithTelemetryCounts() = runBlocking {
+        val telemetry = mutableListOf<Pair<String, Map<String, Any?>>>()
+        val chunks = (1..100).map { "x" }
+        val orchestrator = streamOrchestrator(
+            isStreamingEnabled = true,
+            streamTextChunks = { flowOf(*chunks.toTypedArray()) },
+            legacyStreamEvents = { flowOf(completedEvent("legacy")) },
+            logEvent = { name, params -> telemetry.add(name to params) }
+        )
+
+        val events = orchestrator.streamEvents(sampleRequest()).toList()
+
+        assertEquals(100, events.filterIsInstance<AiStreamDelta>().size)
+        assertEquals("x".repeat(100), events.completedText())
+        val success = telemetry.single { it.first == "stream_pilot_success" }.second
+        assertEquals(100, success["delta_count"])
+        assertEquals(100, success["final_length"])
     }
 
     private fun sampleRequest(): AiChatRequest {
@@ -362,6 +437,14 @@ class AndroidAiOrchestratorTest {
 
     private fun List<AiStreamEvent>.completedText(): String? {
         return filterIsInstance<AiStreamCompleted>().single().response.message.text
+    }
+
+    private fun List<Pair<String, Map<String, Any?>>>.firstFallbackReason(): String? {
+        return first { it.first == "stream_pilot_fallback" }.second["fallback_reason"] as? String
+    }
+
+    private fun List<Pair<String, Map<String, Any?>>>.lastFallbackReason(): String? {
+        return last { it.first == "stream_pilot_fallback" }.second["fallback_reason"] as? String
     }
 
     private fun ignoreEvent(name: String, params: Map<String, Any?>) {
