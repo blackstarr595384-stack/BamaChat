@@ -125,6 +125,7 @@ class ChatViewModel @Inject constructor(
         ): AiStreamConsumptionResult {
             var completedText: String? = null
             var fallbackReason: String? = null
+            var errorMessage: String? = null
 
             events.collect { event ->
                 when (event) {
@@ -142,12 +143,21 @@ class ChatViewModel @Inject constructor(
                         }
                     }
                     is AiStreamCompleted -> completedText = event.response.message.text
-                    is AiStreamError -> fallbackReason = "provider_error"
+                    is AiStreamError -> {
+                        fallbackReason = "provider_error"
+                        errorMessage = event.message
+                    }
                     is AiStreamFinished -> Unit
                 }
             }
 
-            fallbackReason?.let { return AiStreamConsumptionResult(success = false, fallbackReason = it) }
+            fallbackReason?.let {
+                return AiStreamConsumptionResult(
+                    success = false,
+                    fallbackReason = it,
+                    errorMessage = errorMessage
+                )
+            }
 
             val finalText = completedText
                 ?.takeIf { it.isNotBlank() }
@@ -171,7 +181,8 @@ class ChatViewModel @Inject constructor(
                 onChunkReceived: (String) -> Unit,
                 onError: (String) -> Unit
             ) -> ApiManager.ApiResponse,
-            onIntermediateError: (String) -> Unit = {}
+            onIntermediateError: (String) -> Unit = {},
+            onTerminalError: (ApiManager.ApiResponse) -> Unit = {}
         ): Flow<AiStreamEvent> = channelFlow {
             send(AiStreamStarted(provider = provider, model = model))
 
@@ -222,6 +233,7 @@ class ChatViewModel @Inject constructor(
                     )
                 )
             } else {
+                onTerminalError(response)
                 send(
                     AiStreamError(
                         message = response.error.ifBlank { "Legacy stream returned an empty response" },
@@ -246,7 +258,8 @@ class ChatViewModel @Inject constructor(
     internal data class AiStreamConsumptionResult(
         val success: Boolean,
         val finalText: String? = null,
-        val fallbackReason: String? = null
+        val fallbackReason: String? = null,
+        val errorMessage: String? = null
     )
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -902,51 +915,151 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             return
         }
 
-
         try {
-            val result = apiManager.streamChatResponse(
-                systemPrompt = systemPrompt, userMessages = messages,
-                onChunkReceived = { chunk ->
-                    streamingBuffer.append(chunk)
-                    val now = System.currentTimeMillis()
-                    if (now - lastFlushAt >= streamFlushInterval) {
-                        lastFlushAt = now
-                        viewModelScope.launch {
-                            repo.saveMessage(convId, assistantMsg.copy(text = streamingBuffer.toString()), touchConversation = false)
-                        }
+            AppTelemetry.logEvent(
+                "legacy_event_stream_started",
+                mapOf("model" to selectedModel.value)
+            )
+            var terminalLegacyError: ApiManager.ApiResponse? = null
+            val result = consumeAiStreamEvents(
+                events = legacyStreamAsAiEvents(
+                    provider = AiProviderId.OPENROUTER,
+                    model = selectedModel.value,
+                    streamChatResponse = { onChunkReceived, onError ->
+                        apiManager.streamChatResponse(
+                            systemPrompt = systemPrompt,
+                            userMessages = messages,
+                            onChunkReceived = onChunkReceived,
+                            onError = onError
+                        )
+                    },
+                    onIntermediateError = { error ->
+                        publishError(
+                            message = error,
+                            retryable = true,
+                            actionLabel = "Erneut versuchen"
+                        )
+                        AppTelemetry.logEvent(
+                            "chat_stream_error",
+                            mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString())
+                        )
+                    },
+                    onTerminalError = { response ->
+                        terminalLegacyError = response
                     }
+                ),
+                convId = convId,
+                assistantMsg = assistantMsg,
+                webSources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso,
+                streamingBuffer = streamingBuffer,
+                streamFlushInterval = streamFlushInterval,
+                lastFlushAtProvider = { lastFlushAt },
+                updateLastFlushAt = { lastFlushAt = it },
+                saveMessage = { targetConvId, message, touchConversation ->
+                    repo.saveMessage(targetConvId, message, touchConversation = touchConversation)
                 },
-                onError = { error ->
-                    publishError(
-                        message = error,
-                        retryable = true,
-                        actionLabel = "Erneut versuchen"
+                clearRetryContext = { clearRetryContext() },
+                showNotification = { finalText ->
+                    notificationService.show(
+                        "BamaChat",
+                        finalText,
+                        prefs.getBoolean("notifications_enabled", true)
                     )
-                    AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
                 }
             )
 
-            if (result.success && result.content.isNotBlank()) {
-                val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
-                repo.saveMessage(convId, finalized, touchConversation = true)
-                clearRetryContext()
-                notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
+            if (result.success) {
+                AppTelemetry.logEvent(
+                    "legacy_event_stream_completed",
+                    mapOf(
+                        "model" to selectedModel.value,
+                        "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                    )
+                )
             } else {
-                if (result.error.isNotBlank()) {
+                val terminalError = terminalLegacyError
+                if (terminalError != null || !result.errorMessage.isNullOrBlank()) {
                     publishError(
-                        message = result.error,
-                        retryable = result.retryable,
-                        actionLabel = if (result.retryable) "Erneut versuchen" else null
+                        message = terminalError?.error?.takeIf { it.isNotBlank() }
+                            ?: result.errorMessage
+                            ?: "Legacy stream failed",
+                        retryable = terminalError?.retryable ?: true,
+                        actionLabel = if (terminalError?.retryable != false) "Erneut versuchen" else null
                     )
                 }
+                AppTelemetry.logEvent(
+                    "legacy_event_stream_error",
+                    mapOf(
+                        "model" to selectedModel.value,
+                        "reason" to (result.fallbackReason ?: "unknown"),
+                        "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                    )
+                )
                 repo.deleteMessage(assistantMsg.id)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             handleError(e)
             repo.deleteMessage(assistantMsg.id)
         }
     }
 
+    private suspend fun runLegacyStreamingChatWithCallbacks(
+        convId: String,
+        systemPrompt: String,
+        messages: List<OpenRouterMessage>,
+        webContext: ChatEngine.LiveWebContext?,
+        startedAt: Long,
+        assistantMsg: ChatMessage,
+        streamingBuffer: StringBuilder,
+        streamFlushInterval: Long,
+        lastFlushAtProvider: () -> Long,
+        updateLastFlushAt: (Long) -> Unit
+    ) {
+        val result = apiManager.streamChatResponse(
+            systemPrompt = systemPrompt, userMessages = messages,
+            onChunkReceived = { chunk ->
+                streamingBuffer.append(chunk)
+                val now = System.currentTimeMillis()
+                if (now - lastFlushAtProvider() >= streamFlushInterval) {
+                    updateLastFlushAt(now)
+                    viewModelScope.launch {
+                        repo.saveMessage(
+                            convId,
+                            assistantMsg.copy(text = streamingBuffer.toString()),
+                            touchConversation = false
+                        )
+                    }
+                }
+            },
+            onError = { error ->
+                publishError(
+                    message = error,
+                    retryable = true,
+                    actionLabel = "Erneut versuchen"
+                )
+                AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
+            }
+        )
+
+        if (result.success && result.content.isNotBlank()) {
+            val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
+            repo.saveMessage(convId, finalized, touchConversation = true)
+            clearRetryContext()
+            notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
+        } else {
+            if (result.error.isNotBlank()) {
+                publishError(
+                    message = result.error,
+                    retryable = result.retryable,
+                    actionLabel = if (result.retryable) "Erneut versuchen" else null
+                )
+            }
+            repo.deleteMessage(assistantMsg.id)
+        }
+    }
     private suspend fun runExperimentalStreamingChat(
         convId: String,
         systemPrompt: String,

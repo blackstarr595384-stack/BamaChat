@@ -220,6 +220,86 @@ class ChatViewModelAiStreamConsumerTest {
         assertTrue(events.last() is AiStreamFinished)
     }
 
+    @Test
+    fun legacyEventRouteFlushesChunkThroughConsumer() = runBlocking {
+        val saved = mutableListOf<SavedMessage>()
+        val buffer = StringBuilder()
+
+        val result = consumeLegacy(
+            buffer = buffer,
+            lastFlushAt = { 0L },
+            saveMessage = { convId, message, touchConversation ->
+                saved.add(SavedMessage(convId, message, touchConversation))
+            }
+        ) { onChunk, _ ->
+            onChunk("live")
+            ApiManager.ApiResponse(success = true, content = "live", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        assertTrue(result.success)
+        assertEquals("live", buffer.toString())
+        assertEquals("live", saved.first().message.text)
+        assertFalse(saved.first().touchConversation)
+    }
+
+    @Test
+    fun legacyEventRouteFinalSaveStaysCorrect() = runBlocking {
+        val saved = mutableListOf<SavedMessage>()
+        val notifications = mutableListOf<String>()
+
+        val result = consumeLegacy(
+            webSources = listOf(ChatSource(title = "Doc", url = "https://example.test/doc")),
+            webFetchedAtIso = "2026-07-07T13:00:00Z",
+            saveMessage = { convId, message, touchConversation ->
+                saved.add(SavedMessage(convId, message, touchConversation))
+            },
+            showNotification = { notifications.add(it) }
+        ) { onChunk, _ ->
+            onChunk("final")
+            ApiManager.ApiResponse(success = true, content = "final", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        assertTrue(result.success)
+        val final = saved.last()
+        assertEquals("final", final.message.text)
+        assertEquals("Doc", final.message.sources.single().title)
+        assertEquals("2026-07-07T13:00:00Z", final.message.webFetchedAtIso)
+        assertTrue(final.touchConversation)
+        assertEquals(listOf("final"), notifications)
+    }
+
+    @Test
+    fun legacyEventRouteReturnsErrorForFinalFailure() = runBlocking {
+        var terminalError: ApiManager.ApiResponse? = null
+
+        val result = consumeLegacy(
+            onTerminalError = { terminalError = it }
+        ) { _, _ ->
+            ApiManager.ApiResponse(
+                success = false,
+                error = "legacy failed",
+                usedProvider = ApiClient.Provider.OPENROUTER,
+                retryable = false
+            )
+        }
+
+        assertFalse(result.success)
+        assertEquals("provider_error", result.fallbackReason)
+        assertEquals("legacy failed", result.errorMessage)
+        assertEquals(false, terminalError?.retryable)
+    }
+
+    @Test
+    fun legacyEventRouteCancellationIsNotSwallowed() {
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                consumeLegacy { _, _ ->
+                    throw CancellationException("cancel route")
+                }
+            }
+        }
+    }
+
     private suspend fun consume(
         events: Flow<AiStreamEvent>,
         buffer: StringBuilder = StringBuilder(),
@@ -260,6 +340,7 @@ class ChatViewModelAiStreamConsumerTest {
 
     private suspend fun legacyEvents(
         onIntermediateError: (String) -> Unit = {},
+        onTerminalError: (ApiManager.ApiResponse) -> Unit = {},
         streamChatResponse: suspend (
             onChunkReceived: (String) -> Unit,
             onError: (String) -> Unit
@@ -269,8 +350,38 @@ class ChatViewModelAiStreamConsumerTest {
             provider = AiProviderId.OPENROUTER,
             model = MODEL,
             streamChatResponse = streamChatResponse,
-            onIntermediateError = onIntermediateError
+            onIntermediateError = onIntermediateError,
+            onTerminalError = onTerminalError
         ).toList()
+    }
+
+    private suspend fun consumeLegacy(
+        buffer: StringBuilder = StringBuilder(),
+        webSources: List<ChatSource> = emptyList(),
+        webFetchedAtIso: String? = null,
+        lastFlushAt: () -> Long = { 0L },
+        saveMessage: suspend (String, ChatMessage, Boolean) -> Unit = { _, _, _ -> },
+        showNotification: suspend (String) -> Unit = {},
+        onTerminalError: (ApiManager.ApiResponse) -> Unit = {},
+        streamChatResponse: suspend (
+            onChunkReceived: (String) -> Unit,
+            onError: (String) -> Unit
+        ) -> ApiManager.ApiResponse
+    ): ChatViewModel.AiStreamConsumptionResult {
+        return consume(
+            events = ChatViewModel.legacyStreamAsAiEvents(
+                provider = AiProviderId.OPENROUTER,
+                model = MODEL,
+                streamChatResponse = streamChatResponse,
+                onTerminalError = onTerminalError
+            ),
+            buffer = buffer,
+            webSources = webSources,
+            webFetchedAtIso = webFetchedAtIso,
+            lastFlushAt = lastFlushAt,
+            saveMessage = saveMessage,
+            showNotification = showNotification
+        )
     }
 
     private data class SavedMessage(
