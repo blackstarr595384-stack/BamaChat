@@ -41,6 +41,9 @@ import com.example.bamachat.shared.core.AiProviderId
 import com.example.bamachat.shared.core.ai.AiStreamCompleted
 import com.example.bamachat.shared.core.ai.AiStreamDelta
 import com.example.bamachat.shared.core.ai.AiStreamError
+import com.example.bamachat.shared.core.ai.AiStreamEvent
+import com.example.bamachat.shared.core.ai.AiStreamFinished
+import com.example.bamachat.shared.core.ai.AiStreamStarted
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
@@ -101,7 +104,68 @@ class ChatViewModel @Inject constructor(
 
         internal fun normalizeWorkspaceName(raw: String): String =
             WorkspaceNaming.normalizeWorkspaceName(raw)
+
+        internal suspend fun consumeAiStreamEvents(
+            events: Flow<AiStreamEvent>,
+            convId: String,
+            assistantMsg: ChatMessage,
+            webSources: List<ChatSource>,
+            webFetchedAtIso: String?,
+            streamingBuffer: StringBuilder,
+            streamFlushInterval: Long,
+            lastFlushAtProvider: () -> Long,
+            updateLastFlushAt: (Long) -> Unit,
+            saveMessage: suspend (String, ChatMessage, Boolean) -> Unit,
+            clearRetryContext: suspend () -> Unit,
+            showNotification: suspend (String) -> Unit
+        ): AiStreamConsumptionResult {
+            var completedText: String? = null
+            var fallbackReason: String? = null
+
+            events.collect { event ->
+                when (event) {
+                    is AiStreamStarted -> Unit
+                    is AiStreamDelta -> {
+                        streamingBuffer.append(event.text)
+                        val now = System.currentTimeMillis()
+                        if (now - lastFlushAtProvider() >= streamFlushInterval) {
+                            updateLastFlushAt(now)
+                            saveMessage(
+                                convId,
+                                assistantMsg.copy(text = streamingBuffer.toString()),
+                                false
+                            )
+                        }
+                    }
+                    is AiStreamCompleted -> completedText = event.response.message.text
+                    is AiStreamError -> fallbackReason = "provider_error"
+                    is AiStreamFinished -> Unit
+                }
+            }
+
+            fallbackReason?.let { return AiStreamConsumptionResult(success = false, fallbackReason = it) }
+
+            val finalText = completedText
+                ?.takeIf { it.isNotBlank() }
+                ?: return AiStreamConsumptionResult(success = false, fallbackReason = "empty_stream")
+
+            val finalized = assistantMsg.copy(
+                text = finalText,
+                sources = webSources,
+                webFetchedAtIso = webFetchedAtIso
+            )
+            saveMessage(convId, finalized, true)
+            clearRetryContext()
+            showNotification(finalText)
+            return AiStreamConsumptionResult(success = true, finalText = finalText)
+        }
     }
+
+    internal data class AiStreamConsumptionResult(
+        val success: Boolean,
+        val finalText: String? = null,
+        val fallbackReason: String? = null
+    )
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val appContext = getApplication<Application>().applicationContext
@@ -867,38 +931,31 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 }
             )
 
-            var completedText: String? = null
-            orchestrator.streamEvents(request).collect { event ->
-                when (event) {
-                    is AiStreamDelta -> {
-                        streamingBuffer.append(event.text)
-                        val now = System.currentTimeMillis()
-                        if (now - lastFlushAtProvider() >= streamFlushInterval) {
-                            updateLastFlushAt(now)
-                            repo.saveMessage(
-                                convId,
-                                assistantMsg.copy(text = streamingBuffer.toString()),
-                                touchConversation = false
-                            )
-                        }
-                    }
-                    is AiStreamCompleted -> completedText = event.response.message.text
-                    is AiStreamError -> throw StreamingPilotLegacyFallbackException("provider_error")
-                    else -> Unit
+            val result = consumeAiStreamEvents(
+                events = orchestrator.streamEvents(request),
+                convId = convId,
+                assistantMsg = assistantMsg,
+                webSources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso,
+                streamingBuffer = streamingBuffer,
+                streamFlushInterval = streamFlushInterval,
+                lastFlushAtProvider = lastFlushAtProvider,
+                updateLastFlushAt = updateLastFlushAt,
+                saveMessage = { targetConvId, message, touchConversation ->
+                    repo.saveMessage(targetConvId, message, touchConversation = touchConversation)
+                },
+                clearRetryContext = { clearRetryContext() },
+                showNotification = { finalText ->
+                    notificationService.show(
+                        "BamaChat",
+                        finalText,
+                        prefs.getBoolean("notifications_enabled", true)
+                    )
                 }
-            }
-
-            val finalText = completedText?.takeIf { it.isNotBlank() }
-                ?: streamingBuffer.toString().takeIf { it.isNotBlank() }
-                ?: throw StreamingPilotLegacyFallbackException("empty_stream")
-            val finalized = assistantMsg.copy(
-                text = finalText,
-                sources = webContext?.sources.orEmpty(),
-                webFetchedAtIso = webContext?.fetchedAtIso
             )
-            repo.saveMessage(convId, finalized, touchConversation = true)
-            clearRetryContext()
-            notificationService.show("BamaChat", finalText, prefs.getBoolean("notifications_enabled", true))
+            if (!result.success) {
+                throw StreamingPilotLegacyFallbackException(result.fallbackReason ?: "empty_stream")
+            }
             AppTelemetry.logEvent(
                 "stream_pilot_completed",
                 mapOf(
