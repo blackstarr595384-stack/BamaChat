@@ -125,16 +125,40 @@ class ChatViewModel @Inject constructor(
             updateLastFlushAt: (Long) -> Unit,
             saveMessage: suspend (String, ChatMessage, Boolean) -> Unit,
             clearRetryContext: suspend () -> Unit,
-            showNotification: suspend (String) -> Unit
+            showNotification: suspend (String) -> Unit,
+            streamTelemetrySource: String? = null,
+            streamTelemetryModel: String? = null,
+            streamStartedAtMs: Long? = null,
+            logStreamEvent: (String, Map<String, String>) -> Unit = { _, _ -> }
         ): AiStreamConsumptionResult {
             var completedText: String? = null
             var fallbackReason: String? = null
             var errorMessage: String? = null
+            var eventProvider: AiProviderId? = null
+            var eventModel: String? = streamTelemetryModel
+
+            fun telemetryParams(reason: String? = null): Map<String, String> {
+                val params = mutableMapOf<String, String>()
+                streamTelemetrySource?.let { params["source"] = it }
+                eventProvider?.name?.let { params["provider"] = it }
+                eventModel?.takeIf { it.isNotBlank() }?.let { params["model"] = it }
+                streamStartedAtMs?.let { params["duration_ms"] = (System.currentTimeMillis() - it).toString() }
+                reason?.let { params["reason"] = it }
+                return params
+            }
 
             events.collect { event ->
                 when (event) {
-                    is AiStreamStarted -> Unit
+                    is AiStreamStarted -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
+                        streamTelemetrySource?.let {
+                            logStreamEvent("stream_event_started", telemetryParams())
+                        }
+                    }
                     is AiStreamDelta -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
                         streamingBuffer.append(event.text)
                         val now = System.currentTimeMillis()
                         if (now - lastFlushAtProvider() >= streamFlushInterval) {
@@ -146,8 +170,14 @@ class ChatViewModel @Inject constructor(
                             )
                         }
                     }
-                    is AiStreamCompleted -> completedText = event.response.message.text
+                    is AiStreamCompleted -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
+                        completedText = event.response.message.text
+                    }
                     is AiStreamError -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
                         fallbackReason = "provider_error"
                         errorMessage = event.message
                     }
@@ -156,6 +186,9 @@ class ChatViewModel @Inject constructor(
             }
 
             fallbackReason?.let {
+                streamTelemetrySource?.let { _ ->
+                    logStreamEvent("stream_event_error", telemetryParams(reason = it))
+                }
                 return AiStreamConsumptionResult(
                     success = false,
                     fallbackReason = it,
@@ -165,7 +198,12 @@ class ChatViewModel @Inject constructor(
 
             val finalText = completedText
                 ?.takeIf { it.isNotBlank() }
-                ?: return AiStreamConsumptionResult(success = false, fallbackReason = "empty_stream")
+                ?: run {
+                    streamTelemetrySource?.let {
+                        logStreamEvent("stream_event_error", telemetryParams(reason = "empty_stream"))
+                    }
+                    return AiStreamConsumptionResult(success = false, fallbackReason = "empty_stream")
+                }
 
             val finalized = assistantMsg.copy(
                 text = finalText,
@@ -175,6 +213,9 @@ class ChatViewModel @Inject constructor(
             saveMessage(convId, finalized, true)
             clearRetryContext()
             showNotification(finalText)
+            streamTelemetrySource?.let {
+                logStreamEvent("stream_event_completed", telemetryParams())
+            }
             return AiStreamConsumptionResult(success = true, finalText = finalText)
         }
 
@@ -985,7 +1026,11 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         finalText,
                         prefs.getBoolean("notifications_enabled", true)
                     )
-                }
+                },
+                streamTelemetrySource = "legacy",
+                streamTelemetryModel = selectedModel.value,
+                streamStartedAtMs = startedAt,
+                logStreamEvent = AppTelemetry::logEvent
             )
 
             if (result.success) {
@@ -1165,7 +1210,11 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         finalText,
                         prefs.getBoolean("notifications_enabled", true)
                     )
-                }
+                },
+                streamTelemetrySource = "pilot",
+                streamTelemetryModel = selectedModel.value,
+                streamStartedAtMs = startedAt,
+                logStreamEvent = AppTelemetry::logEvent
             )
             if (!result.success) {
                 throw StreamingPilotLegacyFallbackException(result.fallbackReason ?: "empty_stream")

@@ -300,6 +300,122 @@ class ChatViewModelAiStreamConsumerTest {
         }
     }
 
+    @Test
+    fun pilotEventRouteUsesCommonConsumerTelemetry() = runBlocking {
+        val telemetry = mutableListOf<TelemetryEvent>()
+
+        val result = consume(
+            events = flowOf(
+                AiStreamStarted(AiProviderId.OPENROUTER, MODEL),
+                AiStreamDelta("pilot", AiProviderId.OPENROUTER, MODEL),
+                completed("pilot"),
+                AiStreamFinished(AiProviderId.OPENROUTER, MODEL)
+            ),
+            streamTelemetrySource = "pilot",
+            logStreamEvent = { name, params -> telemetry.add(TelemetryEvent(name, params)) }
+        )
+
+        assertTrue(result.success)
+        assertEquals(listOf("stream_event_started", "stream_event_completed"), telemetry.map { it.name })
+        assertEquals("pilot", telemetry.first().params["source"])
+        assertEquals("OPENROUTER", telemetry.first().params["provider"])
+        assertEquals(MODEL, telemetry.first().params["model"])
+    }
+
+    @Test
+    fun legacyEventRouteUsesCommonConsumerTelemetry() = runBlocking {
+        val telemetry = mutableListOf<TelemetryEvent>()
+
+        val result = consumeLegacy(
+            streamTelemetrySource = "legacy",
+            logStreamEvent = { name, params -> telemetry.add(TelemetryEvent(name, params)) }
+        ) { onChunk, _ ->
+            onChunk("legacy")
+            ApiManager.ApiResponse(success = true, content = "legacy", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        assertTrue(result.success)
+        assertEquals(listOf("stream_event_started", "stream_event_completed"), telemetry.map { it.name })
+        assertEquals("legacy", telemetry.first().params["source"])
+        assertEquals("OPENROUTER", telemetry.first().params["provider"])
+    }
+
+    @Test
+    fun commonConsumerFinalSaveAndNotificationHappenOnce() = runBlocking {
+        val saved = mutableListOf<SavedMessage>()
+        val notifications = mutableListOf<String>()
+
+        val result = consume(
+            events = flowOf(
+                AiStreamStarted(AiProviderId.OPENROUTER, MODEL),
+                AiStreamDelta("partial", AiProviderId.OPENROUTER, MODEL),
+                completed("final"),
+                AiStreamFinished(AiProviderId.OPENROUTER, MODEL)
+            ),
+            lastFlushAt = { System.currentTimeMillis() },
+            saveMessage = { convId, message, touchConversation ->
+                saved.add(SavedMessage(convId, message, touchConversation))
+            },
+            showNotification = { notifications.add(it) },
+            streamTelemetrySource = "pilot"
+        )
+
+        assertTrue(result.success)
+        assertEquals(1, saved.size)
+        assertEquals("final", saved.single().message.text)
+        assertTrue(saved.single().touchConversation)
+        assertEquals(listOf("final"), notifications)
+    }
+
+    @Test
+    fun commonConsumerErrorTelemetryIsIdenticalForPilotAndLegacy() = runBlocking {
+        val pilotTelemetry = mutableListOf<TelemetryEvent>()
+        val legacyTelemetry = mutableListOf<TelemetryEvent>()
+
+        val pilotResult = consume(
+            events = flowOf(
+                AiStreamStarted(AiProviderId.OPENROUTER, MODEL),
+                AiStreamError("failed", provider = AiProviderId.OPENROUTER, model = MODEL),
+                AiStreamFinished(AiProviderId.OPENROUTER, MODEL)
+            ),
+            streamTelemetrySource = "pilot",
+            logStreamEvent = { name, params -> pilotTelemetry.add(TelemetryEvent(name, params)) }
+        )
+        val legacyResult = consumeLegacy(
+            streamTelemetrySource = "legacy",
+            logStreamEvent = { name, params -> legacyTelemetry.add(TelemetryEvent(name, params)) }
+        ) { _, _ ->
+            ApiManager.ApiResponse(success = false, error = "failed", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        assertFalse(pilotResult.success)
+        assertFalse(legacyResult.success)
+        assertEquals("stream_event_error", pilotTelemetry.last().name)
+        assertEquals("stream_event_error", legacyTelemetry.last().name)
+        assertEquals("provider_error", pilotTelemetry.last().params["reason"])
+        assertEquals("provider_error", legacyTelemetry.last().params["reason"])
+    }
+
+    @Test
+    fun commonConsumerCancellationDoesNotEmitErrorTelemetry() {
+        val telemetry = mutableListOf<TelemetryEvent>()
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                consume(
+                    events = flow {
+                        emit(AiStreamStarted(AiProviderId.OPENROUTER, MODEL))
+                        throw CancellationException("cancel common route")
+                    },
+                    streamTelemetrySource = "pilot",
+                    logStreamEvent = { name, params -> telemetry.add(TelemetryEvent(name, params)) }
+                )
+            }
+        }
+
+        assertEquals(listOf("stream_event_started"), telemetry.map { it.name })
+    }
+
     private suspend fun consume(
         events: Flow<AiStreamEvent>,
         buffer: StringBuilder = StringBuilder(),
@@ -307,7 +423,9 @@ class ChatViewModelAiStreamConsumerTest {
         webFetchedAtIso: String? = null,
         lastFlushAt: () -> Long = { 0L },
         saveMessage: suspend (String, ChatMessage, Boolean) -> Unit = { _, _, _ -> },
-        showNotification: suspend (String) -> Unit = {}
+        showNotification: suspend (String) -> Unit = {},
+        streamTelemetrySource: String? = null,
+        logStreamEvent: (String, Map<String, String>) -> Unit = { _, _ -> }
     ): ChatViewModel.AiStreamConsumptionResult {
         var lastFlush = 0L
         return ChatViewModel.consumeAiStreamEvents(
@@ -322,7 +440,11 @@ class ChatViewModelAiStreamConsumerTest {
             updateLastFlushAt = { lastFlush = it },
             saveMessage = saveMessage,
             clearRetryContext = {},
-            showNotification = showNotification
+            showNotification = showNotification,
+            streamTelemetrySource = streamTelemetrySource,
+            streamTelemetryModel = MODEL,
+            streamStartedAtMs = 0L,
+            logStreamEvent = logStreamEvent
         ).also {
             if (lastFlush < 0L) error("unreachable")
         }
@@ -363,6 +485,8 @@ class ChatViewModelAiStreamConsumerTest {
         saveMessage: suspend (String, ChatMessage, Boolean) -> Unit = { _, _, _ -> },
         showNotification: suspend (String) -> Unit = {},
         onTerminalError: (ApiManager.ApiResponse) -> Unit = {},
+        streamTelemetrySource: String? = null,
+        logStreamEvent: (String, Map<String, String>) -> Unit = { _, _ -> },
         streamChatResponse: suspend (
             onChunkReceived: (String) -> Unit,
             onError: (String) -> Unit
@@ -380,9 +504,16 @@ class ChatViewModelAiStreamConsumerTest {
             webFetchedAtIso = webFetchedAtIso,
             lastFlushAt = lastFlushAt,
             saveMessage = saveMessage,
-            showNotification = showNotification
+            showNotification = showNotification,
+            streamTelemetrySource = streamTelemetrySource,
+            logStreamEvent = logStreamEvent
         )
     }
+
+    private data class TelemetryEvent(
+        val name: String,
+        val params: Map<String, String>
+    )
 
     private data class SavedMessage(
         val convId: String,
