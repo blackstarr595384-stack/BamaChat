@@ -11,8 +11,9 @@ object SharedAiPilotDebugToggle {
 
     fun resolveRequestedStreamingEnabled(
         hasStreamingEnabledExtra: Boolean,
-        streamingEnabled: Boolean
+        streamingEnabled: Boolean,
+        fallbackEnabled: Boolean? = null
     ): Boolean? {
-        return if (hasStreamingEnabledExtra) streamingEnabled else null
+        return if (hasStreamingEnabledExtra) streamingEnabled else fallbackEnabled
     }
 }

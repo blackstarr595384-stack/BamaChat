@@ -17,7 +17,8 @@ class SharedAiPilotDebugToggleReceiver : BroadcastReceiver() {
         )
         val streamingEnabled = SharedAiPilotDebugToggle.resolveRequestedStreamingEnabled(
             hasStreamingEnabledExtra = intent.hasExtra(SharedAiPilotDebugToggle.EXTRA_STREAMING_ENABLED),
-            streamingEnabled = intent.getBooleanExtra(SharedAiPilotDebugToggle.EXTRA_STREAMING_ENABLED, false)
+            streamingEnabled = intent.getBooleanExtra(SharedAiPilotDebugToggle.EXTRA_STREAMING_ENABLED, false),
+            fallbackEnabled = enabled
         )
         if (enabled == null && streamingEnabled == null) return
 

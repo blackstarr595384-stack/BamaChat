@@ -48,6 +48,18 @@ class SharedAiPilotDebugToggleTest {
     }
 
     @Test
+    fun enabledExtraCanDriveStreamingPilotWhenStreamingExtraIsMissing() {
+        assertEquals(
+            true,
+            SharedAiPilotDebugToggle.resolveRequestedStreamingEnabled(
+                hasStreamingEnabledExtra = false,
+                streamingEnabled = false,
+                fallbackEnabled = true
+            )
+        )
+    }
+
+    @Test
     fun streamingExtraCanActivateStreamingPilotFlag() {
         assertEquals(
             true,

@@ -35,14 +35,23 @@ import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.util.UserErrorMessage
 import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
+import com.example.bamachat.data.OpenRouterStreamChunk
 import com.example.bamachat.data.toAiChatRequestForValidation
 import com.example.bamachat.shared.core.AiProviderId
+import com.example.bamachat.shared.core.ai.AiStreamCompleted
+import com.example.bamachat.shared.core.ai.AiStreamDelta
+import com.example.bamachat.shared.core.ai.AiStreamError
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -731,6 +740,22 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         val streamingBuffer = StringBuilder()
         val streamFlushInterval = 250L
         var lastFlushAt = System.currentTimeMillis()
+        if (runExperimentalStreamingChat(
+                convId = convId,
+                systemPrompt = systemPrompt,
+                messages = messages,
+                webContext = webContext,
+                startedAt = startedAt,
+                assistantMsg = assistantMsg,
+                streamingBuffer = streamingBuffer,
+                streamFlushInterval = streamFlushInterval,
+                lastFlushAtProvider = { lastFlushAt },
+                updateLastFlushAt = { lastFlushAt = it }
+            )
+        ) {
+            return
+        }
+
 
         try {
             val result = apiManager.streamChatResponse(
@@ -776,6 +801,168 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         }
     }
 
+    private suspend fun runExperimentalStreamingChat(
+        convId: String,
+        systemPrompt: String,
+        messages: List<OpenRouterMessage>,
+        webContext: ChatEngine.LiveWebContext?,
+        startedAt: Long,
+        assistantMsg: ChatMessage,
+        streamingBuffer: StringBuilder,
+        streamFlushInterval: Long,
+        lastFlushAtProvider: () -> Long,
+        updateLastFlushAt: (Long) -> Unit
+    ): Boolean {
+        val sharedAiExperimental = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+        val developerModeEnabled = prefs.getBoolean("developer_mode_enabled", false)
+        val streamingPilotEnabled = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_STREAMING_PILOT, false)
+        val pilotEnabled = AndroidAiOrchestrator.isStreamingPilotEnabled(
+            sharedAiExperimental = sharedAiExperimental,
+            developerModeEnabled = developerModeEnabled,
+            sharedAiStreamingPilot = streamingPilotEnabled
+        )
+        if (!pilotEnabled) {
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf("reason" to "flag_off", "model" to selectedModel.value)
+            )
+            return false
+        }
+
+        val apiKey = SecureSettingsStore
+            .getString(appContext, prefs, "openrouter_api_key")
+            .takeIf { it.length > 10 }
+        if (apiKey == null) {
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf("reason" to "missing_api_key", "model" to selectedModel.value)
+            )
+            return false
+        }
+
+        AppTelemetry.logEvent(
+            "stream_pilot_path_selected",
+            mapOf("model" to selectedModel.value)
+        )
+
+        return try {
+            val request = (listOf(OpenRouterMessage("system", systemPrompt)) + messages)
+                .toAiChatRequestForValidation(
+                    provider = AiProviderId.OPENROUTER,
+                    model = selectedModel.value,
+                    maxTokens = 1024,
+                    temperature = 0.7,
+                    stream = true
+                )
+            val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
+            val orchestrator = AndroidAiOrchestrator(
+                isExperimentalEnabled = { false },
+                chatCompletion = service::chatCompletion,
+                isStreamingExperimentalEnabled = { true },
+                streamTextChunks = { streamRequest -> streamOpenRouterTextChunks(service, streamRequest) },
+                legacyStreamEvents = {
+                    flow {
+                        throw StreamingPilotLegacyFallbackException("orchestrator_fallback")
+                    }
+                }
+            )
+
+            var completedText: String? = null
+            orchestrator.streamEvents(request).collect { event ->
+                when (event) {
+                    is AiStreamDelta -> {
+                        streamingBuffer.append(event.text)
+                        val now = System.currentTimeMillis()
+                        if (now - lastFlushAtProvider() >= streamFlushInterval) {
+                            updateLastFlushAt(now)
+                            repo.saveMessage(
+                                convId,
+                                assistantMsg.copy(text = streamingBuffer.toString()),
+                                touchConversation = false
+                            )
+                        }
+                    }
+                    is AiStreamCompleted -> completedText = event.response.message.text
+                    is AiStreamError -> throw StreamingPilotLegacyFallbackException("provider_error")
+                    else -> Unit
+                }
+            }
+
+            val finalText = completedText?.takeIf { it.isNotBlank() }
+                ?: streamingBuffer.toString().takeIf { it.isNotBlank() }
+                ?: throw StreamingPilotLegacyFallbackException("empty_stream")
+            val finalized = assistantMsg.copy(
+                text = finalText,
+                sources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso
+            )
+            repo.saveMessage(convId, finalized, touchConversation = true)
+            clearRetryContext()
+            notificationService.show("BamaChat", finalText, prefs.getBoolean("notifications_enabled", true))
+            AppTelemetry.logEvent(
+                "stream_pilot_completed",
+                mapOf(
+                    "model" to selectedModel.value,
+                    "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                )
+            )
+            true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (fallback: StreamingPilotLegacyFallbackException) {
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf("reason" to fallback.reason, "model" to selectedModel.value)
+            )
+            false
+        } catch (error: Exception) {
+            AppTelemetry.logError("android_ai_orchestrator_stream_pilot_integration_failed", error)
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf(
+                    "reason" to "exception",
+                    "model" to selectedModel.value,
+                    "exception" to error::class.java.simpleName
+                )
+            )
+            false
+        }
+    }
+
+    private fun streamOpenRouterTextChunks(
+        service: com.example.bamachat.data.OpenAICompatibleService,
+        request: OpenRouterChatRequest
+    ): Flow<String> = flow {
+        val response = service.chatCompletionStream(request)
+        if (!response.isSuccessful) {
+            val body = response.errorBody()?.string().orEmpty()
+            throw IllegalStateException("OpenRouter stream failed: ${response.code()} ${body.take(120)}")
+        }
+
+        val body = response.body() ?: throw IllegalStateException("OpenRouter stream failed: empty response body")
+        val gson = Gson()
+        body.byteStream().bufferedReader().use { reader ->
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val current = line ?: continue
+                if (!current.startsWith("data:")) continue
+                val payload = current.removePrefix("data:").trim()
+                if (payload.isBlank() || payload == "[DONE]") continue
+
+                runCatching {
+                    gson.fromJson(payload, OpenRouterStreamChunk::class.java)
+                        .choices
+                        ?.firstOrNull()
+                        ?.delta
+                        ?.content
+                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { emit(it) }
+            }
+        }
+    }
+
+    private class StreamingPilotLegacyFallbackException(
+        val reason: String
+    ) : RuntimeException(reason)
     private suspend fun runExperimentalNonStreamingChat(
         systemPrompt: String,
         messages: List<OpenRouterMessage>
