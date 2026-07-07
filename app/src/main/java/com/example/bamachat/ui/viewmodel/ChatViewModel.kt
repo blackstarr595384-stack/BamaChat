@@ -93,9 +93,13 @@ class ChatViewModel @Inject constructor(
         private const val KEY_EXTENSION_STATES_JSON = "workspace_extension_states_json"
         private const val KEY_EXTENSION_QUICK_ACTION = "extension_quick_action"
         private const val KEY_IMAGE_GENERATION_MODE = "image_generation_mode"
+        internal const val KEY_AGENT_TOOLS_ENABLED = "agent_tools_enabled"
         private const val IMAGE_GENERATION_MODE_DISABLED = "Deaktiviert"
         // Cache system prompts for 5 minutes to reduce API load
         private const val SYSTEM_PROMPT_CACHE_TTL_MS = 5 * 60 * 1000L
+
+        internal fun shouldUseAgentLoop(hasTools: Boolean, agentToolsEnabled: Boolean): Boolean =
+            agentToolsEnabled && hasTools
 
         internal fun computeWindowedMessages(all: List<ChatMessage>, limit: Int): List<ChatMessage> {
             if (all.isEmpty()) return emptyList()
@@ -736,10 +740,25 @@ class ChatViewModel @Inject constructor(
 
         val toolDefs = mcpServerManager.getToolDefinitionsOpenAI() + mcpWorkflowManager.getOpenAIToolDefinitions()
         val hasTools = toolDefs.isNotEmpty()
+        val agentToolsEnabled = prefs.getBoolean(KEY_AGENT_TOOLS_ENABLED, false)
 
-        if (hasTools) {
+        if (shouldUseAgentLoop(hasTools = hasTools, agentToolsEnabled = agentToolsEnabled)) {
+            AppTelemetry.logEvent(
+                "chat_route_agent_loop",
+                mapOf(
+                    "has_tools" to hasTools.toString(),
+                    "agent_tools_enabled" to agentToolsEnabled.toString()
+                )
+            )
             runAgentLoop(convId, text, systemPrompt, startedAt, webContext, toolDefs)
         } else {
+            AppTelemetry.logEvent(
+                "chat_route_streaming",
+                mapOf(
+                    "has_tools" to hasTools.toString(),
+                    "agent_tools_enabled" to agentToolsEnabled.toString()
+                )
+            )
             runStreamingChat(convId, systemPrompt, messages, webContext, startedAt)
         }
     }
