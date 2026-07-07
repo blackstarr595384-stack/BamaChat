@@ -37,6 +37,9 @@ import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
 import com.example.bamachat.data.OpenRouterStreamChunk
 import com.example.bamachat.data.toAiChatRequestForValidation
+import com.example.bamachat.shared.core.AiChatMessage
+import com.example.bamachat.shared.core.AiChatResponse
+import com.example.bamachat.shared.core.AiChatRole
 import com.example.bamachat.shared.core.AiProviderId
 import com.example.bamachat.shared.core.ai.AiStreamCompleted
 import com.example.bamachat.shared.core.ai.AiStreamDelta
@@ -49,6 +52,7 @@ import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -158,6 +162,84 @@ class ChatViewModel @Inject constructor(
             clearRetryContext()
             showNotification(finalText)
             return AiStreamConsumptionResult(success = true, finalText = finalText)
+        }
+
+        internal fun legacyStreamAsAiEvents(
+            provider: AiProviderId,
+            model: String,
+            streamChatResponse: suspend (
+                onChunkReceived: (String) -> Unit,
+                onError: (String) -> Unit
+            ) -> ApiManager.ApiResponse,
+            onIntermediateError: (String) -> Unit = {}
+        ): Flow<AiStreamEvent> = channelFlow {
+            send(AiStreamStarted(provider = provider, model = model))
+
+            val response = try {
+                streamChatResponse(
+                    { chunk ->
+                        if (chunk.isNotEmpty()) {
+                            trySend(
+                                AiStreamDelta(
+                                    text = chunk,
+                                    provider = provider,
+                                    model = model
+                                )
+                            )
+                        }
+                    },
+                    { error ->
+                        onIntermediateError(error)
+                    }
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                send(
+                    AiStreamError(
+                        message = error.message ?: "Legacy stream failed",
+                        exceptionClass = error::class.java.simpleName,
+                        provider = provider,
+                        model = model
+                    )
+                )
+                send(AiStreamFinished(provider = provider, model = model))
+                return@channelFlow
+            }
+
+            val finalProvider = response.usedProvider?.toAiProviderId() ?: provider
+            if (response.success && response.content.isNotBlank()) {
+                send(
+                    AiStreamCompleted(
+                        AiChatResponse(
+                            provider = finalProvider,
+                            model = model,
+                            message = AiChatMessage(
+                                role = AiChatRole.ASSISTANT,
+                                text = response.content
+                            )
+                        )
+                    )
+                )
+            } else {
+                send(
+                    AiStreamError(
+                        message = response.error.ifBlank { "Legacy stream returned an empty response" },
+                        provider = finalProvider,
+                        model = model
+                    )
+                )
+            }
+
+            send(AiStreamFinished(provider = finalProvider, model = model))
+        }
+
+        private fun ApiClient.Provider.toAiProviderId(): AiProviderId = when (this) {
+            ApiClient.Provider.OPENROUTER -> AiProviderId.OPENROUTER
+            ApiClient.Provider.GROQ -> AiProviderId.GROQ
+            ApiClient.Provider.CEREBRAS -> AiProviderId.CEREBRAS
+            ApiClient.Provider.TOGETHER -> AiProviderId.TOGETHER
+            ApiClient.Provider.OPENCODE -> AiProviderId.OPENCODE
         }
     }
 

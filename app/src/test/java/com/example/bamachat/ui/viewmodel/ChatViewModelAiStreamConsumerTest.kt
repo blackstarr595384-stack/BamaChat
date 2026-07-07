@@ -1,5 +1,6 @@
 package com.example.bamachat.ui.viewmodel
 
+import com.example.bamachat.data.ApiClient
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.model.ChatSource
 import com.example.bamachat.shared.core.AiChatMessage
@@ -11,10 +12,12 @@ import com.example.bamachat.shared.core.ai.AiStreamDelta
 import com.example.bamachat.shared.core.ai.AiStreamError
 import com.example.bamachat.shared.core.ai.AiStreamEvent
 import com.example.bamachat.shared.core.ai.AiStreamFinished
+import com.example.bamachat.shared.core.ai.AiStreamStarted
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -122,6 +125,101 @@ class ChatViewModelAiStreamConsumerTest {
         }
     }
 
+    @Test
+    fun legacyChunkMapsToAiStreamDelta() = runBlocking {
+        val events = legacyEvents { onChunk, _ ->
+            onChunk("Hel")
+            ApiManager.ApiResponse(success = true, content = "Hel", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        val deltas = events.filterIsInstance<AiStreamDelta>()
+
+        assertEquals(listOf("Hel"), deltas.map { it.text })
+        assertTrue(events.first() is AiStreamStarted)
+        assertTrue(events.last() is AiStreamFinished)
+    }
+
+    @Test
+    fun legacyChunksKeepOrder() = runBlocking {
+        val events = legacyEvents { onChunk, _ ->
+            onChunk("Hel")
+            onChunk("lo")
+            onChunk("!")
+            ApiManager.ApiResponse(success = true, content = "Hello!", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        assertEquals(listOf("Hel", "lo", "!"), events.filterIsInstance<AiStreamDelta>().map { it.text })
+    }
+
+    @Test
+    fun legacySuccessMapsFinalResponseToCompleted() = runBlocking {
+        val events = legacyEvents { onChunk, _ ->
+            onChunk("done")
+            ApiManager.ApiResponse(success = true, content = "done", usedProvider = ApiClient.Provider.GROQ)
+        }
+
+        val completed = events.filterIsInstance<AiStreamCompleted>().single()
+
+        assertEquals(AiProviderId.GROQ, completed.provider)
+        assertEquals(MODEL, completed.model)
+        assertEquals("done", completed.response.message.text)
+    }
+
+    @Test
+    fun legacyFinalErrorMapsToAiStreamError() = runBlocking {
+        val events = legacyEvents { _, _ ->
+            ApiManager.ApiResponse(
+                success = false,
+                error = "all providers failed",
+                usedProvider = ApiClient.Provider.OPENROUTER,
+                retryable = false
+            )
+        }
+
+        val error = events.filterIsInstance<AiStreamError>().single()
+
+        assertEquals("all providers failed", error.message)
+        assertEquals(AiProviderId.OPENROUTER, error.provider)
+        assertTrue(events.last() is AiStreamFinished)
+    }
+
+    @Test
+    fun legacyIntermediateOnErrorDoesNotEmitTerminalError() = runBlocking {
+        val intermediateErrors = mutableListOf<String>()
+        val events = legacyEvents(
+            onIntermediateError = { intermediateErrors.add(it) }
+        ) { onChunk, onError ->
+            onError("OpenRouter fehlgeschlagen, versuche Groq...")
+            onChunk("ok")
+            ApiManager.ApiResponse(success = true, content = "ok", usedProvider = ApiClient.Provider.GROQ)
+        }
+
+        assertEquals(listOf("OpenRouter fehlgeschlagen, versuche Groq..."), intermediateErrors)
+        assertEquals(emptyList<AiStreamError>(), events.filterIsInstance<AiStreamError>())
+        assertEquals("ok", events.filterIsInstance<AiStreamCompleted>().single().response.message.text)
+    }
+
+    @Test
+    fun legacyCancellationIsForwarded() {
+        assertThrows(CancellationException::class.java) {
+            runBlocking {
+                legacyEvents { _, _ ->
+                    throw CancellationException("cancel legacy")
+                }
+            }
+        }
+    }
+
+    @Test
+    fun legacyFinishedIsEmittedAtEnd() = runBlocking {
+        val events = legacyEvents { onChunk, _ ->
+            onChunk("done")
+            ApiManager.ApiResponse(success = true, content = "done", usedProvider = ApiClient.Provider.OPENROUTER)
+        }
+
+        assertTrue(events.last() is AiStreamFinished)
+    }
+
     private suspend fun consume(
         events: Flow<AiStreamEvent>,
         buffer: StringBuilder = StringBuilder(),
@@ -158,6 +256,21 @@ class ChatViewModelAiStreamConsumerTest {
                 message = AiChatMessage(AiChatRole.ASSISTANT, text)
             )
         )
+    }
+
+    private suspend fun legacyEvents(
+        onIntermediateError: (String) -> Unit = {},
+        streamChatResponse: suspend (
+            onChunkReceived: (String) -> Unit,
+            onError: (String) -> Unit
+        ) -> ApiManager.ApiResponse
+    ): List<AiStreamEvent> {
+        return ChatViewModel.legacyStreamAsAiEvents(
+            provider = AiProviderId.OPENROUTER,
+            model = MODEL,
+            streamChatResponse = streamChatResponse,
+            onIntermediateError = onIntermediateError
+        ).toList()
     }
 
     private data class SavedMessage(
