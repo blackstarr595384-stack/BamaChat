@@ -1,4 +1,208 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">BamaChat</string>
+    <string name="app_description">Your AI Workspace for intelligent conversations and creative collaboration</string>
+
+    <!-- Real-Time Collab: Sync Status -->
+    <string name="collab_sync_status_disconnected">Not connected</string>
+    <string name="collab_sync_status_local_only">Local device only</string>
+    <string name="collab_sync_status_firebase_connected">Firebase connected</string>
+    <string name="collab_sync_status_syncing">Syncing…</string>
+    <string name="collab_sync_status_error">Sync error</string>
+    <string name="collab_sync_status_local_workspace">Local dev workspace active (device only)</string>
+    <string name="collab_sync_status_reconnecting">Reconnecting…</string>
+    <string name="collab_sync_status_login_running">Dev-Cloud login running…</string>
+
+    <!-- Real-Time Collab: Auth Mode -->
+    <string name="collab_auth_mode_not_logged_in">Not logged in</string>
+    <string name="collab_auth_mode_dev_local">Dev-Local Mode</string>
+    <string name="collab_auth_mode_firebase">Firebase</string>
+
+    <!-- Real-Time Collab: Firebase Status -->
+    <string name="collab_firebase_status_initializing">Initializing Firebase…</string>
+    <string name="collab_firebase_status_ready">Firebase ready</string>
+    <string name="collab_firebase_status_auth_required">Authentication required</string>
+
+    <!-- Real-Time Collab: Message Delivery -->
+    <string name="collab_msg_status_sending">Status: sending…</string>
+    <string name="collab_msg_status_sent">Status: sent</string>
+    <string name="collab_msg_status_failed">Status: failed</string>
+
+    <!-- Real-Time Collab: UI Labels -->
+    <string name="collab_realtime_collab">Real-Time Collab</string>
+    <string name="collab_invite_code">Invite Code</string>
+    <string name="collab_session_create">Create Session</string>
+    <string name="collab_session_join">Join Session</string>
+    <string name="collab_session_invite">Invite Others</string>
+    <string name="collab_session_leave">Leave Session</string>
+    <string name="collab_workspace">Workspace</string>
+
+    <!-- Real-Time Collab: Empty States -->
+    <string name="collab_no_messages">No messages yet. Write the first message or invite someone.</string>
+    <string name="collab_loading_session">Loading session…</string>
+    <string name="collab_loading_messages">Loading messages…</string>
+
+    <!-- Real-Time Collab: Privacy -->
+    <string name="collab_privacy_consent_title">Data Privacy Notice</string>
+    <string name="collab_privacy_consent_message">Session data is stored on Firebase and shared with participants. Messages are retained 30 days.\n\nBy creating a session, you agree to our Privacy Policy.</string>
+    <string name="collab_privacy_accept">I accept the Privacy Policy</string>
+
+    <!-- Real-Time Collab: Errors -->
+    <string name="collab_error_session_not_found">Session not found. The owner may have deleted it.</string>
+    <string name="collab_error_permission_denied">Permission denied. Are you still a participant?</string>
+    <string name="collab_error_network">Network error. Check connection and retry.</string>
+    <string name="collab_error_session_expired">Session expired (30 days inactive).</string>
+    <string name="collab_error_auth_required">Authentication required or enable Dev Mode.</string>
+    <string name="collab_error_invalid_code">Invalid invite code. Please check and try again.</string>
+    <string name="collab_error_listener">Failed to connect. Retrying…</string>
+    <string name="collab_error_conflict">Your changes conflict with collaborator edits.</string>
+    <string name="collab_error_too_large">Workspace exceeds maximum length.</string>
+    <string name="collab_error_invite_code_only">Invite code alone is not enough. Please also add Session ID or full invite link.</string>
+    <string name="collab_error_invalid_link">Invalid invite link or session ID. Use the copied link with ?session=... or session ID only.</string>
+    <string name="collab_error_invalid_session_id">Invalid session ID. Please use only session code or valid invite link.</string>
+    <string name="collab_error_owner_only_policy">Only owner can change session policies.</string>
+    <string name="collab_error_owner_only_roles">Only owner can change roles.</string>
+    <string name="collab_error_role_change_failed">Role could not be changed.</string>
+
+    <!-- Real-Time Collab: Conflict Resolution -->
+    <string name="collab_conflict_title">Remote Update Detected</string>
+    <string name="collab_conflict_message">%1$s changed the workspace</string>
+    <string name="collab_conflict_remote">Use Remote</string>
+    <string name="collab_conflict_merge">Smart Merge</string>
+    <string name="collab_conflict_local">Keep Mine</string>
+
+    <!-- Real-Time Collab: Dev Mode -->
+    <string name="collab_dev_warning">⚠️ DEV MODE - Local only, no sync</string>
+
+    <!-- Real-Time Collab: Actions -->
+    <string name="collab_retry">Retry</string>
+    <string name="collab_dismiss">Dismiss</string>
+    <string name="collab_back_home">Back to Home</string>
+    <string name="collab_load_more">Load Earlier Messages</string>
+
+    <!-- Real-Time Collab: Additional Status Messages -->
+    <string name="collab_sync_status_offline_synced">Offline queue synced</string>
+    <string name="collab_sync_status_local_synced">Local workspace synced (device only)</string>
+    <string name="collab_sync_status_workspace_synced">Workspace synced</string>
+    <string name="collab_sync_status_policy_local_updated">Session policy locally updated</string>
+    <string name="collab_sync_status_policy_updated">Session policy updated</string>
+    <string name="collab_error_workspace_sync">Workspace sync failed</string>
+    <string name="collab_error_reconnect_failed">Reconnect failed</string>
+    <string name="collab_error_join_failed">Join failed</string>
+    <string name="collab_error_cloud_login_fallback_local">Cloud login failed, local mode active</string>
+    <string name="collab_sync_status_live_sync">Live sync</string>
+
+    <!-- Real-Time Collab: Session Management Errors -->
+    <string name="collab_error_session_creation_failed">Session could not be created</string>
+    <string name="collab_error_not_participant">You are not a participant in this session</string>
+    <string name="collab_error_policy_update_failed">Session policy could not be updated</string>
+    <string name="collab_error_participant_not_found">Participant not found</string>
+    <string name="collab_error_owner_cannot_demote">Owner role cannot be downgraded</string>
+    <string name="collab_error_owner_only_renew_invite">Only owner can renew invite codes</string>
+    <string name="collab_error_invite_renew_failed">Invite code could not be renewed</string>
+    <string name="collab_error_owner_only_remove">Only owner can remove participants</string>
+    <string name="collab_error_owner_cannot_remove_self">Owner cannot remove themselves</string>
+    <string name="collab_error_participant_removal_failed">Participant could not be removed</string>
+    <string name="collab_error_leave_session_failed">Could not leave session</string>
+    <string name="collab_error_no_last_join">No last session join stored</string>
+
+    <!-- Real-Time Collab: Dev Mode Cloud -->
+    <string name="collab_error_cloud_login_impossible">Cloud login not possible. Local dev mode is only visible on this device.</string>
+    <string name="collab_error_cloud_login_failed">Cloud login failed. Local dev mode is only visible on this device.</string>
+
+    <!-- Real-Time Collab: AI Status -->
+    <string name="collab_ai_starting">AI team starting…</string>
+    <string name="collab_ai_started_agents">AI team started (%1$d agents).</string>
+    <string name="collab_ai_response_received">AI team response received.</string>
+    <string name="collab_ai_help_for">AI help for: %1$s</string>
+    <string name="collab_ai_error">AI team error: %1$s</string>
+    <string name="collab_ai_no_response">AI team could not generate a response.</string>
+    <string name="collab_ai_no_response_retry">AI team could not generate a response. Please try again.</string>
+    <string name="collab_presence_typing"> typing: %1$s</string>
+    <string name="collab_default_session_title">My Session</string>
+    <string name="collab_automation_run_confirm">Run automation?</string>
+    <string name="collab_automation_start">Start</string>
+    <string name="collab_automation_cancel">Cancel</string>
+
+    <!-- Real-Time Collab: Session Setup UI -->
+    <string name="collab_session_setup">Session Setup</string>
+    <string name="collab_hide">Hide</string>
+    <string name="collab_show">Show</string>
+    <string name="collab_session_name">Session name</string>
+    <string name="collab_session_id_or_link">Session ID or invite link</string>
+    <string name="collab_invite_code_optional">Invite code (optional)</string>
+    <string name="collab_active_session">Active Session: %1$s • %2$s</string>
+    <string name="collab_my_role">My role: %1$s</string>
+    <string name="collab_participants_online">Participants: %1$d • Online: %2$d</string>
+    <string name="collab_sync_label">Sync: %1$s</string>
+    <string name="collab_auth_label">Auth: %1$s</string>
+    <string name="collab_hint_local_mode">Note: Local mode is not cross-device.</string>
+    <string name="collab_invite_code_display">Invite code: %1$s</string>
+    <string name="collab_no_code">no code</string>
+
+    <!-- Real-Time Collab: Policies UI -->
+    <string name="collab_session_policies">Session Policies</string>
+    <string name="collab_policy_ai_enabled">AI in workspace active</string>
+    <string name="collab_policy_editor_ai">Editors may use AI</string>
+    <string name="collab_policy_editor_messages">Editors may send messages</string>
+    <string name="collab_policy_editor_workspace">Editors may edit workspace</string>
+
+    <!-- Real-Time Collab: Action Labels -->
+    <string name="collab_copy_link">Copy link</string>
+    <string name="collab_invite_local_only">Invite (local only)</string>
+    <string name="collab_renew_code">Renew code</string>
+    <string name="collab_reconnect">Reconnect</string>
+    <string name="collab_send">Send</string>
+
+    <!-- Real-Time Collab: AI Team -->
+    <string name="collab_choose_agents">Choose agents for AI help:</string>
+    <string name="collab_agents_selected">Selected: %1$d agents</string>
+    <string name="collab_hint_workspace_as_prompt">Note: AI team is currently using workspace text as prompt.</string>
+    <string name="collab_automations">Automations:</string>
+    <string name="collab_ai_running">AI running…</string>
+    <string name="collab_ai_team_response">AI team response</string>
+
+    <!-- Real-Time Collab: Workspace UI -->
+    <string name="collab_workspace_note_label">Live note (synced across all devices)</string>
+    <string name="collab_workspace_lines">Local: %1$d lines • Remote: %2$d</string>
+    <string name="collab_workspace_chars">%1$d/%2$d characters</string>
+    <string name="collab_hint_workspace_long">Note: Very long notes may reduce sync speed.</string>
+    <string name="collab_workspace_last_changed">Last changed by %1$s • Rev %2$d</string>
+    <string name="collab_unknown">Unknown</string>
+
+    <!-- Real-Time Collab: Message Input -->
+    <string name="collab_message_input_label">Message to session</string>
+    <string name="collab_viewer_mode_hint">Viewer mode: reading allowed, writing locked.</string>
+    <string name="collab_ai_disabled_for_role">AI team is disabled for your role per session policy.</string>
+    <string name="collab_ai_working">AI team working…</string>
+
+    <!-- Real-Time Collab: Debug -->
+    <string name="collab_debug">Debug</string>
+    <string name="collab_debug_refresh">Refresh debug</string>
+
+    <!-- Real-Time Collab: Conflict Panel Tooltips -->
+    <string name="collab_conflict_remote_tooltip">Use the version from your collaborator (overwrites your changes)</string>
+    <string name="collab_conflict_merge_tooltip">Intelligently combine both versions</string>
+    <string name="collab_conflict_local_tooltip">Keep your version (overwrites collaborator\'s changes)</string>
+    <string name="collab_conflict_changed_by">Changed by %1$s</string>
+
+    <!-- Real-Time Collab: Workspace Merge -->
+    <string name="collab_merge_remote_empty">Remote is empty, local has content.</string>
+    <string name="collab_merge_local_empty">Local is empty, remote has content.</string>
+    <string name="collab_error_no_metadata_access">No access to session metadata. Please publish Firestore rules for collab_sessions.</string>
+
+    <!-- Real-Time Collab: Additional German-only strings needing English defaults -->
+    <string name="collab_error_ai_disabled">AI responses are disabled for this session.</string>
+    <string name="collab_error_ai_locked">AI actions are locked for your role.</string>
+    <string name="collab_error_viewer_write">Viewers may not write.</string>
+    <string name="collab_error_workspace_edit_disabled">Workspace editing is disabled for editors.</string>
+    <string name="collab_error_workspace_edit_locked">Workspace editing is locked for your role.</string>
+    <string name="collab_merge_local_additions">Local additions</string>
+    <string name="collab_sync_status_local_connected">Local dev workspace connected (device only)</string>
+    <string name="collab_sync_status_local_msg_sent">Local message sent (device only)</string>
+
+    <!-- String placeholders for dynamic content -->
+    <string name="collab_sync_status_local_connected_with_id">Local dev workspace connected (device only): %1$s</string>
+    <string name="collab_sync_status_local_msg_sent_with_count">Local message sent (%1$d, device only)</string>
+
 </resources>
