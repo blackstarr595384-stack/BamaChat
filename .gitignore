@@ -8,10 +8,13 @@ local.properties
 *.jks
 keystore.properties
 .env
+.env.*
 *.zip
 apk_contents/
 apk_contents_new/
 app/google-services.json
+app/src/**/google-services.json
+google-services.json
 hs_err_pid*.log
 replay_pid*.log
 functions/node_modules/
@@ -23,6 +26,10 @@ functions/node_modules/
 /node_modules/
 /playstore_reports/
 /backups/
+/.vercel/
+/firebase-debug.log
+/firestore-debug.log
+/ui-debug.log
 
 # Local patch/export folders
 /BamaChat_*_v*/
@@ -46,8 +53,11 @@ app/**/*.backup*
 *.keystore
 *.p12
 *.env
+*.env.*
 apikeys.properties
 local.properties
+service-account*.json
+firebase-adminsdk*.json
 
 # Wrong Firebase local filename
 /app/google-service.json
