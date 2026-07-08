@@ -35,6 +35,7 @@ import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.util.UserErrorMessage
 import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
+import com.example.bamachat.data.OpenRouterSseTextChunkStream
 import com.example.bamachat.data.OpenRouterStreamChunk
 import com.example.bamachat.data.toAiChatRequestForValidation
 import com.example.bamachat.shared.core.AiChatMessage
@@ -1514,36 +1515,5 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _messageFeedback.value = emptyMap()
         systemPromptCache = null
         super.onCleared()
-    }
-}
-private class OpenRouterSseTextChunkStream(
-    private val service: com.example.bamachat.data.OpenAICompatibleService,
-    private val gson: Gson = Gson()
-) {
-    fun streamTextChunks(request: OpenRouterChatRequest): Flow<String> = flow {
-        val response = service.chatCompletionStream(request)
-        if (!response.isSuccessful) {
-            val body = response.errorBody()?.string().orEmpty()
-            throw IllegalStateException("OpenRouter stream failed: ${response.code()} ${body.take(120)}")
-        }
-
-        val body = response.body() ?: throw IllegalStateException("OpenRouter stream failed: empty response body")
-        body.byteStream().bufferedReader().use { reader ->
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val current = line ?: continue
-                if (!current.startsWith("data:")) continue
-                val payload = current.removePrefix("data:").trim()
-                if (payload.isBlank() || payload == "[DONE]") continue
-
-                runCatching {
-                    gson.fromJson(payload, OpenRouterStreamChunk::class.java)
-                        .choices
-                        ?.firstOrNull()
-                        ?.delta
-                        ?.content
-                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { emit(it) }
-            }
-        }
     }
 }
