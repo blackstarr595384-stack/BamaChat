@@ -1,8 +1,8 @@
 [versions]
 agp = "8.7.3"
-kotlin = "2.1.21"
+kotlin = "2.1.0"
 compose-plugin = "1.9.3"
-ksp = "2.1.21-2.0.1"
+ksp = "2.1.0-1.0.29"
 google-services = "4.4.4"
 firebase-crashlytics-plugin = "3.0.6"
 hilt = "2.54"
