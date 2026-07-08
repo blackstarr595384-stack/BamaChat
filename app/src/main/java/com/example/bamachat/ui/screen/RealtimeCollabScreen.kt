@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +70,7 @@ import com.example.bamachat.ui.component.CompactTextAction
 import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
+import com.example.bamachat.R
 import com.example.bamachat.util.AutomationCatalog
 import com.example.bamachat.util.AutomationTemplate
 import kotlinx.coroutines.Job
@@ -98,6 +100,7 @@ fun RealtimeCollabScreen(
     val isLoading by collabViewModel.isLoading.collectAsStateWithLifecycle()
     val errorMessage by collabViewModel.errorMessage.collectAsStateWithLifecycle()
     val workspaceState by collabViewModel.workspaceState.collectAsStateWithLifecycle()
+    val privacyConsentShown by collabViewModel.privacyConsentShown.collectAsStateWithLifecycle()
     val syncStatus by collabViewModel.syncStatus.collectAsStateWithLifecycle()
     val authModeLabel by collabViewModel.authModeLabel.collectAsStateWithLifecycle()
     val firebaseStatus by collabViewModel.firebaseStatus.collectAsStateWithLifecycle()
@@ -109,9 +112,10 @@ fun RealtimeCollabScreen(
     val canEditWorkspace by collabViewModel.canEditWorkspace.collectAsStateWithLifecycle()
     val canUseAi by collabViewModel.canUseAi.collectAsStateWithLifecycle()
     val workspaceConflictMessage by collabViewModel.workspaceConflictMessage.collectAsStateWithLifecycle()
+    val hasMoreMessages by collabViewModel.hasMoreMessages.collectAsStateWithLifecycle()
     val multiAgentIsRunning by chatViewModel.multiAgentViewModel.isRunning.collectAsStateWithLifecycle()
     val multiAgentError by chatViewModel.multiAgentViewModel.errorMessage.collectAsStateWithLifecycle()
-    val isLocalOnlyMode = authModeLabel.startsWith("Dev-Local") || syncStatus.contains("nur dieses Gerät", ignoreCase = true)
+    val isLocalOnlyMode by collabViewModel.isLocalOnlyMode.collectAsStateWithLifecycle()
 
     val scope = rememberCoroutineScope()
     @Suppress("DEPRECATION")
@@ -126,7 +130,9 @@ fun RealtimeCollabScreen(
     val listItemSpacing = if (compactLayout) 8.dp else 10.dp
     val footerCornerRadius = if (compactLayout) 18.dp else 20.dp
 
-    var sessionTitle by remember { mutableStateOf("Meine Session") }
+    val defaultSessionTitle = stringResource(R.string.collab_default_session_title)
+    var sessionTitle by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { if (sessionTitle.isEmpty()) sessionTitle = defaultSessionTitle }
     var joinCode by remember { mutableStateOf("") }
     var inviteCodeInput by remember { mutableStateOf("") }
     var messageInput by rememberSaveable { mutableStateOf(prefs.getString(KEY_MESSAGE_DRAFT, "").orEmpty()) }
@@ -141,6 +147,8 @@ fun RealtimeCollabScreen(
     var localWorkspaceDirty by remember { mutableStateOf(false) }
     var remoteWorkspaceAheadMessage by remember { mutableStateOf<String?>(null) }
     var lastWorkspaceRevisionSeen by remember { mutableLongStateOf(0L) }
+    var showPrivacyConsentDialog by remember { mutableStateOf(false) }
+    var privacyConsentCheckbox by remember { mutableStateOf(false) }
 
     val selectedAgents = remember { mutableStateListOf<ChatViewModel.Persona>() }
     val isOwner = session?.ownerId == myUserId
@@ -176,10 +184,10 @@ fun RealtimeCollabScreen(
     val runAiRequest: (AiRetryRequest) -> Unit = aiRequest@{ request ->
         if (!canUseAi || session == null || multiAgentIsRunning) return@aiRequest
         chatViewModel.multiAgentViewModel.dismissError()
-        localAiStatus = "KI-Team startet ..."
+        localAiStatus = context.getString(R.string.collab_ai_starting)
         scope.launch {
             collabViewModel.sendMessage(
-                "KI-Team gestartet (${request.personas.size} Agenten).",
+                context.getString(R.string.collab_ai_started_agents, request.personas.size),
                 isAi = true
             )
             chatViewModel.multiAgentViewModel.runCollaboration(
@@ -188,23 +196,23 @@ fun RealtimeCollabScreen(
             )
             val result = chatViewModel.multiAgentViewModel.collaborationResult.value
             if (result != null && result.synthesis.isNotBlank()) {
-                localAiStatus = "KI-Team Antwort erhalten."
+                localAiStatus = context.getString(R.string.collab_ai_response_received)
                 lastAiFailedRequest = null
-                collabViewModel.sendMessage("KI-Hilfe zu: ${request.prompt}", isAi = true)
+                collabViewModel.sendMessage(context.getString(R.string.collab_ai_help_for, request.prompt), isAi = true)
                 collabViewModel.sendMessage(result.synthesis, isAi = true)
             } else {
                 val reason = chatViewModel.multiAgentViewModel.errorMessage.value.orEmpty()
                 localAiStatus = if (reason.isNotBlank()) {
-                    "KI-Team Fehler: $reason"
+                    context.getString(R.string.collab_ai_error, reason)
                 } else {
-                    "KI-Team konnte keine Antwort erzeugen."
+                    context.getString(R.string.collab_ai_no_response)
                 }
                 lastAiFailedRequest = request
                 collabViewModel.sendMessage(
                     if (reason.isNotBlank()) {
-                        "KI-Team Fehler: $reason"
+                        context.getString(R.string.collab_ai_error, reason)
                     } else {
-                        "KI-Team konnte noch keine Antwort erzeugen. Bitte erneut versuchen."
+                        context.getString(R.string.collab_ai_no_response_retry)
                     },
                     isAi = true
                 )
@@ -314,7 +322,7 @@ fun RealtimeCollabScreen(
                         IconButton(onClick = onBack) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Zurück",
+                                contentDescription = stringResource(R.string.collab_back_home),
                                 tint = Color.White
                             )
                         }
@@ -327,15 +335,40 @@ fun RealtimeCollabScreen(
                     }
                 }
 
+                if (isLocalOnlyMode) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFF6B00).copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.6f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("⚠️", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    stringResource(R.string.collab_dev_warning),
+                                    color = Color(0xFFFF9E40),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Session Setup", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.collab_session_setup), color = Color.White, fontWeight = FontWeight.SemiBold)
                         TextButton(onClick = { showSetup = !showSetup }) {
-                            Text(if (showSetup) "Ausblenden" else "Einblenden")
+                            Text(if (showSetup) stringResource(R.string.collab_hide) else stringResource(R.string.collab_show))
                         }
                     }
                 }
@@ -352,26 +385,36 @@ fun RealtimeCollabScreen(
                                     value = sessionTitle,
                                     onValueChange = { sessionTitle = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("Session-Name") },
+                                    label = { Text(stringResource(R.string.collab_session_name)) },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                     keyboardActions = KeyboardActions(onDone = {
                                         focusManager.clearFocus()
-                                        collabViewModel.createSession(sessionTitle)
+                                        if (privacyConsentShown) {
+                                            collabViewModel.createSession(sessionTitle)
+                                        } else {
+                                            showPrivacyConsentDialog = true
+                                        }
                                     })
                                 )
                                 Button(
-                                    onClick = { collabViewModel.createSession(sessionTitle) },
+                                    onClick = {
+                                        if (privacyConsentShown) {
+                                            collabViewModel.createSession(sessionTitle)
+                                        } else {
+                                            showPrivacyConsentDialog = true
+                                        }
+                                    },
                                     enabled = !isLoading,
                                     modifier = Modifier.heightIn(min = 48.dp)
                                 ) {
-                                    Text("Neue Session erstellen")
+                                    Text(stringResource(R.string.collab_session_create))
                                 }
                                 OutlinedTextField(
                                     value = joinCode,
                                     onValueChange = { joinCode = it },
                                     modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("Session-ID oder Invite-Link") },
+                                    label = { Text(stringResource(R.string.collab_session_id_or_link)) },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                                     keyboardActions = KeyboardActions(onNext = {
@@ -382,7 +425,7 @@ fun RealtimeCollabScreen(
                                     value = inviteCodeInput,
                                     onValueChange = { inviteCodeInput = it.uppercase() },
                                     modifier = Modifier.fillMaxWidth(),
-                                    label = { Text("Invite-Code (optional)") },
+                                    label = { Text(stringResource(R.string.collab_invite_code_optional)) },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                     keyboardActions = KeyboardActions(onDone = {
@@ -395,7 +438,7 @@ fun RealtimeCollabScreen(
                                     enabled = !isLoading,
                                     modifier = Modifier.heightIn(min = 48.dp)
                                 ) {
-                                    Text("Session beitreten")
+                                    Text(stringResource(R.string.collab_session_join))
                                 }
                             }
                         }
@@ -411,22 +454,22 @@ fun RealtimeCollabScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("Aktive Session: ${it.id} • ${it.title}", color = Color.White)
-                                Text("Meine Rolle: ${myRole.name}", color = Color(0xFF9BE7FF))
+                                Text(stringResource(R.string.collab_active_session, it.id, it.title), color = Color.White)
+                                Text(stringResource(R.string.collab_my_role, myRole.name), color = Color(0xFF9BE7FF))
                                 Text(
-                                    "Teilnehmer: ${it.participants.size} • Online: ${presences.count { p -> p.active }}",
+                                    stringResource(R.string.collab_participants_online, it.participants.size, presences.count { p -> p.active }),
                                     color = Color.White.copy(alpha = 0.85f)
                                 )
-                                Text("Sync: $syncStatus", color = Color(0xFFBFD8FF))
-                                Text("Auth: $authModeLabel", color = Color(0xFFBFD8FF))
+                                Text(stringResource(R.string.collab_sync_label, syncStatus), color = Color(0xFFBFD8FF))
+                                Text(stringResource(R.string.collab_auth_label, authModeLabel), color = Color(0xFFBFD8FF))
                                 if (isLocalOnlyMode) {
                                     Text(
-                                        "Hinweis: Lokaler Modus ist nicht geräteübergreifend.",
+                                        stringResource(R.string.collab_hint_local_mode),
                                         color = Color(0xFFFFD9A8),
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
-                                Text("Invite-Code: ${it.inviteCode.ifBlank { "kein Code" }}", color = Color.White)
+                                Text(stringResource(R.string.collab_invite_code_display, it.inviteCode.ifBlank { stringResource(R.string.collab_no_code) }), color = Color.White)
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
                                     color = Color.White.copy(alpha = 0.08f),
@@ -436,7 +479,7 @@ fun RealtimeCollabScreen(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text("Session-Policies", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                        Text(stringResource(R.string.collab_session_policies), color = Color.White, fontWeight = FontWeight.SemiBold)
                                         Text(
                                             "KI: ${if (it.aiEnabled) "an" else "aus"} • Editor KI: ${if (it.editorCanUseAi) "an" else "aus"} • Editor Chat: ${if (it.editorCanSendMessages) "an" else "aus"} • Editor Workspace: ${if (it.editorCanEditWorkspace) "an" else "aus"}",
                                             color = Color.White.copy(alpha = 0.82f),
@@ -457,7 +500,7 @@ fun RealtimeCollabScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("KI im Workspace aktiv", color = Color.White)
+                                                Text(stringResource(R.string.collab_policy_ai_enabled), color = Color.White)
                                                 Switch(
                                                     checked = it.aiEnabled,
                                                     onCheckedChange = null
@@ -478,7 +521,7 @@ fun RealtimeCollabScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Editoren dürfen KI starten", color = Color.White)
+                                                Text(stringResource(R.string.collab_policy_editor_ai), color = Color.White)
                                                 Switch(
                                                     checked = it.editorCanUseAi,
                                                     onCheckedChange = null,
@@ -499,7 +542,7 @@ fun RealtimeCollabScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Editoren dürfen Nachrichten senden", color = Color.White)
+                                                Text(stringResource(R.string.collab_policy_editor_messages), color = Color.White)
                                                 Switch(
                                                     checked = it.editorCanSendMessages,
                                                     onCheckedChange = null
@@ -519,7 +562,7 @@ fun RealtimeCollabScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Editoren dürfen Workspace bearbeiten", color = Color.White)
+                                                Text(stringResource(R.string.collab_policy_editor_workspace), color = Color.White)
                                                 Switch(
                                                     checked = it.editorCanEditWorkspace,
                                                     onCheckedChange = null
@@ -531,12 +574,14 @@ fun RealtimeCollabScreen(
                                 CompactTextActionRow(
                                     actions = listOfNotNull(
                                         CompactTextAction(
-                                            label = "Link kopieren",
-                                            onClick = { clipboard.setText(AnnotatedString(inviteLink)) }
+                                            label = if (isLocalOnlyMode) stringResource(R.string.collab_invite_local_only) else stringResource(R.string.collab_copy_link),
+                                            onClick = {
+                                                if (!isLocalOnlyMode) clipboard.setText(AnnotatedString(inviteLink))
+                                            }
                                         ),
-                                        if (isOwner) {
+                                        if (isOwner && !isLocalOnlyMode) {
                                             CompactTextAction(
-                                                label = "Code neu",
+                                                label = stringResource(R.string.collab_renew_code),
                                                 onClick = { collabViewModel.rotateInviteCode() }
                                             )
                                         } else {
@@ -547,11 +592,11 @@ fun RealtimeCollabScreen(
                                 CompactTextActionRow(
                                     actions = listOf(
                                         CompactTextAction(
-                                            label = "Reconnect",
+                                            label = stringResource(R.string.collab_reconnect),
                                             onClick = { collabViewModel.reconnectNow() }
                                         ),
                                         CompactTextAction(
-                                            label = "Verlassen",
+                                            label = stringResource(R.string.collab_session_leave),
                                             onClick = { collabViewModel.leaveSession() }
                                         )
                                     )
@@ -573,15 +618,15 @@ fun RealtimeCollabScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Debug", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.collab_debug), color = Color.White, fontWeight = FontWeight.SemiBold)
                                 TextButton(onClick = { showDebug = !showDebug }) {
-                                    Text(if (showDebug) "Ausblenden" else "Einblenden")
+                                    Text(if (showDebug) stringResource(R.string.collab_hide) else stringResource(R.string.collab_show))
                                 }
                             }
                             CompactTextActionRow(
                                 actions = listOf(
                                     CompactTextAction(
-                                        label = "Debug neu",
+                                        label = stringResource(R.string.collab_debug_refresh),
                                         onClick = { collabViewModel.refreshDebugInfo() }
                                     ),
                                     CompactTextAction(
@@ -610,12 +655,37 @@ fun RealtimeCollabScreen(
 
                 if (!errorMessage.isNullOrBlank()) {
                     item {
-                        Text(errorMessage.orEmpty(), color = Color(0xFFFFB4AB))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFFFB4AB).copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, Color(0xFFFFB4AB).copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    errorMessage.orEmpty(),
+                                    color = Color(0xFFFFB4AB),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = {
+                                        collabViewModel.clearError()
+                                        val sid = session?.id
+                                        if (sid != null) collabViewModel.rebindSession(sid)
+                                    }) {
+                                        Text(stringResource(R.string.collab_retry), color = Color(0xFFFFB4AB))
+                                    }
+                                    TextButton(onClick = { collabViewModel.clearError() }) {
+                                        Text(stringResource(R.string.collab_dismiss), color = Color.White.copy(alpha = 0.6f))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 item {
-                    Text("Agenten für KI-Hilfe wählen:", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.collab_choose_agents), color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
 
                 item {
@@ -647,13 +717,13 @@ fun RealtimeCollabScreen(
 
                 item {
                     Text(
-                        text = "Ausgewählt: ${selectedAgents.size} Agenten",
+                        text = stringResource(R.string.collab_agents_selected, selectedAgents.size),
                         color = Color.White.copy(alpha = 0.75f),
                         style = MaterialTheme.typography.bodySmall
                     )
                     if (messagePrompt.isBlank() && workspacePrompt.isNotBlank()) {
                         Text(
-                            text = "Hinweis: KI-Team nutzt aktuell den Workspace-Text als Prompt.",
+                            text = stringResource(R.string.collab_hint_workspace_as_prompt),
                             color = Color(0xFFBFD8FF),
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -663,7 +733,7 @@ fun RealtimeCollabScreen(
                 if (automationQuickActionsEnabled) {
                     item {
                         Text(
-                            text = "Automationen:",
+                            text = stringResource(R.string.collab_automations),
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -707,7 +777,7 @@ fun RealtimeCollabScreen(
                                 .fillMaxWidth()
                                 .padding(if (compactLayout) 8.dp else 10.dp)
                         ) {
-                            Text("Gemeinsamer Workspace", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.collab_workspace), color = Color.White, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(6.dp))
                             // P0-3 fix: editor grows with content instead of being clipped to a fixed height.
                             OutlinedTextField(
@@ -727,7 +797,7 @@ fun RealtimeCollabScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 140.dp, max = if (compactLayout) 220.dp else 280.dp),
-                                label = { Text("Live-Notiz (synchron auf allen Geräten)") },
+                                label = { Text(stringResource(R.string.collab_workspace_note_label)) },
                                 enabled = canEditWorkspace && session != null
                             )
                             Row(
@@ -736,26 +806,26 @@ fun RealtimeCollabScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "Lokal: $localWorkspaceLines Zeilen • Remote: $remoteWorkspaceLines",
+                                    text = stringResource(R.string.collab_workspace_lines, localWorkspaceLines, remoteWorkspaceLines),
                                     color = Color.White.copy(alpha = 0.85f),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
-                                    text = "$workspaceCharCount/$WORKSPACE_SOFT_CHAR_LIMIT Zeichen",
+                                    text = stringResource(R.string.collab_workspace_chars, workspaceCharCount, WORKSPACE_SOFT_CHAR_LIMIT),
                                     color = if (workspaceOverSoftLimit) Color(0xFFFFC8C8) else Color.White.copy(alpha = 0.85f),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                             if (workspaceOverSoftLimit) {
                                 Text(
-                                    text = "Hinweis: Sehr lange Notizen können die Sync-Geschwindigkeit reduzieren.",
+                                    text = stringResource(R.string.collab_hint_workspace_long),
                                     color = Color(0xFFFFD9A8),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                             if (workspaceState.updatedAt > 0L) {
                                 Text(
-                                    "Zuletzt geändert von ${workspaceState.updatedBy.ifBlank { "Unbekannt" }} • Rev ${workspaceState.revision}",
+                                    stringResource(R.string.collab_workspace_last_changed, workspaceState.updatedBy.ifBlank { stringResource(R.string.collab_unknown) }, workspaceState.revision),
                                     color = Color.White.copy(alpha = 0.85f),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
@@ -788,7 +858,7 @@ fun RealtimeCollabScreen(
                                         CompactTextActionRow(
                                             actions = listOf(
                                                 CompactTextAction(
-                                                    label = "Remote laden",
+                                                    label = stringResource(R.string.collab_conflict_remote),
                                                     onClick = {
                                                         workspaceDraft = workspaceState.text
                                                         localWorkspaceDirty = false
@@ -796,7 +866,7 @@ fun RealtimeCollabScreen(
                                                     }
                                                 ),
                                                 CompactTextAction(
-                                                    label = "Smart Merge",
+                                                    label = stringResource(R.string.collab_conflict_merge),
                                                     onClick = {
                                                         val merged = collabViewModel.mergeWorkspaceTexts(workspaceDraft)
                                                         workspaceDraft = merged
@@ -806,6 +876,11 @@ fun RealtimeCollabScreen(
                                                     }
                                                 )
                                             )
+                                        )
+                                        Text(
+                                            stringResource(R.string.collab_conflict_remote_tooltip),
+                                            color = Color.White.copy(alpha = 0.55f),
+                                            style = MaterialTheme.typography.bodySmall
                                         )
                                     }
                                 }
@@ -825,6 +900,13 @@ fun RealtimeCollabScreen(
                                             color = Color(0xFFFFD9A8),
                                             style = MaterialTheme.typography.bodySmall
                                         )
+                                        workspaceState.updatedBy.takeIf { it.isNotBlank() }?.let { changedBy ->
+                                            Text(
+                                                stringResource(R.string.collab_conflict_changed_by, changedBy),
+                                                color = Color(0xFFFFD9A8).copy(alpha = 0.75f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
                                         Text(
                                             workspaceDiffPreview,
                                             color = Color.White.copy(alpha = 0.82f),
@@ -838,7 +920,7 @@ fun RealtimeCollabScreen(
                                         CompactTextActionRow(
                                             actions = listOf(
                                                 CompactTextAction(
-                                                    label = "Remote übernehmen",
+                                                    label = stringResource(R.string.collab_conflict_remote),
                                                     onClick = {
                                                         workspaceDraft = workspaceState.text
                                                         localWorkspaceDirty = false
@@ -847,7 +929,7 @@ fun RealtimeCollabScreen(
                                                     }
                                                 ),
                                                 CompactTextAction(
-                                                    label = "Merge speichern",
+                                                    label = stringResource(R.string.collab_conflict_merge),
                                                     onClick = {
                                                         val merged = collabViewModel.mergeWorkspaceTexts(workspaceDraft)
                                                         workspaceDraft = merged
@@ -862,7 +944,7 @@ fun RealtimeCollabScreen(
                                         CompactTextActionRow(
                                             actions = listOf(
                                                 CompactTextAction(
-                                                    label = "Lokal erzwingen",
+                                                    label = stringResource(R.string.collab_conflict_local),
                                                     onClick = {
                                                         localWorkspaceDirty = false
                                                         remoteWorkspaceAheadMessage = null
@@ -872,6 +954,23 @@ fun RealtimeCollabScreen(
                                                 )
                                             )
                                         )
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(
+                                                "• ${stringResource(R.string.collab_conflict_remote)}: ${stringResource(R.string.collab_conflict_remote_tooltip)}",
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                            Text(
+                                                "• ${stringResource(R.string.collab_conflict_merge)}: ${stringResource(R.string.collab_conflict_merge_tooltip)}",
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                            Text(
+                                                "• ${stringResource(R.string.collab_conflict_local)}: ${stringResource(R.string.collab_conflict_local_tooltip)}",
+                                                color = Color.White.copy(alpha = 0.5f),
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -887,7 +986,7 @@ fun RealtimeCollabScreen(
                     items(presences, key = { "presence-${it.userId}" }) { presence ->
                         val roleLabel = collabViewModel.roleLabelFor(presence.userId)
                         val typingHint = if (presence.typing && presence.userId != myUserId) {
-                            " tippt: ${presence.draftPreview}"
+                            stringResource(R.string.collab_presence_typing, presence.draftPreview)
                         } else {
                             ""
                         }
@@ -900,10 +999,33 @@ fun RealtimeCollabScreen(
 
                 // P0-1/P0-2 fix: messages are now items of the outer LazyColumn — proper
                 // recycling, no nested vertical scrolling, no clipping.
-                if (messages.isEmpty() && session != null) {
+                if (hasMoreMessages) {
+                    item {
+                        TextButton(
+                            onClick = { /* TODO: Phase 4a - load older messages */ },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(stringResource(R.string.collab_load_more), color = Color.White.copy(alpha = 0.6f))
+                        }
+                    }
+                }
+                if (isLoading && messages.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                } else if (messages.isEmpty() && session != null) {
                     item {
                         Text(
-                            "Noch keine Nachrichten — schreibe die erste oder lade jemanden ein.",
+                            stringResource(R.string.collab_no_messages),
                             color = Color.White.copy(alpha = 0.75f),
                             style = MaterialTheme.typography.bodyMedium
                         )
@@ -929,9 +1051,9 @@ fun RealtimeCollabScreen(
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     text = when (status) {
-                                        CollabViewModel.MessageDeliveryStatus.SENDING -> "Status: sendet ..."
-                                        CollabViewModel.MessageDeliveryStatus.SENT -> "Status: gesendet"
-                                        CollabViewModel.MessageDeliveryStatus.FAILED -> "Status: fehlgeschlagen"
+                                        CollabViewModel.MessageDeliveryStatus.SENDING -> stringResource(R.string.collab_msg_status_sending)
+                                        CollabViewModel.MessageDeliveryStatus.SENT -> stringResource(R.string.collab_msg_status_sent)
+                                        CollabViewModel.MessageDeliveryStatus.FAILED -> stringResource(R.string.collab_msg_status_failed)
                                     },
                                     color = Color.White.copy(alpha = 0.85f),
                                     style = MaterialTheme.typography.bodyMedium
@@ -941,7 +1063,7 @@ fun RealtimeCollabScreen(
                                         onClick = { collabViewModel.retryMessage(msg.id) },
                                         modifier = Modifier.heightIn(min = 48.dp)
                                     ) {
-                                        Text("Erneut senden")
+                                        Text(stringResource(R.string.collab_retry))
                                     }
                                 }
                             }
@@ -971,19 +1093,19 @@ fun RealtimeCollabScreen(
                         value = messageInput,
                         onValueChange = { messageInput = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Nachricht an Session") },
+                        label = { Text(stringResource(R.string.collab_message_input_label)) },
                         enabled = canWriteMessages && session != null,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = { sendSessionMessage() })
                     )
                     if (!canWriteMessages && session != null) {
-                        Text("Viewer-Modus: Lesen erlaubt, Schreiben gesperrt.", color = Color(0xFFFFD9A8))
+                        Text(stringResource(R.string.collab_viewer_mode_hint), color = Color(0xFFFFD9A8))
                     }
                     if (!canUseAi && session != null) {
-                        Text("KI-Team ist laut Session-Policy für deine Rolle deaktiviert.", color = Color(0xFFFFD9A8))
+                        Text(stringResource(R.string.collab_ai_disabled_for_role), color = Color(0xFFFFD9A8))
                     }
                     if (multiAgentIsRunning) {
-                        Text("KI-Team arbeitet ...", color = Color(0xFF9BE7FF))
+                        Text(stringResource(R.string.collab_ai_working), color = Color(0xFF9BE7FF))
                     }
                     if (!localAiStatus.isNullOrBlank()) {
                         Text(localAiStatus.orEmpty(), color = Color(0xFFBFD8FF))
@@ -994,12 +1116,12 @@ fun RealtimeCollabScreen(
                     CompactTextActionRow(
                         actions = listOf(
                             CompactTextAction(
-                                label = "Senden",
+                                label = stringResource(R.string.collab_send),
                                 onClick = sendSessionMessage,
                                 enabled = messagePrompt.isNotBlank() && session != null && canWriteMessages
                             ),
                             CompactTextAction(
-                                label = if (multiAgentIsRunning) "KI läuft..." else "KI Team-Antwort",
+                                label = if (multiAgentIsRunning) stringResource(R.string.collab_ai_running) else stringResource(R.string.collab_ai_team_response),
                                 onClick = aiAction@{
                                     if (aiPrompt.isBlank()) return@aiAction
                                     if (messagePrompt.isNotBlank()) {
@@ -1034,11 +1156,28 @@ fun RealtimeCollabScreen(
         }
     }
 
+    if (showPrivacyConsentDialog) {
+        PrivacyConsentDialog(
+            onAccept = {
+                privacyConsentCheckbox = false
+                showPrivacyConsentDialog = false
+                collabViewModel.acceptPrivacyConsent()
+                collabViewModel.createSession(sessionTitle)
+            },
+            onDismiss = {
+                showPrivacyConsentDialog = false
+                privacyConsentCheckbox = false
+            },
+            consentChecked = privacyConsentCheckbox,
+            onConsentCheckChanged = { privacyConsentCheckbox = it }
+        )
+    }
+
     val templateToRun = pendingToolTemplate
     if (templateToRun != null) {
         AlertDialog(
             onDismissRequest = { pendingToolTemplate = null },
-            title = { Text("Automation ausführen?") },
+            title = { Text(stringResource(R.string.collab_automation_run_confirm)) },
             text = {
                 Text("${templateToRun.title}\n\n${templateToRun.description}")
             },
@@ -1047,16 +1186,65 @@ fun RealtimeCollabScreen(
                     pendingToolTemplate = null
                     runAutomationTemplate(templateToRun)
                 }) {
-                    Text("Starten")
+                    Text(stringResource(R.string.collab_automation_start))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pendingToolTemplate = null }) {
-                    Text("Abbrechen")
+                    Text(stringResource(R.string.collab_automation_cancel))
                 }
             }
         )
     }
+}
+
+@Composable
+private fun PrivacyConsentDialog(
+    onAccept: () -> Unit,
+    onDismiss: () -> Unit,
+    consentChecked: Boolean,
+    onConsentCheckChanged: (Boolean) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.collab_privacy_consent_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.collab_privacy_consent_message))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = consentChecked,
+                            role = Role.Checkbox,
+                            onValueChange = onConsentCheckChanged
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Switch(
+                        checked = consentChecked,
+                        onCheckedChange = onConsentCheckChanged
+                    )
+                    Text(stringResource(R.string.collab_privacy_accept), modifier = Modifier.weight(1f))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onAccept,
+                enabled = consentChecked
+            ) {
+                Text(stringResource(R.string.collab_privacy_accept))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.collab_dismiss))
+            }
+        }
+    )
 }
 
 @Composable
