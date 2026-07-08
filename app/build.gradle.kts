@@ -7,7 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("com.google.gms.google-services") apply false
-    
+
     id("io.gitlab.arturbosch.detekt") version "1.23.6"
     id("com.google.dagger.hilt.android")
 }
@@ -88,6 +88,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -97,18 +98,19 @@ android {
             )
         }
     }
-    
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    
+
     kotlin {
         jvmToolchain(11)
     }
-    
+
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     ksp {
     }
@@ -134,6 +136,7 @@ dependencies {
     val credentialsVersion = "1.2.0-rc01"
 
     implementation(project(":sharedCore"))
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
