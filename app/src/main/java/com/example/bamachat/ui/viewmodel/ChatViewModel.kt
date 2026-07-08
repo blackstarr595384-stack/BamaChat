@@ -1070,60 +1070,6 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         }
     }
 
-    private suspend fun runLegacyStreamingChatWithCallbacks(
-        convId: String,
-        systemPrompt: String,
-        messages: List<OpenRouterMessage>,
-        webContext: ChatEngine.LiveWebContext?,
-        startedAt: Long,
-        assistantMsg: ChatMessage,
-        streamingBuffer: StringBuilder,
-        streamFlushInterval: Long,
-        lastFlushAtProvider: () -> Long,
-        updateLastFlushAt: (Long) -> Unit
-    ) {
-        val result = apiManager.streamChatResponse(
-            systemPrompt = systemPrompt, userMessages = messages,
-            onChunkReceived = { chunk ->
-                streamingBuffer.append(chunk)
-                val now = System.currentTimeMillis()
-                if (now - lastFlushAtProvider() >= streamFlushInterval) {
-                    updateLastFlushAt(now)
-                    viewModelScope.launch {
-                        repo.saveMessage(
-                            convId,
-                            assistantMsg.copy(text = streamingBuffer.toString()),
-                            touchConversation = false
-                        )
-                    }
-                }
-            },
-            onError = { error ->
-                publishError(
-                    message = error,
-                    retryable = true,
-                    actionLabel = "Erneut versuchen"
-                )
-                AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
-            }
-        )
-
-        if (result.success && result.content.isNotBlank()) {
-            val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
-            repo.saveMessage(convId, finalized, touchConversation = true)
-            clearRetryContext()
-            notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
-        } else {
-            if (result.error.isNotBlank()) {
-                publishError(
-                    message = result.error,
-                    retryable = result.retryable,
-                    actionLabel = if (result.retryable) "Erneut versuchen" else null
-                )
-            }
-            repo.deleteMessage(assistantMsg.id)
-        }
-    }
     private suspend fun runExperimentalStreamingChat(
         convId: String,
         systemPrompt: String,
@@ -1178,11 +1124,12 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                     stream = true
                 )
             val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
+            val textChunkStream = OpenRouterSseTextChunkStream(service)
             val orchestrator = AndroidAiOrchestrator(
                 isExperimentalEnabled = { false },
                 chatCompletion = service::chatCompletion,
                 isStreamingExperimentalEnabled = { true },
-                streamTextChunks = { streamRequest -> streamOpenRouterTextChunks(service, streamRequest) },
+                streamTextChunks = textChunkStream::streamTextChunks,
                 legacyStreamEvents = {
                     flow {
                         throw StreamingPilotLegacyFallbackException("orchestrator_fallback")
@@ -1246,37 +1193,6 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 )
             )
             false
-        }
-    }
-
-    private fun streamOpenRouterTextChunks(
-        service: com.example.bamachat.data.OpenAICompatibleService,
-        request: OpenRouterChatRequest
-    ): Flow<String> = flow {
-        val response = service.chatCompletionStream(request)
-        if (!response.isSuccessful) {
-            val body = response.errorBody()?.string().orEmpty()
-            throw IllegalStateException("OpenRouter stream failed: ${response.code()} ${body.take(120)}")
-        }
-
-        val body = response.body() ?: throw IllegalStateException("OpenRouter stream failed: empty response body")
-        val gson = Gson()
-        body.byteStream().bufferedReader().use { reader ->
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val current = line ?: continue
-                if (!current.startsWith("data:")) continue
-                val payload = current.removePrefix("data:").trim()
-                if (payload.isBlank() || payload == "[DONE]") continue
-
-                runCatching {
-                    gson.fromJson(payload, OpenRouterStreamChunk::class.java)
-                        .choices
-                        ?.firstOrNull()
-                        ?.delta
-                        ?.content
-                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { emit(it) }
-            }
         }
     }
 
@@ -1598,5 +1514,36 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _messageFeedback.value = emptyMap()
         systemPromptCache = null
         super.onCleared()
+    }
+}
+private class OpenRouterSseTextChunkStream(
+    private val service: com.example.bamachat.data.OpenAICompatibleService,
+    private val gson: Gson = Gson()
+) {
+    fun streamTextChunks(request: OpenRouterChatRequest): Flow<String> = flow {
+        val response = service.chatCompletionStream(request)
+        if (!response.isSuccessful) {
+            val body = response.errorBody()?.string().orEmpty()
+            throw IllegalStateException("OpenRouter stream failed: ${response.code()} ${body.take(120)}")
+        }
+
+        val body = response.body() ?: throw IllegalStateException("OpenRouter stream failed: empty response body")
+        body.byteStream().bufferedReader().use { reader ->
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val current = line ?: continue
+                if (!current.startsWith("data:")) continue
+                val payload = current.removePrefix("data:").trim()
+                if (payload.isBlank() || payload == "[DONE]") continue
+
+                runCatching {
+                    gson.fromJson(payload, OpenRouterStreamChunk::class.java)
+                        .choices
+                        ?.firstOrNull()
+                        ?.delta
+                        ?.content
+                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { emit(it) }
+            }
+        }
     }
 }
