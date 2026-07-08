@@ -51,6 +51,7 @@ private object Routes {
     const val COMPOSE_LAB = "compose_lab"
     const val COMPOSE_PLAYGROUND = "compose_playground"
     const val KNOWLEDGE_GRAPH = "knowledge_graph"
+    const val WORKSPACES = "workspaces"
     const val CHAT_SEARCH = "chat_search"
     const val COMPOSE_ARG_DEMO = "compose_arg_demo/{demoId}"
 
@@ -63,7 +64,8 @@ private val topLevelRoutes = listOf(
     Routes.HOME_HUB,
     Routes.CHAT,
     Routes.PROFILE,
-    Routes.SETTINGS
+    Routes.SETTINGS,
+    Routes.WORKSPACES
 )
 
 private fun normalizeRoute(route: String?): String? = route?.substringBefore("?")?.substringBefore("/")
@@ -324,7 +326,7 @@ fun BamaChatApp() {
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenProviderSettings = { navController.navigate(Routes.settingsRoute("ai")) },
                     onOpenDesignSettings = { navController.navigate(Routes.settingsRoute("chat")) },
-                    onOpenWorkspaceSettings = { navController.navigate(Routes.settingsRoute("workspaces")) },
+                    onOpenWorkspaceSettings = { navController.navigate(Routes.WORKSPACES) },
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenExtensions = { navController.navigate(Routes.EXTENSIONS) },
@@ -418,6 +420,18 @@ fun BamaChatApp() {
             composable(Routes.KNOWLEDGE_GRAPH) {
                 KnowledgeGraphScreen(
                     onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Routes.WORKSPACES) {
+                WorkspaceScreen(
+                    settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenChat = { workspaceId ->
+                        settingsViewModel.setActiveWorkspace(workspaceId)
+                        navController.navigate(Routes.CHAT) {
+                            popUpTo(Routes.HOME_HUB)
+                        }
+                    }
                 )
             }
             composable(Routes.COMPOSE_LAB) {
