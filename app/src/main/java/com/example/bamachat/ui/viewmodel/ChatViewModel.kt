@@ -18,6 +18,7 @@ import com.example.bamachat.service.ConversationService
 import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
+import com.example.bamachat.service.ImageUrlResolver
 import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.shared.core.ChatSendDeduplicator
 import com.example.bamachat.shared.core.QuickActionSuggestion
@@ -52,7 +53,6 @@ import com.example.bamachat.shared.core.ai.AiStreamStarted
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
-import okhttp3.OkHttpClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.Flow
@@ -329,11 +329,7 @@ class ChatViewModel @Inject constructor(
     private val repo = ChatRepository(
         com.example.bamachat.data.local.ChatDatabase.getDatabase(application).chatDao()
     )
-    private val imageHttpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .writeTimeout(8, TimeUnit.SECONDS)
-        .build()
+    private val imageUrlResolver = ImageUrlResolver()
 
     val personaViewModel = PersonaViewModel(application)
     val multiAgentViewModel = MultiAgentViewModel(application, apiManager, personaViewModel)
@@ -692,7 +688,7 @@ class ChatViewModel @Inject constructor(
             _isLoading.value = true
             try {
                 val genReq = mediaService.buildImageGenerationRequest(prompt)
-                val imageUrl = resolveWorkingImageUrl(genReq.candidateUrls)
+                val imageUrl = imageUrlResolver.resolveFirstWorkingUrl(genReq.candidateUrls)
                 if (imageUrl == null) {
                     // P0-A fix: Keine kaputte Bildkarte speichern, wenn der externe Bilddienst 402/403/Fehler liefert.
                     _errorMessage.value = "Bildgenerierung ist aktuell nicht erreichbar oder erfordert Auth/Zahlung beim Bilddienst. Bitte später erneut versuchen oder Bild-KI in den Einstellungen konfigurieren."
@@ -705,17 +701,6 @@ class ChatViewModel @Inject constructor(
                 notificationService.show("BamaChat Bild", "Bild generiert: $prompt", prefs.getBoolean("notifications_enabled", true))
             } catch (e: Exception) { handleError(e) }
             finally { _isLoading.value = false }
-        }
-    }
-
-    private suspend fun resolveWorkingImageUrl(candidates: List<String>): String? {
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            candidates.firstOrNull { candidate ->
-                runCatching {
-                    val request = okhttp3.Request.Builder().url(candidate).get().build()
-                    imageHttpClient.newCall(request).execute().use { it.isSuccessful }
-                }.getOrDefault(false)
-            }
         }
     }
 
@@ -1508,6 +1493,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         messagesJob?.cancel()
         activeGenerationJob?.cancel()
         prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
+        imageUrlResolver.shutdown()
         bufferLock.write { allMessagesBuffer.clear() }
         _messageFeedback.value = emptyMap()
         systemPromptCache = null
