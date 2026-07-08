@@ -73,6 +73,11 @@ class AuthViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+    private val _isEmailVerified = MutableStateFlow(false)
+    val isEmailVerified: StateFlow<Boolean> = _isEmailVerified.asStateFlow()
+    private val _connectedProviders = MutableStateFlow<List<String>>(emptyList())
+    val connectedProviders: StateFlow<List<String>> = _connectedProviders.asStateFlow()
+
 
     private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         _firebaseUser.value = firebaseAuth.currentUser
@@ -82,6 +87,7 @@ class AuthViewModel @Inject constructor(
             prefs.edit().putBoolean(KEY_GUEST_MODE, false).apply()
             AppTelemetry.setUserId(firebaseAuth.currentUser?.uid)
             AppTelemetry.logEvent("auth_state_signed_in")
+            refreshProviderData()
             viewModelScope.launch {
                 runCatching { loadProfileForCurrentUser() }
                     .onFailure {
@@ -91,6 +97,8 @@ class AuthViewModel @Inject constructor(
             }
         } else {
             _profile.value = null
+            _connectedProviders.value = emptyList()
+            _isEmailVerified.value = false
             AppTelemetry.setUserId(null)
             AppTelemetry.logEvent("auth_state_signed_out")
         }
@@ -356,6 +364,123 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    fun sendPasswordResetEmail(email: String) {
+        val firebaseAuth = auth
+        if (firebaseAuth == null) {
+            _errorMessage.value = "Passwort-Reset aktuell nicht verfügbar."
+            return
+        }
+        val cleanEmail = email.trim()
+        if (cleanEmail.isBlank()) {
+            _errorMessage.value = "Bitte E-Mail-Adresse eingeben."
+            return
+        }
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _statusMessage.value = null
+            try {
+                firebaseAuth.sendPasswordResetEmail(cleanEmail).await()
+                _statusMessage.value = "Passwort-Reset-E-Mail gesendet. Bitte prüfe dein Postfach."
+                AppTelemetry.logEvent("password_reset_sent")
+            } catch (e: Exception) {
+                AppTelemetry.logError("auth_password_reset", e)
+                _errorMessage.value = e.message ?: "Passwort-Reset fehlgeschlagen."
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun sendEmailVerification() {
+        val user = auth?.currentUser ?: return
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _statusMessage.value = null
+            try {
+                user.sendEmailVerification().await()
+                _statusMessage.value = "Bestätigungs-E-Mail gesendet."
+                AppTelemetry.logEvent("email_verification_sent")
+            } catch (e: Exception) {
+                AppTelemetry.logError("auth_email_verification", e)
+                _errorMessage.value = e.message ?: "Bestätigungs-E-Mail konnte nicht gesendet werden."
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun refreshEmailVerificationStatus() {
+        val user = auth?.currentUser ?: return
+        viewModelScope.launch {
+            try {
+                user.reload().await()
+                _isEmailVerified.value = user.isEmailVerified
+                if (user.isEmailVerified) {
+                    _statusMessage.value = "E-Mail bestätigt."
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun linkGoogleAccount(idToken: String) {
+        val currentUser = auth?.currentUser ?: return
+        val cleanToken = idToken.trim()
+        if (cleanToken.isBlank()) return
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _statusMessage.value = null
+            try {
+                val credential = GoogleAuthProvider.getCredential(cleanToken, null)
+                currentUser.linkWithCredential(credential).await()
+                _statusMessage.value = "Google-Konto erfolgreich verbunden."
+                refreshProviderData()
+                AppTelemetry.logEvent("google_account_linked")
+            } catch (e: Exception) {
+                AppTelemetry.logError("auth_link_google", e)
+                _errorMessage.value = e.message ?: "Google-Konto konnte nicht verbunden werden."
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun unlinkProvider(providerId: String) {
+        val currentUser = auth?.currentUser ?: return
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _statusMessage.value = null
+            try {
+                currentUser.unlink(providerId).await()
+                _statusMessage.value = "Anmeldemethode getrennt."
+                refreshProviderData()
+                AppTelemetry.logEvent("provider_unlinked", mapOf("provider" to providerId))
+            } catch (e: Exception) {
+                AppTelemetry.logError("auth_unlink_provider", e)
+                _errorMessage.value = e.message ?: "Trennen fehlgeschlagen."
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun refreshProviderData() {
+        val user = auth?.currentUser
+        if (user == null) {
+            _connectedProviders.value = emptyList()
+            _isEmailVerified.value = false
+            return
+        }
+        _isEmailVerified.value = user.isEmailVerified
+        _connectedProviders.value = user.providerData
+            .mapNotNull { it.providerId }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+
     fun signOut() {
         val wasGuest = _isGuestMode.value
         auth?.signOut()
@@ -433,6 +558,7 @@ class AuthViewModel @Inject constructor(
     fun clearStatus() {
         _statusMessage.value = null
     }
+
 
     private suspend fun loadProfileForCurrentUser() {
         val user = auth?.currentUser ?: return
