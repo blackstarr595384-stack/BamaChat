@@ -20,11 +20,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -81,16 +81,18 @@ import com.example.bamachat.ui.component.ChatInputBar
 import com.example.bamachat.ui.component.EmptyChatState
 import com.example.bamachat.ui.component.PremiumPaywallDialog
 import com.example.bamachat.ui.component.TypingIndicator
+import com.example.bamachat.ui.component.ToolCallsDisplay
 import com.example.bamachat.ui.component.compactLabel
 import com.example.bamachat.ui.component.designTokensFor
 import com.example.bamachat.ui.component.sanitizeForSpeech
 import com.example.bamachat.ui.component.splitSpeechChunks
+import com.example.bamachat.ui.screen.PersonaMood
+import com.example.bamachat.ui.screen.moodForPersona
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.ui.viewmodel.MonetizationViewModel
 import com.example.bamachat.ui.viewmodel.ToolCallProgress
-import com.example.bamachat.ui.viewmodel.ToolCallStatus
 import com.example.bamachat.util.CloudVoiceManager
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
@@ -100,92 +102,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.io.File
 
-private data class PersonaMood(
-    val gradientTop: Color,
-    val gradientBottom: Color,
-    val cardSurface: Color,
-    val userBubbleStart: Color,
-    val userBubbleEnd: Color,
-    val accent: Color
-)
-
-private fun moodForPersona(
-    persona: ChatViewModel.Persona,
-    baseAccent: Color,
-    sentiment: String
-): PersonaMood {
-    val accent = when (sentiment) {
-        "positive" -> Color(0xFF0FB57A)
-        "negative" -> Color(0xFFE8505B)
-        else -> baseAccent
-    }
-    return when (persona) {
-        ChatViewModel.Persona.DEVELOPER -> PersonaMood(
-            gradientTop = Color(0xFF0F1424),
-            gradientBottom = Color(0xFF131A2B),
-            cardSurface = Color(0xFF1A2236),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF3D7DFF),
-            accent = Color(0xFF4CC9FF)
-        )
-        ChatViewModel.Persona.TEACHER -> PersonaMood(
-            gradientTop = Color(0xFF1C1522),
-            gradientBottom = Color(0xFF221A2B),
-            cardSurface = Color(0xFF2C2038),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF9F6DFF),
-            accent = Color(0xFFE6C15A)
-        )
-        ChatViewModel.Persona.CHEF -> PersonaMood(
-            gradientTop = Color(0xFF2A1612),
-            gradientBottom = Color(0xFF2F1D15),
-            cardSurface = Color(0xFF3A261C),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFFE27A3D),
-            accent = Color(0xFFFFB157)
-        )
-        ChatViewModel.Persona.FITNESS -> PersonaMood(
-            gradientTop = Color(0xFF101B16),
-            gradientBottom = Color(0xFF13231B),
-            cardSurface = Color(0xFF1D3127),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF37C887),
-            accent = Color(0xFF6FE5B1)
-        )
-        ChatViewModel.Persona.TRANSLATOR -> PersonaMood(
-            gradientTop = Color(0xFF101D26),
-            gradientBottom = Color(0xFF142530),
-            cardSurface = Color(0xFF1E3442),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF41A1FF),
-            accent = Color(0xFF79C8FF)
-        )
-        ChatViewModel.Persona.THERAPIST -> PersonaMood(
-            gradientTop = Color(0xFF121E1B),
-            gradientBottom = Color(0xFF152721),
-            cardSurface = Color(0xFF22372F),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF57BFA2),
-            accent = Color(0xFF9ADCCB)
-        )
-        ChatViewModel.Persona.CUSTOM -> PersonaMood(
-            gradientTop = Color(0xFF1A1623),
-            gradientBottom = Color(0xFF1D1B2B),
-            cardSurface = Color(0xFF2B2440),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF7E6DFF),
-            accent = Color(0xFFBAA8FF)
-        )
-        else -> PersonaMood(
-            gradientTop = Color(0xFF10151F),
-            gradientBottom = Color(0xFF161B26),
-            cardSurface = Color(0xFF202838),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF4E7BFF),
-            accent = Color(0xFF82A6FF)
-        )
-    }
-}
 
 private fun createChatCameraCaptureUri(context: android.content.Context): Pair<File, Uri>? {
     return runCatching {
@@ -1841,6 +1757,7 @@ private fun ChatContent(
                         themeColor = themeColor,
                         surfaceColor = personaMood.cardSurface,
                         isLoading = isLoading,
+                        onStopGeneration = onStopGeneration,
                         designTokens = designTokens,
                         connectChatBottomBars = connectChatBottomBars,
                         glassEffectsEnabled = glassEffectsEnabled,
@@ -1878,58 +1795,6 @@ private fun ChatContent(
     }
 }
 
-@Composable
-private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor: Color) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        activeToolCalls.forEach { tc ->
-            val icon = when (tc.status) {
-                ToolCallStatus.RUNNING -> "◌"
-                ToolCallStatus.DONE -> "✓"
-                ToolCallStatus.ERROR -> "✗"
-            }
-            val surface = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = surface,
-                tonalElevation = 2.dp
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(icon, fontSize = 14.sp)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = tc.toolName,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = tc.arguments.take(80),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    if (tc.status == ToolCallStatus.RUNNING) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = themeColor
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
+
 
 
