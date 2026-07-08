@@ -1,6 +1,7 @@
 package com.example.bamachat.util
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -96,6 +97,7 @@ class SmartFeatureManager(private val context: Context) {
         return weatherKeywords.any { lower.contains(it) }
     }
 
+    @SuppressLint("MissingPermission") // Permission is checked manually above via ContextCompat.checkSelfPermission
     suspend fun getWeatherData(): String? = withContext(Dispatchers.IO) {
         try {
             val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
