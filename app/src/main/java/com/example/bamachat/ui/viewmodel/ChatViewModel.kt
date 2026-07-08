@@ -30,10 +30,10 @@ import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.McpWorkflowStatus
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.data.AndroidAiOrchestrator
+import com.example.bamachat.data.AgentLoopRequestFactory
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.util.UserErrorMessage
-import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
 import com.example.bamachat.data.OpenRouterSseTextChunkStream
 import com.example.bamachat.data.OpenRouterStreamChunk
@@ -835,13 +835,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         try {
             while (iteration < maxIter) {
                 iteration++
-                val request = OpenRouterChatRequest(
+                val request = AgentLoopRequestFactory.buildAgentChatRequest(
                     model = selectedModel.value,
                     messages = messages,
-                    stream = false,
-                    tools = toolDefs,
-                    toolChoice = "auto",
-                    maxTokens = 2048
+                    toolDefs = toolDefs
                 )
                 runCatching {
                     messages.toAiChatRequestForValidation(
@@ -916,11 +913,12 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         ) else it
                     }
 
-                    messages.add(OpenRouterMessage(
-                        role = "tool",
-                        toolCallId = toolCall.id,
-                        content = resultText
-                    ))
+                    messages.add(
+                        AgentLoopRequestFactory.createToolResultMessage(
+                            toolCallId = toolCall.id,
+                            content = resultText
+                        )
+                    )
                 }
             }
 
