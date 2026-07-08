@@ -13,6 +13,7 @@ import com.example.bamachat.data.model.ChatSource
 import com.example.bamachat.data.model.ModelInfo
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.service.ChatEngine
+import com.example.bamachat.service.ChatErrorRecoveryPolicy
 import com.example.bamachat.service.ConversationService
 import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
@@ -749,7 +750,7 @@ class ChatViewModel @Inject constructor(
             val networkError = com.example.bamachat.util.ErrorRecoveryManager
                 .mapErrorToUserMessage(java.io.IOException("No network"))
             publishError(
-                message = buildErrorDisplayText(networkError),
+                message = ChatErrorRecoveryPolicy.buildErrorDisplayText(networkError),
                 retryable = networkError.isRetryable,
                 actionLabel = networkError.actionLabel
             )
@@ -1311,7 +1312,9 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     }
 
     fun retryLastFailedMessage(): Boolean {
-        val retryText = _lastRetryableUserMessage.value?.takeIf { it.isNotBlank() } ?: return false
+        val retryText = _lastRetryableUserMessage.value
+            ?.takeIf { ChatErrorRecoveryPolicy.isValidRetryCandidate(it) }
+            ?: return false
         lastAcceptedTextSend = null
         lastAcceptedConversationId = null
         lastAcceptedTextSendAtMs = 0L
@@ -1376,19 +1379,15 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         AppTelemetry.logError("chat_error", e)
         val userErrorMessage = com.example.bamachat.util.ErrorRecoveryManager.mapErrorToUserMessage(e)
         publishError(
-            message = buildErrorDisplayText(userErrorMessage),
+            message = ChatErrorRecoveryPolicy.buildErrorDisplayText(userErrorMessage),
             retryable = userErrorMessage.isRetryable,
             actionLabel = userErrorMessage.actionLabel
         )
     }
 
-    private fun buildErrorDisplayText(msg: UserErrorMessage): String {
-        return "${msg.title}: ${msg.description}\n\n💡 ${msg.suggestion}"
-    }
-
     private fun publishError(message: String, retryable: Boolean, actionLabel: String?) {
         val candidate = pendingUserMessageForRetry?.takeIf { it.isNotBlank() }
-        val canRetry = retryable && !candidate.isNullOrBlank()
+        val canRetry = ChatErrorRecoveryPolicy.shouldEnableRetry(retryable, candidate)
         if (canRetry) {
             _lastRetryableUserMessage.value = candidate
             _isErrorRetryable.value = true
