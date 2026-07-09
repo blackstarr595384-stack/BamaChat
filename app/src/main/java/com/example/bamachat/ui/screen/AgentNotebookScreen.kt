@@ -190,9 +190,9 @@ fun AgentNotebookScreen(
                     }
                 }
 
-                if (state.result != null) {
+                state.result?.let { result ->
                     ResultSection(
-                        result = state.result!!,
+                        result = result,
                         onReset = viewModel::reset,
                         onNewTask = {
                             viewModel.reset()

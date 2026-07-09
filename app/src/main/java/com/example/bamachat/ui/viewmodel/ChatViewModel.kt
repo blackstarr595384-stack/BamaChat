@@ -63,7 +63,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import java.util.*
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import javax.inject.Inject
 import kotlin.concurrent.read
@@ -1340,8 +1339,9 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     // ===== Private/Utilities =====
     private fun getSystemPromptWithCache(persona: Persona): String {
         val now = System.currentTimeMillis()
-        if (systemPromptCache != null && now < systemPromptCacheExpireAt) {
-            return systemPromptCache!!
+        val cached = systemPromptCache
+        if (cached != null && now < systemPromptCacheExpireAt) {
+            return cached
         }
         val prompt = personaViewModel.getSystemPromptCached(persona)
         systemPromptCache = prompt

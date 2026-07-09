@@ -30,7 +30,7 @@ object ServiceLocator {
                 val db = ChatDatabase.getDatabase(app)
                 _chatRepository = ChatRepository(db.chatDao())
             }
-            return _chatRepository!!
+            return _chatRepository ?: throw IllegalStateException("ChatRepository not initialized")
         }
 
     fun init(application: Application) {

@@ -647,8 +647,9 @@ class CollabViewModel @Inject constructor(
                     _errorMessage.value = getString(R.string.collab_error_session_not_found)
                     return@runCatching
                 }
-                val docRef = firestore.collection("collab_sessions").document(resolvedSessionId!!)
-                lastJoinSessionInput = resolvedSessionId!!
+                val sessionId = resolvedSessionId ?: return@runCatching
+                val docRef = firestore.collection("collab_sessions").document(sessionId)
+                lastJoinSessionInput = sessionId
                 lastJoinInviteInput = existing.inviteCode
 
                 if (inviteCode.isNotBlank() &&

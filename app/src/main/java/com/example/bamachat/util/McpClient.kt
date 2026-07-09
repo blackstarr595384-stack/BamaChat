@@ -57,9 +57,10 @@ class McpClient(
             val pb = ProcessBuilder(config.command, *config.args.toTypedArray())
                 .redirectErrorStream(false)
             config.env.forEach { (k, v) -> pb.environment()[k] = v }
-            process = pb.start()
-            writer = OutputStreamWriter(process!!.outputStream)
-            reader = BufferedReader(InputStreamReader(process!!.inputStream))
+            val proc = pb.start()
+            process = proc
+            writer = OutputStreamWriter(proc.outputStream)
+            reader = BufferedReader(InputStreamReader(proc.inputStream))
             startReader()
             sendInitialize()
             _connectionStatus.value = McpConnectionStatus.CONNECTED

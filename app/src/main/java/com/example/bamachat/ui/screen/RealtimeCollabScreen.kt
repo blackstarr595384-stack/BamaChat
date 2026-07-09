@@ -1140,12 +1140,13 @@ fun RealtimeCollabScreen(
                             )
                         )
                     )
-                    if (lastAiFailedRequest != null && !multiAgentIsRunning) {
+                    val failedRequest = lastAiFailedRequest
+                    if (failedRequest != null && !multiAgentIsRunning) {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
                                     label = "Wiederholen",
-                                    onClick = { runAiRequest(lastAiFailedRequest!!) },
+                                    onClick = { runAiRequest(failedRequest) },
                                     color = Color(0xFFFFD9A8)
                                 )
                             )

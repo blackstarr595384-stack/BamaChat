@@ -332,7 +332,8 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
                         }
                     }
 
-                    if (selectedNode != null) {
+                    val node = selectedNode
+                    if (node != null) {
                         Surface(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -343,7 +344,7 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
                         ) {
                             Column(Modifier.padding(14.dp).verticalScroll(rememberScrollState())) {
                                 Text(
-                                    selectedNode!!.label,
+                                    node.label,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     color = selectedNodeColor
