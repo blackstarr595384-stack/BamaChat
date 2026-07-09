@@ -395,7 +395,7 @@ class CollabViewModel @Inject constructor(
             failedOutbound[message.id] = message
             putDeliveryStatus(message.id, MessageDeliveryStatus.FAILED)
         }
-        _messages.value = (_messages.value + restored).distinctBy { it.id }.sortedBy { it.timestamp }
+        _messages.update { old -> (old + restored).distinctBy { it.id }.sortedBy { it.timestamp } }
     }
 
     fun retryFailedOutboundNow() {
@@ -844,7 +844,7 @@ class CollabViewModel @Inject constructor(
 
         putDeliveryStatus(messageId, MessageDeliveryStatus.SENDING)
         failedOutbound.remove(messageId)
-        _messages.value = (_messages.value.filterNot { it.id == messageId } + msg).sortedBy { it.timestamp }
+        _messages.update { old -> (old.filterNot { it.id == messageId } + msg).sortedBy { it.timestamp } }
 
         viewModelScope.launch {
                 _syncStatus.value = getString(R.string.collab_msg_status_sending)
