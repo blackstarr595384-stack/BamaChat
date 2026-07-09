@@ -26,6 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -321,9 +322,7 @@ class CollabViewModel @Inject constructor(
     }
 
     private fun putDeliveryStatus(messageId: String, status: MessageDeliveryStatus) {
-        _messageDeliveryStatus.value = _messageDeliveryStatus.value.toMutableMap().apply {
-            put(messageId, status)
-        }
+        _messageDeliveryStatus.update { old -> old + (messageId to status) }
     }
 
     private fun recordDetailedError(prefix: String, details: String?) {
@@ -1563,12 +1562,12 @@ class CollabViewModel @Inject constructor(
                 _hasMoreMessages.value = (value?.documents?.size ?: 0) >= 50
                 val ownId = _currentUserId.value
                 if (ownId.isNotBlank()) {
-                    val statusMap = _messageDeliveryStatus.value.toMutableMap()
+                    _messageDeliveryStatus.update { old ->
+                        old + messages.filter { it.authorId == ownId }.associate { it.id to MessageDeliveryStatus.SENT }
+                    }
                     messages.filter { it.authorId == ownId }.forEach { message ->
-                        statusMap[message.id] = MessageDeliveryStatus.SENT
                         failedOutbound.remove(message.id)
                     }
-                    _messageDeliveryStatus.value = statusMap
                     persistOfflineQueue(sessionId)
                 }
                 _syncStatus.value = getString(R.string.collab_sync_status_live_sync) + ": ${messages.size}"
