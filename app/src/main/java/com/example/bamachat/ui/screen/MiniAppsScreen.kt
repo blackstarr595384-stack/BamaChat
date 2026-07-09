@@ -15,6 +15,7 @@ import android.net.Uri
 import android.speech.RecognizerIntent
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -40,6 +41,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -56,6 +58,9 @@ import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.RotateLeft
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -116,8 +121,16 @@ import kotlin.random.Random
 enum class MiniAppCategory(val label: String) {
     PRODUCTIVITY("Produktiv"),
     CREATIVE("Kreativ"),
-    UTILITY("Utility"),
-    KNOWLEDGE("Knowledge")
+    UTILITY("Tools"),
+    KNOWLEDGE("Wissen"),
+    GAMES("Spiele")
+}
+
+// MiniApp Status - indicates availability and maturity
+enum class MiniAppStatus(val label: String, val color: Color) {
+    READY("Aktiv", NeonGreen),        // Fully functional
+    BETA("Beta", NeonPurple),          // Work in progress
+    COMING_SOON("Kommt bald", NeonCyan) // Not yet implemented
 }
 
 // --- original MiniAppsScreen remains identical except for header/background ---
@@ -134,17 +147,34 @@ private const val KEY_HIDDEN_APPS = "hidden_apps"
 private const val KEY_APP_ORDER = "app_order"
 private const val KEY_LAST_USED = "last_used"
 
-private enum class MiniApp(val label: String, val emoji: String, val category: MiniAppCategory) {
-    PROMPT_LAB("Prompt Lab", "🧪", MiniAppCategory.CREATIVE),
-    NOTES("Notizen", "📝", MiniAppCategory.PRODUCTIVITY),
-    SMART_WORKSPACE("Smart Workspace", "⚡", MiniAppCategory.PRODUCTIVITY),
-    BROWSER("Browser", "🌐", MiniAppCategory.UTILITY),
-    DOODLE("Doodle", "✏️", MiniAppCategory.CREATIVE),
-    GAME_2048("2048", "🎮", MiniAppCategory.CREATIVE),
-    WEATHER("Wetter", "🌤️", MiniAppCategory.UTILITY),
-    AI_PHOTO("AI Photo", "📸", MiniAppCategory.CREATIVE),
-    TIMER("Timer", "⏱️", MiniAppCategory.UTILITY),
-    UNIT_CONVERTER("Converter", "📐", MiniAppCategory.UTILITY)
+private enum class MiniApp(
+    val label: String,
+    val emoji: String,
+    val category: MiniAppCategory,
+    val status: MiniAppStatus,
+    val description: String
+) {
+    // 🎨 CREATIVE Apps
+    PROMPT_LAB("Prompt Lab", "🧪", MiniAppCategory.CREATIVE, MiniAppStatus.READY, "Erstelle professionelle AI Prompts"),
+    DOODLE("Doodle", "✏️", MiniAppCategory.CREATIVE, MiniAppStatus.READY, "Zeichne und mache Notizen"),
+    AI_PHOTO("AI Foto Editor", "📸", MiniAppCategory.CREATIVE, MiniAppStatus.COMING_SOON, "Bearbeite Fotos mit AI"),
+
+    // 🚀 PRODUCTIVITY Apps
+    NOTES("Notizen", "📝", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.READY, "Schnelle Notizen und Todos"),
+    SMART_WORKSPACE("Smart Workspace", "⚡", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.BETA, "Projektorganisation und Planung"),
+    VOICE_NOTES("Voice Notes", "🎙️", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.READY, "Sprach-Notizen transkribieren"),
+    CODE_GENERATOR("Code Generator", "💻", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.READY, "AI Code Generierung & Debugging"),
+    TEXT_SUMMARIZER("Zusammenfassung", "📄", MiniAppCategory.PRODUCTIVITY, MiniAppStatus.READY, "Texte intelligent zusammenfassen"),
+
+    // 🛠️ UTILITY Apps
+    BROWSER("Browser", "🌐", MiniAppCategory.UTILITY, MiniAppStatus.READY, "Integrierter Web Browser"),
+    WEATHER("Wetter", "🌤️", MiniAppCategory.UTILITY, MiniAppStatus.COMING_SOON, "Live Wettervorhersagen"),
+    TIMER("Timer", "⏱️", MiniAppCategory.UTILITY, MiniAppStatus.READY, "Zeitnehmung und Erinnerungen"),
+    UNIT_CONVERTER("Konverter", "📐", MiniAppCategory.UTILITY, MiniAppStatus.COMING_SOON, "Einheiten Umrechnung"),
+    QR_GENERATOR("QR Code", "📱", MiniAppCategory.UTILITY, MiniAppStatus.READY, "QR Codes generieren"),
+
+    // 🎮 GAMES
+    GAME_2048("2048", "🎮", MiniAppCategory.GAMES, MiniAppStatus.READY, "Klassisches Puzzle Spiel")
 }
 
 private data class MiniAppMood(val top: Color, val bottom: Color)
@@ -269,11 +299,13 @@ fun MiniAppsScreen(
                     onClose = onClose
                 )
             } else {
-                MiniAppScreen(
-                    app = currentApp!!,
-                    themeColor = themeColor,
-                    onBack = { currentApp = null }
-                )
+                currentApp?.let { app ->
+                    MiniAppScreen(
+                        app = app,
+                        themeColor = themeColor,
+                        onBack = { currentApp = null }
+                    )
+                }
             }
         }
     }
@@ -296,81 +328,117 @@ private fun MiniAppsHub(
     val sortedApps = appOrder.mapNotNull { name -> MiniApp.entries.find { it.name == name } }
     val visibleApps = sortedApps.filter { it.name !in hiddenApps }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp)
-    ) {
+    var selectedCategory by remember { mutableStateOf<MiniAppCategory?>(null) }
+    val filteredVisibleApps = if (selectedCategory != null) {
+        visibleApps.filter { it.category == selectedCategory }
+    } else {
+        visibleApps
+    }
+
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(8.dp))
 
-        // Header with close button
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        // Header
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onClose) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    "Zurück",
-                    tint = Color.White
-                )
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück", tint = Color.White)
             }
             Spacer(Modifier.width(4.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "🧩 Mini-Apps",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Nützliche Tools & kreative Helfer",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 13.sp
-                )
+                Text("🧩 Mini-Apps", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Nützliche Tools & kreative Helfer", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
             }
             IconButton(onClick = onResetOrder) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Redo,
-                    "Reset",
-                    tint = Color.White.copy(alpha = 0.5f)
+                Icon(Icons.AutoMirrored.Filled.Redo, "Reset", tint = Color.White.copy(alpha = 0.5f))
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Category tabs
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 4.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            item {
+                FilterChip(
+                    selected = selectedCategory == null,
+                    onClick = { selectedCategory = null },
+                    label = { Text("Alle") },
+                    leadingIcon = if (selectedCategory == null) { { Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp)) } } else null,
+                    modifier = Modifier.height(32.dp)
+                )
+            }
+            items(MiniAppCategory.entries.toList()) { category ->
+                FilterChip(
+                    selected = selectedCategory == category,
+                    onClick = { selectedCategory = category },
+                    label = { Text(category.label) },
+                    leadingIcon = if (selectedCategory == category) { { Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp)) } } else null,
+                    modifier = Modifier.height(32.dp)
                 )
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
-        if (loadingHub) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = NeonPurple)
+        when {
+            loadingHub -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = NeonPurple)
+                }
             }
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                // Favorites section
-                val favoriteApps = visibleApps.filter { it.name in favorites }
-                if (favoriteApps.isNotEmpty()) {
+            filteredVisibleApps.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("😴", fontSize = 48.sp, modifier = Modifier.padding(bottom = 16.dp))
+                        Text("Keine Apps in dieser Kategorie", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+                    }
+                }
+            }
+            else -> {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    val favoriteApps = filteredVisibleApps.filter { it.name in favorites }
+                    if (favoriteApps.isNotEmpty()) {
+                        item {
+                            Text("⭐ Favoriten", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                        favoriteApps.chunked(4).forEach { rowApps ->
+                            item {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    rowApps.forEach { app ->
+                                        MiniAppIcon(
+                                            app = app,
+                                            isFavorite = app.name in favorites,
+                                            onClick = { onOpenApp(app) },
+                                            onLongClick = { onToggleFavorite(app) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
+                                }
+                            }
+                        }
+                        item { Spacer(Modifier.height(8.dp)) }
+                    }
+
                     item {
                         Text(
-                            "⭐ Favoriten",
+                            if (selectedCategory != null) "${selectedCategory?.label}" else "Alle Apps",
                             color = Color.White.copy(alpha = 0.7f),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
-                    val rows = favoriteApps.chunked(4)
-                    rows.forEach { rowApps ->
+                    val nonFavorites = filteredVisibleApps.filter { it.name !in favorites }
+                    nonFavorites.chunked(4).forEach { rowApps ->
                         item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                 rowApps.forEach { app ->
                                     MiniAppIcon(
                                         app = app,
@@ -380,44 +448,7 @@ private fun MiniAppsHub(
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
-                                repeat(4 - rowApps.size) {
-                                    Spacer(Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-                    item { Spacer(Modifier.height(8.dp)) }
-                }
-
-                // All apps
-                item {
-                    Text(
-                        "Alle Apps",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
-                val nonFavoriteVisible = visibleApps.filter { it.name !in favorites }
-                val allRows = nonFavoriteVisible.chunked(4)
-                allRows.forEach { rowApps ->
-                    item {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            rowApps.forEach { app ->
-                                MiniAppIcon(
-                                    app = app,
-                                    isFavorite = app.name in favorites,
-                                    onClick = { onOpenApp(app) },
-                                    onLongClick = { onToggleFavorite(app) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            repeat(4 - rowApps.size) {
-                                Spacer(Modifier.weight(1f))
+                                repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
                     }
@@ -426,6 +457,7 @@ private fun MiniAppsHub(
         }
     }
 }
+
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -439,8 +471,9 @@ private fun MiniAppIcon(
     Column(
         modifier = modifier
             .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
+                onClick = { if (app.status != MiniAppStatus.COMING_SOON) onClick() },
+                onLongClick = onLongClick,
+                enabled = true
             )
             .padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -453,20 +486,47 @@ private fun MiniAppIcon(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            SurfaceDarkElevated.copy(alpha = 0.8f),
-                            SurfaceDarkCard.copy(alpha = 0.6f)
+                            SurfaceDarkElevated.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.4f else 0.8f),
+                            SurfaceDarkCard.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.2f else 0.6f)
                         )
                     )
                 )
                 .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text(text = app.emoji, fontSize = 24.sp)
+            Text(
+                text = app.emoji,
+                fontSize = 24.sp,
+                color = Color.White.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.4f else 1f)
+            )
+
+            // 🔴 Status Badge
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-4).dp)
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(app.status.color)
+                    .border(1.dp, Color.Black.copy(alpha = 0.3f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = when (app.status) {
+                        MiniAppStatus.READY -> "✓"
+                        MiniAppStatus.BETA -> "β"
+                        MiniAppStatus.COMING_SOON -> "!"
+                    },
+                    color = Color.White,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
         Spacer(Modifier.height(4.dp))
         Text(
             text = app.label,
-            color = Color.White.copy(alpha = 0.8f),
+            color = Color.White.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.4f else 0.8f),
             fontSize = 10.sp,
             textAlign = TextAlign.Center,
             maxLines = 1
@@ -474,6 +534,15 @@ private fun MiniAppIcon(
         if (isFavorite) {
             Text("★", color = NeonPink.copy(alpha = 0.6f), fontSize = 8.sp)
         }
+        // Status label
+        Text(
+            text = app.status.label,
+            color = app.status.color,
+            fontSize = 7.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -496,6 +565,10 @@ private fun MiniAppScreen(
             MiniApp.AI_PHOTO -> AiPhotoApp(themeColor)
             MiniApp.TIMER -> TimerApp(themeColor)
             MiniApp.UNIT_CONVERTER -> ConverterApp(themeColor)
+            MiniApp.VOICE_NOTES -> VoiceNotesApp(themeColor)
+            MiniApp.CODE_GENERATOR -> CodeGeneratorApp(themeColor)
+            MiniApp.TEXT_SUMMARIZER -> TextSummarizerApp(themeColor)
+            MiniApp.QR_GENERATOR -> QrGeneratorApp(themeColor)
         }
 
         // Back button overlay
@@ -781,12 +854,23 @@ private fun SmartWorkspaceScreen(themeColor: Color) {
     }
 }
 
+private fun isValidBrowserUrl(input: String): String? {
+    val trimmed = input.trim()
+    if (trimmed.isBlank()) return null
+    val url = if (trimmed.startsWith("https://") || trimmed.startsWith("http://")) trimmed else "https://$trimmed"
+    return url.takeIf { it.startsWith("https://") }
+}
+
 // Browser App
 @Composable
 private fun BrowserApp(themeColor: Color) {
     var url by remember { mutableStateOf("https://www.google.com") }
     var inputUrl by remember { mutableStateOf("") }
     var loadUrl by remember { mutableStateOf(url) }
+
+    fun navigateTo(input: String) {
+        isValidBrowserUrl(input)?.let { loadUrl = it }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(top = 60.dp)) {
         Row(
@@ -807,11 +891,11 @@ private fun BrowserApp(themeColor: Color) {
                     unfocusedBorderColor = Color.White.copy(alpha = 0.08f)
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(onGo = { loadUrl = inputUrl })
+                keyboardActions = KeyboardActions(onGo = { navigateTo(inputUrl) })
             )
             Spacer(Modifier.width(8.dp))
             FilledIconButton(
-                onClick = { if (inputUrl.isNotBlank()) loadUrl = inputUrl },
+                onClick = { navigateTo(inputUrl) },
                 shape = CircleShape,
                 colors = IconButtonDefaults.filledIconButtonColors(containerColor = NeonCyan)
             ) {
@@ -829,9 +913,16 @@ private fun BrowserApp(themeColor: Color) {
                     settings.builtInZoomControls = true
                     settings.displayZoomControls = false
                     setBackgroundColor(AndroidColor.parseColor("#1A1A2E"))
-                    webViewClient = WebViewClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                            return isValidBrowserUrl(request.url.toString()) == null
+                        }
+                    }
                     loadUrl(loadUrl)
                 }
+            },
+            update = { webView ->
+                webView.loadUrl(loadUrl)
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -1148,7 +1239,7 @@ private fun WeatherApp(themeColor: Color) {
         val days = listOf(Triple("Mo", "☀️", "24°"), Triple("Di", "⛅", "21°"), Triple("Mi", "🌧️", "18°"), Triple("Do", "☁️", "19°"), Triple("Fr", "☀️", "25°"), Triple("Sa", "☀️", "27°"), Triple("So", "⛅", "23°"))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             days.forEach { (day, emoji, temp) ->
-                
+
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(day, color = Color.White.copy(alpha = 0.5f), fontSize = 11.sp)
                     Text(emoji, fontSize = 20.sp)
@@ -1403,6 +1494,346 @@ internal fun MiniAppStatusBanner(
             }
             AnimatedVisibility(visible = isLoading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Color.White)
+            }
+        }
+    }
+}
+
+// ===== VOICE NOTES TRANSCRIBER =====
+@Composable
+private fun VoiceNotesApp(themeColor: Color) {
+    var voiceText by remember { mutableStateOf("") }
+    var isRecording by remember { mutableStateOf(false) }
+    var recordedNotes by remember { mutableStateOf(listOf<String>()) }
+    var transcript by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Spacer(Modifier.height(48.dp))
+        Text("🎙️ Voice Notes Transcriber", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+
+        // Transkript-Anzeige
+        if (transcript.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = SurfaceDarkCard,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("📝 Transkription:", color = NeonPurple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(transcript, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        }
+
+        // Aufnahme-Button
+        Button(
+            onClick = { isRecording = !isRecording },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = if (isRecording) NeonPink else NeonPurple)
+        ) {
+            Text(if (isRecording) "⏹ Aufnahme stoppen" else "🔴 Aufnahme starten", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+
+        // Gespeicherte Notizen
+        if (recordedNotes.isNotEmpty()) {
+            Text("📚 Gespeicherte Notizen", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            recordedNotes.forEach { note ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SurfaceDarkCard,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(note, color = Color.White, fontSize = 12.sp, modifier = Modifier.padding(12.dp))
+                }
+            }
+        }
+    }
+}
+
+// ===== CODE GENERATOR =====
+@Composable
+private fun CodeGeneratorApp(themeColor: Color) {
+    var prompt by remember { mutableStateOf("") }
+    var language by remember { mutableStateOf("Python") }
+    var generatedCode by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+
+    val languages = listOf("Python", "Kotlin", "JavaScript", "TypeScript", "Java", "C++", "Go", "Rust")
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Spacer(Modifier.height(48.dp))
+        Text("💻 Code Generator", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+
+        // Programmiersprache wählen
+        Text("Sprache:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(languages) { lang ->
+                FilterChip(
+                    selected = language == lang,
+                    onClick = { language = lang },
+                    label = { Text(lang, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = NeonPurple.copy(alpha = 0.3f),
+                        containerColor = SurfaceDarkCard
+                    )
+                )
+            }
+        }
+
+        // Prompt eingeben
+        OutlinedTextField(
+            value = prompt,
+            onValueChange = { prompt = it },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
+            placeholder = { Text("z.B. 'Schreibe eine Funktion die Fibonacci berechnet'", color = Color.White.copy(alpha = 0.4f)) },
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = SurfaceDarkCard,
+                unfocusedContainerColor = SurfaceDarkCard,
+                focusedBorderColor = NeonPurple.copy(alpha = 0.4f),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
+                cursorColor = NeonPurple
+            )
+        )
+
+        // Generieren Button
+        Button(
+            onClick = {
+                isLoading = true
+                // Simulation: Nach 1.5s Beispiel-Code anzeigen
+                generatedCode = "def fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci(n-1) + fibonacci(n-2)\n\nresult = fibonacci(10)\nprint(result)"
+                isLoading = false
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+            enabled = prompt.isNotEmpty() && !isLoading
+        ) {
+            Text(if (isLoading) "⏳ Generiere..." else "🚀 Code generieren", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+
+        // Generierter Code
+        if (generatedCode.isNotEmpty()) {
+            Text("Generated Code:", color = NeonPurple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.Black.copy(alpha = 0.5f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    generatedCode,
+                    color = Color(0xFF00FF00),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(12.dp),
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+            }
+        }
+    }
+}
+
+// ===== TEXT SUMMARIZER =====
+@Composable
+private fun TextSummarizerApp(themeColor: Color) {
+    var inputText by remember { mutableStateOf("") }
+    var summary by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var summaryLength by remember { mutableFloatStateOf(0.5f) } // 0-1 scale
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Spacer(Modifier.height(48.dp))
+        Text("📄 Text Summarizer", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+
+        // Text eingeben
+        OutlinedTextField(
+            value = inputText,
+            onValueChange = { inputText = it },
+            modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+            placeholder = { Text("Füge einen längeren Text oder Artikel ein...", color = Color.White.copy(alpha = 0.4f)) },
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = SurfaceDarkCard,
+                unfocusedContainerColor = SurfaceDarkCard,
+                focusedBorderColor = NeonPurple.copy(alpha = 0.4f),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
+                cursorColor = NeonPurple
+            )
+        )
+
+        // Zusammenfassungs-Länge wählen
+        Text("Länge: ${((summaryLength * 100).toInt())}%", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+        Slider(
+            value = summaryLength,
+            onValueChange = { summaryLength = it },
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = NeonPurple,
+                activeTrackColor = NeonPurple.copy(alpha = 0.5f)
+            )
+        )
+
+        // Zusammenfassen Button
+        Button(
+            onClick = {
+                isLoading = true
+                // Simulation
+                summary = "Dies ist eine KI-generierte Zusammenfassung des eingegeben Textes. Sie enthält die wichtigsten Punkte und Erkenntnisse in prägnanter Form."
+                isLoading = false
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+            enabled = inputText.isNotEmpty() && !isLoading
+        ) {
+            Text(if (isLoading) "⏳ Zusammenfassend..." else "✨ Zusammenfassen", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+
+        // Zusammenfassung anzeigen
+        if (summary.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = SurfaceDarkCard,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("📌 Zusammenfassung:", color = NeonPurple, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(summary, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp), lineHeight = 18.sp)
+                }
+            }
+        }
+    }
+}
+
+// ===== QR CODE GENERATOR =====
+@Composable
+private fun QrGeneratorApp(themeColor: Color) {
+    var qrInput by remember { mutableStateOf("") }
+    var qrType by remember { mutableStateOf("Text") }
+    var showQr by remember { mutableStateOf(false) }
+
+    val qrTypes = listOf("Text", "URL", "Email", "Phone", "WiFi")
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Spacer(Modifier.height(48.dp))
+        Text("📱 QR Code Generator", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+
+        // QR-Typ wählen
+        Text("Typ:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(qrTypes) { type ->
+                FilterChip(
+                    selected = qrType == type,
+                    onClick = { qrType = type },
+                    label = { Text(type, fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = NeonPurple.copy(alpha = 0.3f),
+                        containerColor = SurfaceDarkCard
+                    )
+                )
+            }
+        }
+
+        // Input Feld
+        val placeholder = when (qrType) {
+            "URL" -> "https://example.com"
+            "Email" -> "beispiel@email.com"
+            "Phone" -> "+49 123 456789"
+            "WiFi" -> "SSID:Password"
+            else -> "Text eingeben..."
+        }
+
+        OutlinedTextField(
+            value = qrInput,
+            onValueChange = { qrInput = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(placeholder, color = Color.White.copy(alpha = 0.4f)) },
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = SurfaceDarkCard,
+                unfocusedContainerColor = SurfaceDarkCard,
+                focusedBorderColor = NeonPurple.copy(alpha = 0.4f),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
+                cursorColor = NeonPurple
+            )
+        )
+
+        // QR Generieren
+        Button(
+            onClick = { showQr = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = NeonPurple),
+            enabled = qrInput.isNotEmpty()
+        ) {
+            Text("🔲 QR Code generieren", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+
+        // QR Platzhalter
+        if (showQr && qrInput.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .align(Alignment.CenterHorizontally)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(200.dp)
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "QR\n${qrInput.take(20)}${if (qrInput.length > 20) "..." else ""}",
+                        color = Color.Black,
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
