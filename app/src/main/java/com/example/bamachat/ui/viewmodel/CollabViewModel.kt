@@ -18,7 +18,10 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.gson.Gson
 import android.net.Uri
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1628,7 +1631,7 @@ class CollabViewModel @Inject constructor(
     override fun onCleared() {
         // 🔴 CRITICAL: Cleanup presence state before destroying listeners
         try {
-            viewModelScope.launch {
+            CoroutineScope(Dispatchers.IO + NonCancellable).launch {
                 runCatching { 
                     setOwnPresence(active = false)
                 }.onFailure { e ->
