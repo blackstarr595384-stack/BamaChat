@@ -81,7 +81,7 @@ fun SettingsScreen(
         SettingsEntryItem("KI & Modelle", "Provider, API-Keys, Abo, Credits", Icons.Default.Tune, NeonBlue, Color(0xFF0066CC), section = "ai"),
         SettingsEntryItem("Darstellung", "Farben, Layout, Chat-Anzeige", Icons.Default.Palette, NeonPink, Color(0xFFAA0055), section = "chat"),
         SettingsEntryItem("Sprache & Stimme", "TTS, Cloud-Voice, Sprachmodus", Icons.Default.GraphicEq, NeonGreen, Color(0xFF008844), section = "voice"),
-        SettingsEntryItem("Workspaces & Automationen", "Projekte, Schnellaktionen, Rollen", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), section = "workspaces"),
+        SettingsEntryItem("Arbeitsbereiche", "Bereiche, Filter, Automationen", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), section = "workspaces"),
         SettingsEntryItem("Datenschutz & Daten", "Sync, Bereinigung, App-Info", Icons.Default.Security, Color(0xFF00BFA5), Color(0xFF00796B), section = "data")
     )
     val advancedExtraEntries = listOf(

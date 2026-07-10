@@ -76,6 +76,7 @@ fun HomeHubScreen(
     val dashboardCards = listOf(
         DashboardCard("Chat", "Chat-Verlauf und laufende Gespräche", Icons.AutoMirrored.Filled.Chat, NeonPurple, Color(0xFF7C4DFF), NeonPurple, onClick = onOpenChat),
         DashboardCard("Agent Hub", "Persona, Regeln, Assistenten", Icons.Default.Psychology, NeonBlue, Color(0xFF0066CC), NeonCyan, onClick = onOpenAgentHub),
+        DashboardCard("Arbeitsbereiche", "Bereiche, Filter, Automationen verwalten", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenWorkspaceSettings),
         DashboardCard("Mini-Apps", "Tools, Browser, Spiele und Notizen", Icons.Default.Extension, NeonGreen, Color(0xFF008844), NeonGreen, onClick = onOpenMiniApps),
         DashboardCard("AI Extensions", "Plugins für erweiterte Funktionen", Icons.Default.Tune, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenExtensions),
         DashboardCard("Wissensgraph", "Themen und Verbindungen visualisieren", Icons.Default.AccountTree, Color(0xFF00BFA5), Color(0xFF00796B), Color(0xFF00BFA5), onClick = onOpenKnowledgeGraph),
@@ -123,7 +124,7 @@ fun HomeHubScreen(
                     Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Default.Folder, null, tint = NeonCyan.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
-                        Text(if (activeWorkspaceName.isNotBlank()) activeWorkspaceName else "Standard", color = palette.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Text(if (activeWorkspaceName.isNotBlank()) activeWorkspaceName else "Standard-Bereich", color = palette.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }

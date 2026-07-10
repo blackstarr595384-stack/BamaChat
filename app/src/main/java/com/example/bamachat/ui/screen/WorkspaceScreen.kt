@@ -60,7 +60,7 @@ fun WorkspaceScreen(
     if (deleteTarget != null) {
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
-            title = { Text("Workspace löschen") },
+            title = { Text("Arbeitsbereich löschen") },
             text = { Text("\"${deleteTarget?.name}\" endgültig löschen?") },
             confirmButton = {
                 Button(
@@ -80,7 +80,7 @@ fun WorkspaceScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Workspaces", fontWeight = FontWeight.SemiBold) },
+                title = { Text("Arbeitsbereiche", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
@@ -119,7 +119,7 @@ fun WorkspaceScreen(
                     border = BorderStroke(1.dp, NeonCyan.copy(alpha = 0.15f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Neuen Workspace erstellen", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        Text("Neuen Arbeitsbereich anlegen", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = newName,
@@ -177,7 +177,7 @@ fun WorkspaceScreen(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.FilterList, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-                            Text("Chat-Filter: Nur aktiven Workspace anzeigen", color = TextSecondary, fontSize = 13.sp)
+                            Text("Chat-Filter: Nur aktiven Bereich zeigen", color = TextSecondary, fontSize = 13.sp)
                         }
                         Switch(
                             checked = workspaceChatFilterEnabled,
@@ -323,7 +323,7 @@ private fun WorkspaceCard(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(16.dp), tint = accent)
                     Spacer(Modifier.width(6.dp))
-                    Text("Chats", fontSize = 12.sp, color = accent)
+                    Text("Chats öffnen", fontSize = 12.sp, color = accent)
                 }
 
                 // Activate button (if not active)
