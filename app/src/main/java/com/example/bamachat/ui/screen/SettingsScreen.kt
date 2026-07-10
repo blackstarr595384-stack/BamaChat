@@ -54,6 +54,7 @@ fun SettingsScreen(
     onOpenProfile: () -> Unit,
     initialSection: String? = null,
     onOpenPrivacyPolicy: () -> Unit = {},
+    onOpenWorkspaceSettings: () -> Unit = {},
     @Suppress("UNUSED_PARAMETER") mcpServerManager: Any? = null,
     @Suppress("UNUSED_PARAMETER") mcpWorkflowManager: Any? = null
 ) {
@@ -198,6 +199,7 @@ fun SettingsScreen(
                         item = entry,
                         onClick = {
                             if (entry.openProfile) onOpenProfile()
+                            else if (entry.section == "workspaces") onOpenWorkspaceSettings()
                             else expandedSection = entry.section
                         }
                     )

@@ -368,6 +368,7 @@ fun BamaChatApp() {
                     onBack = { navController.popBackStack() },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     initialSection = initialSection,
+                    onOpenWorkspaceSettings = { navController.navigate(Routes.WORKSPACES) },
                     mcpServerManager = chatViewModel.mcpServerManager,
                     mcpWorkflowManager = chatViewModel.mcpWorkflowManager
                 )
