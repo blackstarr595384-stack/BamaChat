@@ -1299,11 +1299,6 @@ private fun ChatContent(
                                     }
                                 },
                                 actions = {
-                                    if (!usageStatus.isPremium) {
-                                        IconButton(onClick = onUpgradeClick) {
-                                            Icon(Icons.Default.Star, "Upgrade", tint = Color.White)
-                                        }
-                                    }
                                     IconButton(onClick = onPersonaClick) {
                                         Icon(Icons.Default.Psychology, "Persona", tint = Color.White)
                                     }
@@ -1369,6 +1364,38 @@ private fun ChatContent(
                                                     onSettingsClick()
                                                 }
                                             )
+                                            if (!usageStatus.isPremium) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Upgrade") },
+                                                    leadingIcon = { Icon(Icons.Default.Star, null) },
+                                                    onClick = {
+                                                        topMenuExpanded = false
+                                                        onUpgradeClick()
+                                                    }
+                                                )
+                                            }
+                                            DropdownMenuItem(
+                                                text = { Text("Design: $designName") },
+                                                leadingIcon = { Icon(Icons.Default.Palette, null) },
+                                                onClick = { topMenuExpanded = false },
+                                                enabled = false
+                                            )
+                                            if (activeExtensionsLabel.isNotBlank()) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Extensions: $activeExtensionsLabel") },
+                                                    leadingIcon = { Icon(Icons.Default.Extension, null) },
+                                                    onClick = { topMenuExpanded = false },
+                                                    enabled = false
+                                                )
+                                            }
+                                            if (!usageStatus.isPremium) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Plan: ${usageStatus.tierLabel} · ${usageStatus.textUsed}/${usageStatus.textLimit} · Credits ${usageStatus.creditsBalance}") },
+                                                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                                                    onClick = { topMenuExpanded = false },
+                                                    enabled = false
+                                                )
+                                            }
                                         }
                                     }
                                 },
@@ -1458,29 +1485,6 @@ private fun ChatContent(
                                         }
                                     }
                                 }
-                                Surface(
-                                    shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                    color = Color.Black.copy(alpha = 0.24f),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        when (designPreset) {
-                                            ChatDesignPreset.GLASS -> Color(0xFF9FCBFF).copy(alpha = 0.7f)
-                                            ChatDesignPreset.EDITORIAL -> Color(0xFFFFB08A).copy(alpha = 0.7f)
-                                            ChatDesignPreset.NOIR -> Color(0xFF86A8FF).copy(alpha = 0.7f)
-                                            ChatDesignPreset.SOLAR -> Color(0xFFFFC386).copy(alpha = 0.7f)
-                                            ChatDesignPreset.DASHBOARD -> Color(0xFF7DD3FC).copy(alpha = 0.7f)
-                                            ChatDesignPreset.CURRENT -> Color.White.copy(alpha = 0.35f)
-                                        }
-                                    )
-                                ) {
-                                    Text(
-                                        text = "Design: $designName",
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1
-                                    )
-                                }
                                 // P1-1: Workspace chip — read-only here. Tap opens settings → workspaces.
                                 if (activeWorkspaceName.isNotBlank()) {
                                     Surface(
@@ -1541,69 +1545,7 @@ private fun ChatContent(
                                     }
                                 }
                             }
-                            if (activeExtensionsLabel.isNotBlank() || lastAppliedExtensionsLabel.isNotBlank()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 0.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (activeExtensionsLabel.isNotBlank()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                            color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                                        ) {
-                                            Text(
-                                                text = "Extensions: $activeExtensionsLabel",
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                    if (lastAppliedExtensionsLabel.isNotBlank()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                            color = Color(0xFF15344E).copy(alpha = 0.65f),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, themeColor.copy(alpha = 0.42f))
-                                        ) {
-                                            Text(
-                                                text = "Modus: $lastAppliedExtensionsLabel",
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            if (!usageStatus.isPremium) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 0.dp),
-                                    horizontalArrangement = Arrangement.Start
-                                ) {
-                                    Surface(
-                                        modifier = Modifier.clickable { onUpgradeClick() },
-                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                                    ) {
-                                        Text(
-                                            text = "${usageStatus.tierLabel}-Plan · Nachrichten ${usageStatus.textUsed}/${usageStatus.textLimit} · Credits ${usageStatus.creditsBalance}",
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
+
                             Spacer(Modifier.height(headerBottomSpacer))
                         }
                     }
