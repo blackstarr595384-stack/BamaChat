@@ -445,6 +445,35 @@ fun SettingsDialog(
                             }
                         }
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customAccentHex,
+                            onValueChange = { customAccentHex = it.trim() },
+                            label = { Text("Eigene Akzentfarbe", fontSize = 11.sp) },
+                            placeholder = { Text("#4E7DE8", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        Button(
+                            onClick = {
+                                parsedCustomAccent?.let { colorInt ->
+                                    viewModel.setPrimaryColor(colorInt)
+                                    customAccentHex = colorToHex(colorInt)
+                                }
+                            },
+                            enabled = parsedCustomAccent != null
+                        ) {
+                            Text("Anwenden", fontSize = 11.sp)
+                        }
+                    }
+                    if (parsedCustomAccent == null && customAccentHex.isNotBlank()) {
+                        Text("Format: #RRGGBB oder #AARRGGBB", fontSize = 10.sp, color = Color(0xFFFFC107))
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Schriftgröße (${fontSize.toInt()} sp)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
                         Slider(
@@ -1183,35 +1212,6 @@ fun SettingsDialog(
                                 Text("GPT", fontSize = 11.sp)
                             }
                         }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = customAccentHex,
-                            onValueChange = { customAccentHex = it.trim() },
-                            label = { Text("Eigene Akzentfarbe", fontSize = 11.sp) },
-                            placeholder = { Text("#4E7DE8", fontSize = 10.sp) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                        )
-                        Button(
-                            onClick = {
-                                parsedCustomAccent?.let { colorInt ->
-                                    viewModel.setPrimaryColor(colorInt)
-                                    customAccentHex = colorToHex(colorInt)
-                                }
-                            },
-                            enabled = parsedCustomAccent != null
-                        ) {
-                            Text("Anwenden", fontSize = 11.sp)
-                        }
-                    }
-                    if (parsedCustomAccent == null && customAccentHex.isNotBlank()) {
-                        Text("Format: #RRGGBB oder #AARRGGBB", fontSize = 10.sp, color = Color(0xFFFFC107))
                     }
                     OutlinedTextField(
                         value = openCodeEndpoint,
