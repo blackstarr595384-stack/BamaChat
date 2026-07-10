@@ -347,6 +347,7 @@ fun BamaChatApp() {
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenComposeLab = { navController.navigate(Routes.COMPOSE_LAB) },
+                    onOpenWorkspace = { navController.navigate(Routes.WORKSPACES) },
                     onSearchClick = { navController.navigate(Routes.CHAT_SEARCH) }
                 )
             }

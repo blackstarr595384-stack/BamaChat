@@ -124,6 +124,7 @@ fun ChatScreen(
     onOpenMiniApps: () -> Unit = {},
     onOpenAgentHub: () -> Unit = {},
     onOpenComposeLab: () -> Unit = {},
+    onOpenWorkspace: () -> Unit = {},
     onSearchClick: () -> Unit = {}
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -1024,6 +1025,7 @@ fun ChatScreen(
             onSearchClick = onSearchClick,
             onMenuClick = { scope.launch { drawerState.open() } },
             onSettingsClick = { showSettingsDialog = true },
+            onOpenWorkspaceClick = onOpenWorkspace,
             onMiniAppsClick = onOpenMiniApps,
             onAgentHubClick = onOpenAgentHub,
             onComposeLabClick = onOpenComposeLab,
@@ -1140,6 +1142,7 @@ private fun ChatContent(
     onSearchClick: () -> Unit,
     onMenuClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onOpenWorkspaceClick: () -> Unit = {},
     onMiniAppsClick: () -> Unit,
     onAgentHubClick: () -> Unit,
     onComposeLabClick: () -> Unit,
@@ -1494,7 +1497,7 @@ private fun ChatContent(
                                             1.dp,
                                             Color.White.copy(alpha = 0.22f)
                                         ),
-                                        modifier = Modifier.clickable { onSettingsClick() }
+                                        modifier = Modifier.clickable { onOpenWorkspaceClick() }
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
