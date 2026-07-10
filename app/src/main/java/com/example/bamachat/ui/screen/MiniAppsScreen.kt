@@ -475,14 +475,14 @@ private fun MiniAppIcon(
                 onLongClick = onLongClick,
                 enabled = true
             )
-            .padding(4.dp),
+            .padding(2.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
-                .shadow(6.dp, RoundedCornerShape(16.dp), spotColor = NeonPurple.copy(alpha = 0.15f))
-                .clip(RoundedCornerShape(16.dp))
+                .size(48.dp)
+                .shadow(4.dp, RoundedCornerShape(14.dp), spotColor = NeonPurple.copy(alpha = 0.12f))
+                .clip(RoundedCornerShape(14.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
@@ -491,50 +491,25 @@ private fun MiniAppIcon(
                         )
                     )
                 )
-                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp)),
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = app.emoji,
-                fontSize = 24.sp,
+                fontSize = 20.sp,
                 color = Color.White.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.4f else 1f)
             )
-
-            // 🔴 Status Badge
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 4.dp, y = (-4).dp)
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(app.status.color)
-                    .border(1.dp, Color.Black.copy(alpha = 0.3f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = when (app.status) {
-                        MiniAppStatus.READY -> "✓"
-                        MiniAppStatus.BETA -> "β"
-                        MiniAppStatus.COMING_SOON -> "!"
-                    },
-                    color = Color.White,
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
         }
-        Spacer(Modifier.height(4.dp))
         Text(
-            text = app.label,
+            text = buildString {
+                append(app.label)
+                if (isFavorite) append(" ★")
+            },
             color = Color.White.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.4f else 0.8f),
-            fontSize = 10.sp,
+            fontSize = 9.sp,
             textAlign = TextAlign.Center,
             maxLines = 1
         )
-        if (isFavorite) {
-            Text("★", color = NeonPink.copy(alpha = 0.6f), fontSize = 8.sp)
-        }
-        // Status label
         Text(
             text = app.status.label,
             color = app.status.color,
