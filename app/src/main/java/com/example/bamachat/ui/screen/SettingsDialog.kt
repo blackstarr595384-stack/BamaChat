@@ -1541,13 +1541,28 @@ fun SettingsDialog(
                             )
                         )
                     }
-                    SettingRow("Privacy Strict Mode", "Maskiert sensible Inhalte stärker in Logs/Status") {
+                    SettingRow("Privacy-Modus (streng)", "Schützt private Daten in Logs und Statusmeldungen") {
                         Switch(
                             checked = privacyStrictModeEnabled,
                             onCheckedChange = { viewModel.setPrivacyStrictModeEnabled(it) }
                         )
                     }
-                    SettingRow("Rechtliches", "Öffentliche Texte und Kontaktwege") {
+                    // Friendly summary
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF00BFA5).copy(alpha = 0.06f)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Auf einen Blick", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Deine Chats bleiben lokal, solange kein Cloud-Sync aktiv ist. API-Schlüssel werden geschützt gespeichert. Externe KI-Dienste erhalten nur Daten, wenn du sie aktiv nutzt.",
+                                color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, lineHeight = 16.sp
+                            )
+                        }
+                    }
+                    SettingRow("Datenschutz & Rechtliches", "Infos, Einstellungen und Kontakt") {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -1575,13 +1590,13 @@ fun SettingsDialog(
                             onCheckedChange = { viewModel.setGuestAutoClearOnAccountSignIn(it) }
                         )
                     }
-                    SettingRow("Gastdaten beim Abmelden löschen", "Löscht lokale Gast-Chats und Persona-Lernstände") {
+                    SettingRow("Gastdaten beim Abmelden löschen", "Löscht lokale Chat-Verläufe und gelernte Anpassungen") {
                         Switch(
                             checked = guestAutoClearOnSignOut,
                             onCheckedChange = { viewModel.setGuestAutoClearOnSignOut(it) }
                         )
                     }
-                    SettingRow("Gast-/Prompt-Daten jetzt löschen", "Löscht nur lokale Session-, Prompt- und Lern-Daten") {
+                    SettingRow("Gast-/Prompt-Daten jetzt löschen", "Löscht nur temporäre Daten auf diesem Gerät") {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -1592,7 +1607,7 @@ fun SettingsDialog(
                             )
                         )
                     }
-                    SettingRow("Lokale Daten löschen", "Einstellungen und Chats auf diesem Gerät zurücksetzen") {
+                    SettingRow("Lokale Daten löschen", "Setzt nur lokale Einstellungen und Chats zurück") {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(

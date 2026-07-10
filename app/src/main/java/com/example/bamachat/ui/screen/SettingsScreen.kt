@@ -82,7 +82,7 @@ fun SettingsScreen(
         SettingsEntryItem("Darstellung", "Farben, Layout, Chat-Anzeige", Icons.Default.Palette, NeonPink, Color(0xFFAA0055), section = "chat"),
         SettingsEntryItem("Sprache & Stimme", "TTS, Cloud-Voice, Sprachmodus", Icons.Default.GraphicEq, NeonGreen, Color(0xFF008844), section = "voice"),
         SettingsEntryItem("Arbeitsbereiche", "Bereiche, Filter, Automationen", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), section = "workspaces"),
-        SettingsEntryItem("Datenschutz & Daten", "Sync, Bereinigung, App-Info", Icons.Default.Security, Color(0xFF00BFA5), Color(0xFF00796B), section = "data")
+        SettingsEntryItem("Datenschutz & Daten", "Sync, lokale Daten, Rechtliches", Icons.Default.Security, Color(0xFF00BFA5), Color(0xFF00796B), section = "data")
     )
     val advancedExtraEntries = listOf(
         SettingsEntryItem("Allgemein", "Sicherheit, Sprache, Benachrichtigung", Icons.Default.Settings, Color(0xFF6C63FF), Color(0xFF4A42D4), section = "general"),
