@@ -154,7 +154,7 @@ fun WelcomeScreen(
             )
 
             Text(
-                "Futuristische KI",
+                "AI Workspace OS",
                 fontSize = 16.sp,
                 color = NeonPurple.copy(alpha = 0.8f),
                 fontWeight = FontWeight.Medium,
@@ -165,7 +165,7 @@ fun WelcomeScreen(
 
             // Description
             Text(
-                "Dein KI-Workspace für intelligente\nGespräche, kreative Zusammenarbeit\nund grenzenlose Produktivität.",
+                "BamaChat ist dein KI-Arbeitsraum für Android.\nWindows/Desktop-Unterstützung ist vorbereitet,\ndamit dein Workspace später geräteübergreifend wächst.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
