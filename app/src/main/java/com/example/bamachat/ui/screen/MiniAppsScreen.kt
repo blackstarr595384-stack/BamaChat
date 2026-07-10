@@ -121,7 +121,7 @@ import kotlin.random.Random
 enum class MiniAppCategory(val label: String) {
     PRODUCTIVITY("Produktiv"),
     CREATIVE("Kreativ"),
-    UTILITY("Tools"),
+    UTILITY("Werkzeuge"),
     KNOWLEDGE("Wissen"),
     GAMES("Spiele")
 }
@@ -345,8 +345,8 @@ private fun MiniAppsHub(
             }
             Spacer(Modifier.width(4.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("🧩 Mini-Apps", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
-                Text("Nützliche Tools & kreative Helfer", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
+                Text("🤖 AI Werkzeuge", style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                Text("KI-gestützte Helfer & Tools", color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp)
             }
             IconButton(onClick = onResetOrder) {
                 Icon(Icons.AutoMirrored.Filled.Redo, "Reset", tint = Color.White.copy(alpha = 0.5f))
@@ -366,7 +366,6 @@ private fun MiniAppsHub(
                     selected = selectedCategory == null,
                     onClick = { selectedCategory = null },
                     label = { Text("Alle") },
-                    leadingIcon = if (selectedCategory == null) { { Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp)) } } else null,
                     modifier = Modifier.height(32.dp)
                 )
             }
@@ -375,7 +374,6 @@ private fun MiniAppsHub(
                     selected = selectedCategory == category,
                     onClick = { selectedCategory = category },
                     label = { Text(category.label) },
-                    leadingIcon = if (selectedCategory == category) { { Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp)) } } else null,
                     modifier = Modifier.height(32.dp)
                 )
             }
@@ -405,9 +403,9 @@ private fun MiniAppsHub(
                     val favoriteApps = filteredVisibleApps.filter { it.name in favorites }
                     if (favoriteApps.isNotEmpty()) {
                         item {
-                            Text("⭐ Favoriten", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
+                            Text("⭐ Favoriten", color = Color.White.copy(alpha = 0.7f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(vertical = 4.dp))
                         }
-                        favoriteApps.chunked(4).forEach { rowApps ->
+                        favoriteApps.chunked(3).forEach { rowApps ->
                             item {
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                     rowApps.forEach { app ->
@@ -419,24 +417,24 @@ private fun MiniAppsHub(
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
-                                    repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
+                                    repeat(3 - rowApps.size) { Spacer(Modifier.weight(1f)) }
                                 }
                             }
                         }
-                        item { Spacer(Modifier.height(8.dp)) }
+                        item { HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = Color.White.copy(alpha = 0.1f)) }
                     }
 
                     item {
                         Text(
                             if (selectedCategory != null) "${selectedCategory?.label}" else "Alle Apps",
                             color = Color.White.copy(alpha = 0.7f),
-                            fontSize = 13.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
                     }
                     val nonFavorites = filteredVisibleApps.filter { it.name !in favorites }
-                    nonFavorites.chunked(4).forEach { rowApps ->
+                    nonFavorites.chunked(3).forEach { rowApps ->
                         item {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                                 rowApps.forEach { app ->
@@ -448,7 +446,7 @@ private fun MiniAppsHub(
                                         modifier = Modifier.weight(1f)
                                     )
                                 }
-                                repeat(4 - rowApps.size) { Spacer(Modifier.weight(1f)) }
+                                repeat(3 - rowApps.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
                     }
@@ -480,7 +478,7 @@ private fun MiniAppIcon(
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(56.dp)
                 .shadow(4.dp, RoundedCornerShape(14.dp), spotColor = NeonPurple.copy(alpha = 0.12f))
                 .clip(RoundedCornerShape(14.dp))
                 .background(
@@ -506,18 +504,20 @@ private fun MiniAppIcon(
                 if (isFavorite) append(" ★")
             },
             color = Color.White.copy(alpha = if (app.status == MiniAppStatus.COMING_SOON) 0.4f else 0.8f),
-            fontSize = 9.sp,
+            fontSize = 11.sp,
             textAlign = TextAlign.Center,
             maxLines = 1
         )
-        Text(
-            text = app.status.label,
-            color = app.status.color,
-            fontSize = 7.sp,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            fontWeight = FontWeight.Bold
-        )
+        if (app.status != MiniAppStatus.READY) {
+            Text(
+                text = app.status.label,
+                color = app.status.color,
+                fontSize = 7.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
