@@ -50,6 +50,7 @@ fun ProfileScreen(
     val statusMessage by authViewModel.statusMessage.collectAsStateWithLifecycle()
 
     var nameInput by remember(profile?.displayName) { mutableStateOf(profile?.displayName.orEmpty()) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -401,6 +402,40 @@ fun ProfileScreen(
                                 "Abmelden",
                                 color = NeonPink.copy(alpha = 0.7f),
                                 fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        // Delete account
+                        TextButton(
+                            onClick = { showDeleteConfirm = true },
+                            enabled = !isLoading,
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text(
+                                "Konto löschen",
+                                color = Color(0xFFD63031).copy(alpha = 0.7f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        // Delete confirmation dialog
+                        if (showDeleteConfirm) {
+                            AlertDialog(
+                                onDismissRequest = { showDeleteConfirm = false },
+                                title = { Text("Konto wirklich löschen?") },
+                                text = { Text("Diese Aktion löscht dein Konto und setzt lokale App-Daten zurück. Das kann nicht rückgängig gemacht werden.") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showDeleteConfirm = false
+                                            authViewModel.deleteAccount(onDeleted = onRequireLogin)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD63031))
+                                    ) { Text("Endgültig löschen") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Abbrechen") }
+                                }
                             )
                         }
 
