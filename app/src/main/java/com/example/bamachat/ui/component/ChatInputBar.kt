@@ -76,6 +76,7 @@ fun ChatInputBar(
     themeColor: Color,
     surfaceColor: Color,
     isLoading: Boolean,
+    onStopGeneration: () -> Unit,
     designTokens: ChatDesignTokens,
     connectChatBottomBars: Boolean,
     glassEffectsEnabled: Boolean,
@@ -92,6 +93,7 @@ fun ChatInputBar(
 ) {
     val focusManager = LocalFocusManager.current
     var moreActionsExpanded by remember { mutableStateOf(false) }
+    var modeMenuExpanded by remember { mutableStateOf(false) }
 
     val inputShape = RoundedCornerShape(
         topStart = 20.dp,
@@ -187,6 +189,37 @@ fun ChatInputBar(
                     )
                     .padding(top = 8.dp, bottom = 8.dp, start = 8.dp, end = 8.dp)
             ) {
+                if (automationQuickActionsEnabled) {
+                    val quickActions = listOf(
+                        ChatViewModel.ExtensionQuickAction.AUTO to "Auto",
+                        ChatViewModel.ExtensionQuickAction.RESEARCH to "Research",
+                        ChatViewModel.ExtensionQuickAction.CODE_REVIEW to "Code",
+                        ChatViewModel.ExtensionQuickAction.PLAN to "Plan"
+                    )
+                    val selectedLabel = quickActions.firstOrNull { it.first == selectedExtensionQuickAction }?.second ?: "Auto"
+                    Box(modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+                        AssistChip(
+                            onClick = { modeMenuExpanded = true },
+                            label = { Text("Modus: $selectedLabel") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)) }
+                        )
+                        DropdownMenu(expanded = modeMenuExpanded, onDismissRequest = { modeMenuExpanded = false }) {
+                            quickActions.forEach { (action, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    leadingIcon = {
+                                        if (action == selectedExtensionQuickAction) Icon(Icons.Default.Check, null)
+                                    },
+                                    onClick = {
+                                        onSelectExtensionQuickAction(action)
+                                        modeMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Text input row
                 Row(
                     modifier = Modifier
@@ -284,7 +317,7 @@ fun ChatInputBar(
                         Text(
                             text = if (isLoading) "KI antwortet..." else "Bereit",
                             color = Color.White.copy(alpha = 0.4f),
-                            fontSize = 10.sp
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
 
@@ -292,11 +325,9 @@ fun ChatInputBar(
                     if (isLoading) {
                         // Stop button
                         FilledIconButton(
-                            onClick = {
-                                // The ChatScreen handles stop via the ChatViewModel
-                            },
+                            onClick = onStopGeneration,
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .shadow(
                                     elevation = 8.dp,
                                     shape = CircleShape,
@@ -323,7 +354,7 @@ fun ChatInputBar(
                             },
                             enabled = inputText.isNotBlank() || selectedImageUri != null,
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .shadow(
                                     elevation = 8.dp,
                                     shape = CircleShape,
@@ -401,7 +432,7 @@ private fun InputActionButton(
 ) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(tint.copy(alpha = containerAlpha))
             .clickable(onClick = onClick),
