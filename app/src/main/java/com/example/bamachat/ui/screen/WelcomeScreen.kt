@@ -113,7 +113,7 @@ fun WelcomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Spacer(Modifier.height(48.dp))
+            Spacer(Modifier.height(24.dp))
 
             // Logo icon
             Box(
@@ -164,7 +164,7 @@ fun WelcomeScreen(
                 letterSpacing = 4.sp
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
             // Description
             Text(
@@ -175,7 +175,7 @@ fun WelcomeScreen(
                 lineHeight = 24.sp
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
             // Feature highlights
             if (!isAuthenticated) {
