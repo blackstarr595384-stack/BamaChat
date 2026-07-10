@@ -154,7 +154,7 @@ fun WelcomeScreen(
             )
 
             Text(
-                "AI Workspace OS",
+                "KI-Arbeitsplatz",
                 fontSize = 16.sp,
                 color = NeonPurple.copy(alpha = 0.8f),
                 fontWeight = FontWeight.Medium,
@@ -165,7 +165,7 @@ fun WelcomeScreen(
 
             // Description
             Text(
-                "BamaChat ist dein KI-Arbeitsraum für Android.\nWindows/Desktop-Unterstützung ist vorbereitet,\ndamit dein Workspace später geräteübergreifend wächst.",
+                "Dein KI-Arbeitsplatz für Chat, Tools und Agents.\nLäuft auf Android — bald auch auf Windows/Desktop.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
@@ -180,9 +180,9 @@ fun WelcomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    FeaturePill("🤖 KI-Chat", NeonPurple)
-                    FeaturePill("🎨 Kreativ", NeonCyan)
-                    FeaturePill("🔒 Sicher", NeonPink)
+                    FeaturePill("💬 Chat & Agents", NeonPurple)
+                    FeaturePill("🧩 Tools & Workflows", NeonCyan)
+                    FeaturePill("☁️ Cloud & Collab", NeonPink)
                 }
                 Spacer(Modifier.height(32.dp))
             }

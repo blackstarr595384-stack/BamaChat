@@ -74,12 +74,12 @@ fun HomeHubScreen(
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
 
     val dashboardCards = listOf(
-        DashboardCard("Chat", "Schneller Einstieg in laufende Gespräche mit KI", Icons.AutoMirrored.Filled.Chat, NeonPurple, Color(0xFF7C4DFF), NeonPurple, onClick = onOpenChat),
-        DashboardCard("Agent Hub", "Persona, Regeln und KI-Assistenten verwalten", Icons.Default.Psychology, NeonBlue, Color(0xFF0066CC), NeonCyan, onClick = onOpenAgentHub),
+        DashboardCard("Chat", "Chat-Verlauf und laufende Gespräche", Icons.AutoMirrored.Filled.Chat, NeonPurple, Color(0xFF7C4DFF), NeonPurple, onClick = onOpenChat),
+        DashboardCard("Agent Hub", "Persona, Regeln, Assistenten", Icons.Default.Psychology, NeonBlue, Color(0xFF0066CC), NeonCyan, onClick = onOpenAgentHub),
         DashboardCard("Mini-Apps", "Tools, Browser, Spiele und Notizen", Icons.Default.Extension, NeonGreen, Color(0xFF008844), NeonGreen, onClick = onOpenMiniApps),
-        DashboardCard("AI Extensions", "Plugins installieren und Berechtigungen steuern", Icons.Default.Tune, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenExtensions),
-        DashboardCard("Wissensgraph", "Verbindungen zwischen Themen visualisieren", Icons.Default.AccountTree, Color(0xFF00BFA5), Color(0xFF00796B), Color(0xFF00BFA5), onClick = onOpenKnowledgeGraph),
-        DashboardCard("Real-Time Collab", "Gemeinsam in Echtzeit chatten und arbeiten", Icons.Default.Groups, NeonPink, Color(0xFFAA0055), NeonPink, onClick = onOpenRealtimeCollab)
+        DashboardCard("AI Extensions", "Plugins für erweiterte Funktionen", Icons.Default.Tune, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenExtensions),
+        DashboardCard("Wissensgraph", "Themen und Verbindungen visualisieren", Icons.Default.AccountTree, Color(0xFF00BFA5), Color(0xFF00796B), Color(0xFF00BFA5), onClick = onOpenKnowledgeGraph),
+        DashboardCard("Real-Time Collab", "Gemeinsam chatten in Echtzeit", Icons.Default.Groups, NeonPink, Color(0xFFAA0055), NeonPink, onClick = onOpenRealtimeCollab)
     )
 
     Box(
@@ -101,7 +101,7 @@ fun HomeHubScreen(
 
             Text("🤖 BamaHub", style = MaterialTheme.typography.headlineLarge, color = palette.heroTitle, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            Text("Willkommen zurück, bereit für die Zukunft", color = palette.textSecondary, fontSize = 14.sp)
+            Text("Wähle einen Bereich, um loszulegen", color = palette.textSecondary, fontSize = 14.sp)
 
             Spacer(Modifier.height(24.dp))
 
