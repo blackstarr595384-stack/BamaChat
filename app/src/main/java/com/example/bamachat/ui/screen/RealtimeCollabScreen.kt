@@ -63,6 +63,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -1039,14 +1040,16 @@ fun RealtimeCollabScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column(modifier = Modifier.padding(8.dp)) {
                             Text(
                                 text = "${if (msg.isAi) "🤖" else "👤"} ${msg.authorName}",
                                 color = Color.White,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(4.dp))
-                            Text(msg.text, color = Color.White)
+                            Spacer(Modifier.height(2.dp))
+                            Text(msg.text, color = Color.White, maxLines = 5, overflow = TextOverflow.Ellipsis)
                             if (status != null) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
