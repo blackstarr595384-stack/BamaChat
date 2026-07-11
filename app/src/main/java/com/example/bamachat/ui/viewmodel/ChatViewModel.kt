@@ -1103,7 +1103,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 .toAiChatRequestForValidation(
                     provider = AiProviderId.OPENROUTER,
                     model = selectedModel.value,
-                    maxTokens = 1024,
+                    maxTokens = 4096,
                     temperature = 0.7,
                     stream = true
                 )
@@ -1205,7 +1205,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 .toAiChatRequestForValidation(
                     provider = AiProviderId.OPENROUTER,
                     model = selectedModel.value,
-                    maxTokens = 1024,
+                    maxTokens = 4096,
                     temperature = 0.7,
                     stream = false
                 )

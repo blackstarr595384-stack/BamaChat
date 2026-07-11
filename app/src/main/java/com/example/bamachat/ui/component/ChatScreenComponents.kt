@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -175,10 +176,16 @@ fun ChatBubble(
                                 onClick = {
                                     val text = message.text
                                     if (text.isNotBlank()) {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
-                                        copied = true
-                                        android.widget.Toast.makeText(context, "Nachricht kopiert.", android.widget.Toast.LENGTH_SHORT).show()
+                                        Log.d("ChatBubble", "Copy text length: ${text.length}")
+                                        try {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
+                                            copied = true
+                                            android.widget.Toast.makeText(context, "Nachricht kopiert.", android.widget.Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            Log.e("ChatBubble", "Clipboard setPrimaryClip failed", e)
+                                            android.widget.Toast.makeText(context, "Kopieren fehlgeschlagen: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 },
                                 modifier = Modifier.size(48.dp)
