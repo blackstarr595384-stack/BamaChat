@@ -17,7 +17,7 @@ fun List<OpenRouterMessage>.toAiChatRequestForValidation(
     model: String,
     quickAction: QuickActionSuggestion = QuickActionSuggestion.AUTO,
     runtimeDecision: ExtensionRuntimeDecision? = null,
-    maxTokens: Int = 1024,
+    maxTokens: Int = 4096,
     temperature: Double = 0.7,
     stream: Boolean = false,
     builder: AiChatRequestBuilder = AiChatRequestBuilder()

@@ -456,7 +456,7 @@ class ApiManager(
             val request = OpenRouterChatRequest(
                 model = config.model,
                 messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
-                maxTokens = 1024,
+                maxTokens = 4096,
                 temperature = 0.7f,
                 stream = true
             )
@@ -544,7 +544,7 @@ class ApiManager(
                     OpenRouterMessage("system", systemPrompt),
                     OpenRouterMessage("user", userPrompt)
                 ),
-                maxTokens = 800,
+                maxTokens = 2048,
                 temperature = 0.65f,
                 stream = false
             )
@@ -589,7 +589,7 @@ class ApiManager(
             val request = buildOpenCodeZenRequest(
                 model = config.model,
                 messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
-                maxTokens = 1024,
+                maxTokens = 4096,
                 temperature = 0.7f
             )
             val response = service.message(request)
@@ -645,7 +645,7 @@ class ApiManager(
                     OpenRouterMessage("system", systemPrompt),
                     OpenRouterMessage("user", userPrompt)
                 ),
-                maxTokens = 800,
+                maxTokens = 2048,
                 temperature = 0.65f
             )
             val response = service.message(request)
@@ -698,7 +698,7 @@ class ApiManager(
             val request = buildOpenCodeResponsesRequest(
                 model = config.model,
                 messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
-                maxTokens = 1024,
+                maxTokens = 4096,
                 temperature = 0.7f
             )
             val response = service.response(request)
@@ -752,7 +752,7 @@ class ApiManager(
                     OpenRouterMessage("system", systemPrompt),
                     OpenRouterMessage("user", userPrompt)
                 ),
-                maxTokens = 800,
+                maxTokens = 2048,
                 temperature = 0.65f
             )
             val response = service.response(request)
@@ -986,7 +986,7 @@ class ApiManager(
                         )
                     )
                 ),
-                maxTokens = 1024,
+                maxTokens = 2048,
                 temperature = 0.4f,
                 stream = false
             )
