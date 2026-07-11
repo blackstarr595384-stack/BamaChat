@@ -402,7 +402,7 @@ private fun DesktopChatWorkspace(
                     contentColor = Color.White
                 )
             ) {
-                Text("Nutze Vorschlag")
+                Text("Vorschlag")
             }
         }
         OutlinedTextField(
@@ -486,13 +486,22 @@ private fun DesktopChatWorkspace(
                             )
                             onStatusChange("Antwort erhalten (${settings.provider.label()}).")
                         } catch (t: Throwable) {
-                            val message = t.message ?: "Unbekannter Fehler"
-                            localError = message
-                            chatHistory += AiChatMessage(
-                                role = AiChatRole.ASSISTANT,
-                                text = "Fehler: $message"
-                            )
-                            onStatusChange("Anfrage fehlgeschlagen.")
+                            val (userMessage, statusMessage) = when (t) {
+                                is DesktopMissingApiKeyException ->
+                                    "OpenRouter API-Key fehlt. Bitte in den Einstellungen hinterlegen." to
+                                    "API-Key fehlt – Einstellungen öffnen."
+                                is DesktopModelUnavailableException ->
+                                    "Das ausgewählte ${settings.provider.label()}-Modell ist aktuell nicht verfügbar. Bitte in den Einstellungen ein anderes Modell wählen oder Ollama nutzen." to
+                                    "Modell nicht verfügbar – Einstellungen prüfen."
+                                is DesktopProviderHttpException ->
+                                    "${settings.provider.label()} antwortet nicht. Bitte Einstellungen und Internetverbindung prüfen." to
+                                    "Verbindungsfehler – Einstellungen prüfen."
+                                else ->
+                                    "Fehler beim Senden der Anfrage. Bitte Einstellungen und Verbindung prüfen." to
+                                    "Anfrage fehlgeschlagen."
+                            }
+                            localError = userMessage
+                            onStatusChange(statusMessage)
                         } finally {
                             isSending = false
                         }
@@ -524,11 +533,18 @@ private fun DesktopChatWorkspace(
         )
 
         localError?.let { error ->
-            Text(
-                text = "Letzter Fehler: $error",
-                color = Color(0xFFFFB3B3),
-                style = MaterialTheme.typography.caption
-            )
+            Surface(
+                color = Color(0xFF4B2330),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = error,
+                    color = Color(0xFFFFD6D6),
+                    style = MaterialTheme.typography.body2,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
         }
 
         Surface(
@@ -832,13 +848,13 @@ private fun DesktopSettingsView(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Desktop Settings",
+                text = "Desktop-Einstellungen",
                 style = MaterialTheme.typography.h5,
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Provider, Modelle und aktivierte Extensions fuer den Desktop-Chat.",
+                text = "Anbieter, Modelle und aktivierte Erweiterungen für den Desktop-Chat.",
                 color = Color.White.copy(alpha = 0.78f)
             )
             Text(
@@ -853,7 +869,7 @@ private fun DesktopSettingsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Provider", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Anbieter", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         ProviderRadio(
                             selected = provider == DesktopProvider.OPENROUTER,
@@ -866,44 +882,60 @@ private fun DesktopSettingsView(
                             onSelect = { provider = DesktopProvider.OLLAMA }
                         )
                     }
+                    if (provider == DesktopProvider.OPENROUTER && openRouterModel.isBlank()) {
+                        Text(
+                            "Bitte ein gültiges OpenRouter-Modell eingeben (z. B. \"openai/gpt-4o-mini\").",
+                            color = Color(0xFFFFB3B3),
+                            style = MaterialTheme.typography.caption
+                        )
+                    }
+                    if (openRouterModel == OLD_STALE_OPENROUTER_MODEL) {
+                        Text(
+                            "Das Modell \"google/gemma-3-12b-it:free\" ist nicht mehr verfügbar. Bitte ein anderes Modell eingeben.",
+                            color = Color(0xFFFFB3B3),
+                            style = MaterialTheme.typography.caption
+                        )
+                    }
                     Divider(color = Color.White.copy(alpha = 0.2f))
                     OutlinedTextField(
                         value = openRouterApiKey,
                         onValueChange = { openRouterApiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("OpenRouter API-Key", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("OpenRouter API-Schlüssel", color = Color.White.copy(alpha = 0.8f)) },
+                        visualTransformation = PasswordVisualTransformation()
                     )
                     OutlinedTextField(
                         value = openRouterModel,
                         onValueChange = { openRouterModel = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("OpenRouter Modell", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("OpenRouter-Modell", color = Color.White.copy(alpha = 0.8f)) }
                     )
                     OutlinedTextField(
                         value = ollamaBaseUrl,
                         onValueChange = { ollamaBaseUrl = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Ollama Base URL", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Ollama-Basis-URL", color = Color.White.copy(alpha = 0.8f)) }
                     )
                     OutlinedTextField(
                         value = ollamaModel,
                         onValueChange = { ollamaModel = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Ollama Modell", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Ollama-Modell", color = Color.White.copy(alpha = 0.8f)) }
                     )
                     Divider(color = Color.White.copy(alpha = 0.2f))
-                    Text("Firebase Cloud", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Firebase-Cloud", color = Color.White, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = firebaseApiKey,
                         onValueChange = { firebaseApiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Firebase Web API-Key", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Firebase Web API-Schlüssel", color = Color.White.copy(alpha = 0.8f)) },
+                        visualTransformation = PasswordVisualTransformation()
                     )
                     OutlinedTextField(
                         value = firebaseProjectId,
                         onValueChange = { firebaseProjectId = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Firebase Project-ID", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Firebase-Projekt-ID", color = Color.White.copy(alpha = 0.8f)) }
                     )
                     OutlinedTextField(
                         value = googleOAuthClientId,
@@ -940,7 +972,7 @@ private fun DesktopSettingsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Extensions", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Erweiterungen", color = Color.White, fontWeight = FontWeight.SemiBold)
                     DesktopExtensionCatalog.all.forEach { preset ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1011,7 +1043,7 @@ private fun DesktopSettingsView(
                         enabledExtensionIds = DesktopUserSettings().enabledExtensionIds
                     }
                 ) {
-                    Text("Defaults")
+                    Text("Standard")
                 }
             }
 
@@ -1021,7 +1053,7 @@ private fun DesktopSettingsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Cloud Login", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Cloud-Anmeldung", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(
                         text = if (settings.authUid.isNotBlank()) {
                             "Angemeldet als ${settings.authEmail.ifBlank { settings.authUid }}"
@@ -1172,7 +1204,7 @@ private fun DesktopSettingsView(
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Hinweise", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "OpenRouter braucht einen gueltigen API-Key. Ollama braucht einen lokal laufenden Server. Fuer Cloud-Sync sind Firebase API-Key + Project-ID + Login noetig. Fuer Google-Login verwende bevorzugt einen OAuth Client vom Typ 'Desktop App'.",
+                        "OpenRouter braucht einen gültigen API-Schlüssel. Ollama braucht einen lokal laufenden Server. Für Cloud-Sync sind Firebase API-Schlüssel + Projekt-ID + Anmeldung nötig. Für Google-Login verwende bevorzugt einen OAuth-Client vom Typ 'Desktop-App'.",
                         color = Color.White.copy(alpha = 0.78f)
                     )
                 }

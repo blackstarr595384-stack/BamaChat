@@ -18,7 +18,7 @@ enum class DesktopProvider {
 }
 
 data class DesktopUserSettings(
-    val provider: DesktopProvider = DesktopProvider.OPENROUTER,
+    val provider: DesktopProvider = DesktopProvider.OLLAMA,
     val openRouterApiKey: String = "",
     val openRouterModel: String = DEFAULT_OPENROUTER_MODEL,
     val ollamaBaseUrl: String = DEFAULT_OLLAMA_BASE_URL,
@@ -50,7 +50,8 @@ data class DesktopUserSettings(
     )
 }
 
-const val DEFAULT_OPENROUTER_MODEL = "google/gemma-3-12b-it:free"
+const val DEFAULT_OPENROUTER_MODEL = ""
+const val OLD_STALE_OPENROUTER_MODEL = "google/gemma-3-12b-it:free"
 const val DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434/"
 const val DEFAULT_OLLAMA_MODEL = "llama3.2:latest"
 val DEFAULT_ENABLED_EXTENSION_IDS: Set<String> = setOf(

@@ -23,6 +23,16 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 
+sealed class DesktopChatException(message: String) : Exception(message)
+class DesktopMissingApiKeyException(provider: String) :
+    DesktopChatException("$provider-API-Key fehlt in den Desktop-Einstellungen.")
+class DesktopModelUnavailableException(provider: String, model: String) :
+    DesktopChatException("Modell $model von $provider nicht verfügbar.")
+class DesktopProviderHttpException(provider: String, statusCode: Int) :
+    DesktopChatException("$provider antwortet nicht (HTTP $statusCode).")
+class DesktopUnknownProviderException(cause: String) :
+    DesktopChatException(cause)
+
 class DesktopChatGateway(
     private val httpClient: HttpClient = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(20))
@@ -63,7 +73,7 @@ class DesktopChatGateway(
     ): AiChatResponse {
         val apiKey = settings.openRouterApiKey.trim()
         if (apiKey.isBlank()) {
-            throw IllegalStateException("OpenRouter API-Key fehlt in den Desktop-Einstellungen.")
+            throw DesktopMissingApiKeyException("OpenRouter")
         }
         val messages = buildProviderMessages(request)
 
@@ -163,37 +173,64 @@ class DesktopChatGateway(
 
     private fun parseOpenRouterResponse(body: String): String {
         val root = JsonParser.parseString(body).asJsonObject
-        val errorMessage = root.getObject("error")?.getString("message")
+        val errorObj = root.getObject("error")
+        val errorMessage = errorObj?.getString("message")
         if (!errorMessage.isNullOrBlank()) {
-            throw IllegalStateException("OpenRouter Fehler: $errorMessage")
+            if (isModelUnavailableError(errorMessage, 0)) {
+                throw DesktopModelUnavailableException("OpenRouter", "")
+            }
+            throw DesktopUnknownProviderException(errorMessage.take(120))
         }
         val choices = root.getArray("choices")
         val first = choices?.firstObjectOrNull()
-            ?: throw IllegalStateException("OpenRouter Antwort ohne choices.")
+            ?: throw DesktopUnknownProviderException("OpenRouter antwortete ohne choices.")
         val message = first.getObject("message")
-            ?: throw IllegalStateException("OpenRouter Antwort ohne message.")
+            ?: throw DesktopUnknownProviderException("OpenRouter antwortete ohne message.")
         return message.getString("content")
             ?.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("OpenRouter Antwort enthielt keinen Text.")
+            ?: throw DesktopUnknownProviderException("OpenRouter antwortete ohne Text.")
     }
 
     private fun parseOllamaResponse(body: String): String {
         val root = JsonParser.parseString(body).asJsonObject
         val errorMessage = root.getString("error")
         if (!errorMessage.isNullOrBlank()) {
-            throw IllegalStateException("Ollama Fehler: $errorMessage")
+            throw DesktopUnknownProviderException(errorMessage.take(120))
         }
         val message = root.getObject("message")
-            ?: throw IllegalStateException("Ollama Antwort ohne message.")
+            ?: throw DesktopUnknownProviderException("Ollama antwortete ohne message.")
         return message.getString("content")
             ?.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("Ollama Antwort enthielt keinen Text.")
+            ?: throw DesktopUnknownProviderException("Ollama antwortete ohne Text.")
     }
 
     private fun ensureSuccess(provider: String, statusCode: Int, body: String) {
         if (statusCode in 200..299) return
-        val snippet = body.take(280).replace('\n', ' ')
-        throw IllegalStateException("$provider Request fehlgeschlagen ($statusCode): $snippet")
+        val cleanError = runCatching {
+            val root = JsonParser.parseString(body).asJsonObject
+            root.getObject("error")?.getString("message")?.take(120)
+        }.getOrNull()
+        if (!cleanError.isNullOrBlank()) {
+            if (isModelUnavailableError(cleanError, statusCode)) {
+                throw DesktopModelUnavailableException(provider, "")
+            }
+            throw DesktopUnknownProviderException(cleanError)
+        }
+        if (isModelUnavailableError("", statusCode)) {
+            throw DesktopModelUnavailableException(provider, "")
+        }
+        throw DesktopProviderHttpException(provider, statusCode)
+    }
+
+    private fun isModelUnavailableError(message: String, statusCode: Int): Boolean {
+        val lower = message.lowercase()
+        return statusCode == 402 || statusCode == 404 ||
+            "unavailable" in lower ||
+            "not found" in lower ||
+            "free" in lower ||
+            "quota" in lower ||
+            "exceeded" in lower ||
+            "paid" in lower
     }
 
     private fun normalizeBaseUrl(raw: String): String {
