@@ -1,5 +1,8 @@
 package com.example.bamachat.ui.component
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.*
@@ -22,9 +25,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -166,14 +167,19 @@ fun ChatBubble(
                             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val clipboardManager = LocalClipboardManager.current
+                            val context = LocalContext.current
                             var copied by remember { mutableStateOf(false) }
 
                             // Copy Button
                             IconButton(
                                 onClick = {
-                                    clipboardManager.setText(AnnotatedString(message.text))
-                                    copied = true
+                                    val text = message.text
+                                    if (text.isNotBlank()) {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
+                                        copied = true
+                                        android.widget.Toast.makeText(context, "Nachricht kopiert.", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                                 modifier = Modifier.size(48.dp)
                             ) {
