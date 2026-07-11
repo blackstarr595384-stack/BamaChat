@@ -144,7 +144,7 @@ fun HomeHubScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
-            Spacer(Modifier.height(80.dp))
+            Spacer(Modifier.height(104.dp))
         }
     }
 }
