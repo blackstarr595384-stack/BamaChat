@@ -41,6 +41,7 @@ compose.desktop {
                 perUserInstall = true
                 menuGroup = "BamaChat"
                 upgradeUuid = "9f45b82e-98a3-4b03-b95f-3ec8b1dbe8ff"
+                iconFile.set(project.file("src/main/resources/bamachat.ico"))
             }
         }
     }
