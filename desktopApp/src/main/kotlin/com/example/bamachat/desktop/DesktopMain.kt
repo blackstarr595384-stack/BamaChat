@@ -53,9 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -480,7 +480,6 @@ private fun DesktopChatWorkspace(
                             )
                         }
                     } else {
-                        val clipboardManager = LocalClipboardManager.current
                         chatHistory.forEach { item ->
                             val cardColor = if (item.role == AiChatRole.USER) {
                                 Color(0xFF2C4C7D)
@@ -506,8 +505,12 @@ private fun DesktopChatWorkspace(
                                         )
                                         IconButton(
                                             onClick = {
-                                                clipboardManager.setText(AnnotatedString(item.text))
-                                                onStatusChange("In Zwischenablage kopiert.")
+                                                runCatching {
+                                                    Toolkit.getDefaultToolkit()
+                                                        .systemClipboard
+                                                        .setContents(StringSelection(item.text), null)
+                                                    onStatusChange("Nachricht kopiert.")
+                                                }
                                             },
                                             modifier = Modifier.size(24.dp)
                                         ) {
