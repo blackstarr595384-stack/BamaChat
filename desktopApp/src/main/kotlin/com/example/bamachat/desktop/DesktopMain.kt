@@ -86,7 +86,7 @@ private val DESKTOP_TEMPLATE_TITLES = listOf(
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "BamaChat Desktop"
+        title = "BamaChat für Windows"
     ) {
         MaterialTheme {
             DesktopRoot()
@@ -230,7 +230,7 @@ private fun LeftSidebar(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Desktop client",
+                text = "Desktop-Client",
                 color = Color.White.copy(alpha = 0.75f),
                 style = MaterialTheme.typography.body2
             )
@@ -258,14 +258,14 @@ private fun LeftSidebar(
                 onSelect(DesktopSection.CHAT)
             }
             SidebarButton(
-                label = "Workspace",
+                label = "Arbeitsbereiche",
                 icon = Icons.Default.Notes,
                 isActive = activeSection == DesktopSection.WORKSPACE
             ) {
                 onSelect(DesktopSection.WORKSPACE)
             }
             SidebarButton(
-                label = "Settings",
+                label = "Einstellungen",
                 icon = Icons.Default.Settings,
                 isActive = activeSection == DesktopSection.SETTINGS
             ) {
@@ -342,13 +342,13 @@ private fun DesktopChatWorkspace(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Chat Workbench",
+            text = "Chat-Arbeitsbereich",
             style = MaterialTheme.typography.h5,
             color = Color.White,
             fontWeight = FontWeight.SemiBold
         )
         Text(
-            text = "Produktiver Desktop-Chat mit OpenRouter/Ollama und Shared-Core Quick Actions.",
+            text = "Produktiver Desktop-Chat mit OpenRouter/Ollama und gemeinsamen Schnellaktionen.",
             color = Color.White.copy(alpha = 0.78f),
             style = MaterialTheme.typography.body2
         )
@@ -370,14 +370,14 @@ private fun DesktopChatWorkspace(
                     )
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = onRequestOpenSettings) {
-                        Text("Settings")
+                        Text("Einstellungen")
                     }
                 }
             }
         }
 
         Text(
-            text = "Quick Action",
+            text = "Schnellaktionen",
             color = Color.White.copy(alpha = 0.86f),
             style = MaterialTheme.typography.body2,
             fontWeight = FontWeight.SemiBold
@@ -427,7 +427,7 @@ private fun DesktopChatWorkspace(
                     }
                 }
             ) {
-                Text("Draft speichern")
+                Text("Entwurf speichern")
             }
             Button(
                 enabled = chatHistory.isNotEmpty() && !isSending,
@@ -508,7 +508,7 @@ private fun DesktopChatWorkspace(
         }
 
         Text(
-            text = "Aktive Extensions: ${
+            text = "Aktive Erweiterungen: ${
                 DesktopExtensionCatalog.all
                     .filter { settings.enabledExtensionIds.contains(it.id) }
                     .joinToString { it.name }
@@ -784,8 +784,8 @@ private fun DesktopNotesWorkspace(
 
 private fun QuickActionSuggestion.label(): String = when (this) {
     QuickActionSuggestion.AUTO -> "Auto"
-    QuickActionSuggestion.RESEARCH -> "Research"
-    QuickActionSuggestion.CODE_REVIEW -> "Code Review"
+    QuickActionSuggestion.RESEARCH -> "Recherche"
+    QuickActionSuggestion.CODE_REVIEW -> "Code prüfen"
     QuickActionSuggestion.PLAN -> "Plan"
 }
 
