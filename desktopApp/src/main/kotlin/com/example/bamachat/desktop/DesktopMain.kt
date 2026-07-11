@@ -249,6 +249,11 @@ private fun LeftSidebar(
                 color = Color.White.copy(alpha = 0.66f),
                 style = MaterialTheme.typography.caption
             )
+            Text(
+                text = "Entwickler: M.D Baldé",
+                color = Color.White.copy(alpha = 0.60f),
+                style = MaterialTheme.typography.caption
+            )
             Spacer(Modifier.height(10.dp))
             SidebarButton(
                 label = "Chat",

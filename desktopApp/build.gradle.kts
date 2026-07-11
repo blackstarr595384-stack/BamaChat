@@ -25,7 +25,8 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Exe)
             packageName = "BamaChatDesktop"
-            packageVersion = "0.1.4"
+            packageVersion = "1.0.1"
+            vendor = "M.D Baldé"
             modules(
                 "java.net.http",
                 "jdk.httpserver",
