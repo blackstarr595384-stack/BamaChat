@@ -51,11 +51,11 @@ fun BamaChatBottomNav(
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
 
     val navItems = listOf(
-        BottomNavItem("Home", Icons.Default.Home, "home_hub"),
+        BottomNavItem("Hub", Icons.Default.Home, "home_hub"),
         BottomNavItem("Chat", Icons.AutoMirrored.Filled.Chat, "chat"),
-        BottomNavItem("Apps", Icons.Default.Apps, "mini_apps"),
+        BottomNavItem("Tools", Icons.Default.Apps, "mini_apps"),
         BottomNavItem("Profil", Icons.Default.AccountCircle, "profile"),
-        BottomNavItem("Settings", Icons.Default.Settings, "settings")
+        BottomNavItem("Einst.", Icons.Default.Settings, "settings")
     )
 
     val shape = RoundedCornerShape(28.dp)

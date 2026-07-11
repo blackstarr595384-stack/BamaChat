@@ -278,7 +278,7 @@ fun WelcomeScreen(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                "Version 1.0.0",
+                "Version 1.0.1",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White.copy(alpha = 0.2f)
             )

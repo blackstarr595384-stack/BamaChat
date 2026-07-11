@@ -173,7 +173,7 @@ fun AuthScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onBack) {
-                    Text("Zurueck", color = Color.White.copy(alpha = 0.92f))
+                    Text("Zurück", color = Color.White.copy(alpha = 0.92f))
                 }
                 TextButton(onClick = onOpenHelp) {
                     Text("Hilfe", color = Color(0xFFD7E4FF))

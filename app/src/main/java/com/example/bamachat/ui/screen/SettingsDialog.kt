@@ -744,7 +744,7 @@ fun SettingsDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        if (voicePreviewStatus.isNotBlank()) voicePreviewStatus else "Bereit fuer einen Testlauf.",
+                                        if (voicePreviewStatus.isNotBlank()) voicePreviewStatus else "Bereit für einen Testlauf.",
                                         fontSize = 10.sp,
                                         color = Color.White.copy(alpha = 0.6f),
                                         modifier = Modifier.weight(1f)
@@ -779,8 +779,8 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Workspaces & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
-                    Text("Aktiver Projekt-Workspace", fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                SettingsSection("Arbeitsbereiche & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
+                    Text("Aktiver Arbeitsbereich", fontWeight = FontWeight.Medium, fontSize = 15.sp)
                     projectWorkspaces.forEach { workspace ->
                         val isActive = workspace.id == activeWorkspaceId
                         val isRenaming = renamingWorkspaceId == workspace.id
@@ -884,7 +884,7 @@ fun SettingsDialog(
                     OutlinedTextField(
                         value = newWorkspaceName,
                         onValueChange = { newWorkspaceName = it },
-                        label = { Text("Neuer Workspace", fontSize = 14.sp) },
+                        label = { Text("Neuer Arbeitsbereich", fontSize = 14.sp) },
                         placeholder = { Text("z.B. Kundenprojekt Alpha", fontSize = 14.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -909,10 +909,10 @@ fun SettingsDialog(
                             },
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) {
-                            Text("Workspace erstellen", fontSize = 14.sp)
+                            Text("Arbeitsbereich erstellen", fontSize = 14.sp)
                         }
                     }
-                    SettingRow("Nur aktive Workspace-Chats", "Chatliste auf aktiven Workspace filtern") {
+                    SettingRow("Nur aktive Bereichs-Chats", "Chatliste auf aktiven Bereich filtern") {
                         Switch(
                             checked = workspaceChatFilterEnabled,
                             onCheckedChange = { viewModel.setWorkspaceChatFilterEnabled(it) }
@@ -1652,11 +1652,11 @@ fun SettingsDialog(
     workspacePendingDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { workspacePendingDelete = null },
-            title = { Text("Workspace löschen?") },
+            title = { Text("Arbeitsbereich löschen?") },
             text = {
                 Text(
-                    "Workspace \"${target.name}\" wirklich löschen? Die zugehörigen Chats bleiben erhalten, " +
-                        "werden aber bei aktivem Workspace-Filter ausgeblendet.",
+                    "Arbeitsbereich \"${target.name}\" wirklich löschen? Die zugehörigen Chats bleiben erhalten, " +
+                        "werden aber bei aktivem Bereichs-Filter ausgeblendet.",
                     fontSize = 14.sp
                 )
             },

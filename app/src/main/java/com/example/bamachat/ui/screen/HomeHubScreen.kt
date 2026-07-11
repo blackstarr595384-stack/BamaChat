@@ -133,7 +133,7 @@ fun HomeHubScreen(
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 QuickActionChip(Icons.AutoMirrored.Filled.HelpCenter, "Hilfe", onOpenHelp, NeonCyan, modifier = Modifier.weight(1f))
-                QuickActionChip(Icons.Default.Settings, "Settings", onOpenSettings, NeonPurple, modifier = Modifier.weight(1f))
+                QuickActionChip(Icons.Default.Settings, "Einstellungen", onOpenSettings, NeonPurple, modifier = Modifier.weight(1f))
                 QuickActionChip(Icons.Default.Palette, "Design", onOpenDesignSettings, NeonPink, modifier = Modifier.weight(1f))
             }
 

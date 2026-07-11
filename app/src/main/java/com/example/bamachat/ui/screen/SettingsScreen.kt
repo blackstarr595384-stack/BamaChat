@@ -216,12 +216,12 @@ fun SettingsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    "BamaChat v1.0.0",
+                    "BamaChat v1.0.1",
                     color = Color.White.copy(alpha = 0.3f),
                     fontSize = 12.sp
                 )
                 Text(
-                    "Futuristic AI Edition",
+                    "KI-Edition",
                     color = Color.White.copy(alpha = 0.2f),
                     fontSize = 11.sp
                 )
