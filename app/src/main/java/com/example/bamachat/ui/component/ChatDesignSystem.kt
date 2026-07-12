@@ -110,10 +110,12 @@ fun designTokensFor(preset: ChatDesignPreset): ChatDesignTokens = when (preset) 
 }
 
 @Composable
-fun EmptyChatState(themeColor: Color, persona: ChatViewModel.Persona) {
+fun EmptyChatState(themeColor: Color, persona: ChatViewModel.Persona, workspaceName: String = "") {
+    val hasWorkspace = workspaceName.isNotBlank()
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 32.dp)
             .padding(top = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -134,17 +136,33 @@ fun EmptyChatState(themeColor: Color, persona: ChatViewModel.Persona) {
             Text(persona.emoji, fontSize = 48.sp)
         }
         Spacer(Modifier.height(24.dp))
-        Text(
-            "Hallo! Ich bin ${persona.displayName}",
-            color = Color.White,
-            fontSize = 20.sp
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Worüber möchtest du sprechen?",
-            color = Color.White.copy(alpha = 0.5f),
-            fontSize = 14.sp
-        )
+        if (hasWorkspace) {
+            Text(
+                "Noch keine Unterhaltung",
+                color = Color.White,
+                fontSize = 20.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Starte den ersten Chat in diesem Arbeitsbereich.",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        } else {
+            Text(
+                "Hallo! Ich bin ${persona.displayName}",
+                color = Color.White,
+                fontSize = 20.sp
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Worüber möchtest du sprechen?",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 14.sp
+            )
+        }
     }
 }
 
