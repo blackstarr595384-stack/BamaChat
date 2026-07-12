@@ -31,6 +31,7 @@ import com.example.bamachat.ui.viewmodel.CollabViewModel
 import com.example.bamachat.ui.viewmodel.ExtensionManagerViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.LegalPolicy
+import kotlinx.coroutines.launch
 
 private object Routes {
     const val ONBOARDING = "onboarding"
@@ -98,6 +99,7 @@ fun BamaChatApp() {
     val normalizedRoute = normalizeRoute(currentRoute)
     val context = LocalContext.current
     val activity = context as? Activity
+    val scope = rememberCoroutineScope()
     val startDestination = remember(onboardingCompleted, legalAcknowledgedVersion) {
         when {
             !onboardingCompleted -> Routes.ONBOARDING
@@ -321,8 +323,19 @@ fun BamaChatApp() {
                     providerName = aiProvider,
                     designPreset = designPreset,
                     activeWorkspaceName = activeWorkspaceName,
-                    onOpenMenu = { navController.navigate(Routes.CHAT) },
-                    onOpenChat = { navController.navigate(Routes.CHAT) },
+                    onOpenMenu = {
+                        chatViewModel.setChatWorkspaceContext(null)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(false)
+                        navController.navigate(Routes.CHAT)
+                    },
+                    onOpenChat = {
+                        chatViewModel.setChatWorkspaceContext(null)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(false)
+                        scope.launch {
+                            chatViewModel.openOrCreateNormalConversation()
+                            navController.navigate(Routes.CHAT)
+                        }
+                    },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenProviderSettings = { navController.navigate(Routes.settingsRoute("ai")) },
                     onOpenDesignSettings = { navController.navigate(Routes.settingsRoute("chat")) },
@@ -430,8 +443,13 @@ fun BamaChatApp() {
                     onBack = { navController.popBackStack() },
                     onOpenChat = { workspaceId ->
                         settingsViewModel.setActiveWorkspace(workspaceId)
-                        navController.navigate(Routes.CHAT) {
-                            popUpTo(Routes.HOME_HUB)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(true)
+                        chatViewModel.setChatWorkspaceContext(workspaceId)
+                        scope.launch {
+                            chatViewModel.openOrCreateWorkspaceConversation(workspaceId)
+                            navController.navigate(Routes.CHAT) {
+                                popUpTo(Routes.HOME_HUB)
+                            }
                         }
                     }
                 )
@@ -446,6 +464,8 @@ fun BamaChatApp() {
                 ChatSearchScreen(
                     onBack = { navController.popBackStack() },
                     onOpenConversation = { conversationId ->
+                        chatViewModel.setChatWorkspaceContext(null)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(false)
                         navController.navigate(Routes.CHAT) {
                             popUpTo(Routes.HOME_HUB)
                         }

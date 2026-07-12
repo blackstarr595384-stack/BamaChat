@@ -83,12 +83,59 @@ class ConversationService(
         }
     }
 
+    fun findLatestConversationForWorkspace(
+        conversations: List<ConversationEntity>,
+        workspaceName: String
+    ): ConversationEntity? {
+        val target = WorkspaceNaming.normalizeWorkspaceName(workspaceName)
+        return conversations
+            .filter { conv ->
+                resolveConversationWorkspaceName(conv.id, conv.title)
+                    .equals(target, ignoreCase = true)
+            }
+            .maxByOrNull { it.updatedAt }
+    }
+
+    fun isBoundToWorkspace(id: String, title: String): Boolean {
+        val persisted = prefs.getString(conversationWorkspaceKey(id), "")?.trim().orEmpty()
+        if (persisted.isNotBlank()) return true
+        return WorkspaceNaming.workspaceTagFromTitle(title) != null
+    }
+
+    suspend fun createNormalConversation(personaName: String): ConversationEntity {
+        val id = UUID.randomUUID().toString()
+        val conv = repo.createConversation(id, "Neuer Chat", personaName)
+        return conv
+    }
+
+    fun findLatestConversationWithoutWorkspace(
+        conversations: List<ConversationEntity>
+    ): ConversationEntity? {
+        return conversations
+            .filter { conv -> !isBoundToWorkspace(conv.id, conv.title) }
+            .maxByOrNull { it.updatedAt }
+    }
+
     fun syncWorkspaceBindings(conversations: List<ConversationEntity>) {
         conversations.forEach { resolveConversationWorkspaceName(it.id, it.title) }
     }
 
     fun activeWorkspaceName(): String =
         WorkspaceNaming.normalizeWorkspaceName(prefs.getString("active_workspace_name", "Standard").orEmpty())
+
+    fun findWorkspaceNameById(workspaceId: String): String? {
+        val raw = prefs.getString("project_workspaces_json", null) ?: return null
+        return try {
+            val arr = org.json.JSONArray(raw)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                if (obj.getString("id") == workspaceId) return obj.getString("name")
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private companion object {
         private const val CURRENT_CONVERSATION_KEY = "current_conversation_id"

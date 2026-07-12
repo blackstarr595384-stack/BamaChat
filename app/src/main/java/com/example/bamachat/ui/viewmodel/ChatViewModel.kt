@@ -57,10 +57,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.*
 import java.util.concurrent.locks.ReentrantReadWriteLock
@@ -346,6 +350,17 @@ class ChatViewModel @Inject constructor(
     private val _conversations = MutableStateFlow<List<com.example.bamachat.data.local.ConversationEntity>>(emptyList())
     val conversations: StateFlow<List<com.example.bamachat.data.local.ConversationEntity>> = _conversations
 
+    private val _chatWorkspaceId = MutableStateFlow<String?>(null)
+    val chatWorkspaceId: StateFlow<String?> = _chatWorkspaceId
+    val chatWorkspaceName: StateFlow<String> = _chatWorkspaceId.map { chatWsId ->
+        if (chatWsId.isNullOrBlank()) ""
+        else conversationService.findWorkspaceNameById(chatWsId).orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun setChatWorkspaceContext(workspaceId: String?) {
+        _chatWorkspaceId.value = workspaceId
+    }
+
     private val _currentConversationId = MutableStateFlow<String?>(null)
     val currentConversationId: StateFlow<String?> = _currentConversationId
 
@@ -469,8 +484,42 @@ class ChatViewModel @Inject constructor(
     fun newConversation() {
         viewModelScope.launch {
             val personaName = personaViewModel.selectedPersona.value.name
-            val wsName = conversationService.activeWorkspaceName()
+            val chatWsId = _chatWorkspaceId.value
+            if (chatWsId != null) {
+                val wsName = conversationService.activeWorkspaceName()
+                val conv = conversationService.createConversation(personaName, wsName)
+                switchConversation(conv.id)
+            } else {
+                val conv = conversationService.createNormalConversation(personaName)
+                switchConversation(conv.id)
+            }
+        }
+    }
+
+    suspend fun openOrCreateWorkspaceConversation(workspaceId: String) {
+        val wsName = conversationService.findWorkspaceNameById(workspaceId)
+            ?: conversationService.activeWorkspaceName()
+        val existing = conversationService.findLatestConversationForWorkspace(
+            _conversations.value, wsName
+        )
+        if (existing != null) {
+            switchConversation(existing.id)
+        } else {
+            val personaName = personaViewModel.selectedPersona.value.name
             val conv = conversationService.createConversation(personaName, wsName)
+            switchConversation(conv.id)
+        }
+    }
+
+    suspend fun openOrCreateNormalConversation() {
+        val existing = conversationService.findLatestConversationWithoutWorkspace(
+            _conversations.value
+        )
+        if (existing != null) {
+            switchConversation(existing.id)
+        } else {
+            val personaName = personaViewModel.selectedPersona.value.name
+            val conv = conversationService.createNormalConversation(personaName)
             switchConversation(conv.id)
         }
     }

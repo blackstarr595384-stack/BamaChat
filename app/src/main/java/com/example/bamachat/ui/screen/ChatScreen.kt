@@ -173,6 +173,8 @@ fun ChatScreen(
     val automationQuickActionsEnabled by settingsViewModel.automationQuickActionsEnabled.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val workspaceChatFilterEnabled by settingsViewModel.workspaceChatFilterEnabled.collectAsStateWithLifecycle()
+    val chatWorkspaceId by viewModel.chatWorkspaceId.collectAsStateWithLifecycle()
+    val chatWorkspaceName by viewModel.chatWorkspaceName.collectAsStateWithLifecycle()
     val autoSendVoice by settingsViewModel.autoSendVoice.collectAsStateWithLifecycle()
     val showTimestamps by settingsViewModel.showTimestamps.collectAsStateWithLifecycle()
     val liveSourcesVisible by settingsViewModel.showLiveSources.collectAsStateWithLifecycle()
@@ -851,9 +853,9 @@ fun ChatScreen(
         )
     }
 
-    val filteredConversations = remember(conversations, activeWorkspaceName, workspaceChatFilterEnabled) {
+    val filteredConversations = remember(conversations, chatWorkspaceName, workspaceChatFilterEnabled) {
         viewModel.getConversationsForWorkspace(
-            activeWorkspaceName = activeWorkspaceName,
+            activeWorkspaceName = chatWorkspaceName,
             onlyActiveWorkspace = workspaceChatFilterEnabled
         )
     }
@@ -1052,7 +1054,15 @@ fun ChatScreen(
             onLoadOlderMessages = { viewModel.loadOlderMessages() },
             uiDesignPreset = uiDesignPreset,
             compactChatHeader = compactChatHeader,
-            activeWorkspaceName = activeWorkspaceName,
+            chatWorkspaceId = chatWorkspaceId,
+            chatWorkspaceName = chatWorkspaceName,
+            onLeaveWorkspace = {
+                viewModel.setChatWorkspaceContext(null)
+                settingsViewModel.setWorkspaceChatFilterEnabled(false)
+                scope.launch {
+                    viewModel.openOrCreateNormalConversation()
+                }
+            },
             connectChatBottomBars = connectChatBottomBars,
             glassEffectsEnabled = glassEffectsEnabled,
             uiCornerRoundnessScale = uiCornerRoundnessScale,
@@ -1162,7 +1172,9 @@ private fun ChatContent(
     onLoadOlderMessages: () -> Unit,
     uiDesignPreset: String,
     compactChatHeader: Boolean,
-    activeWorkspaceName: String,
+    chatWorkspaceId: String?,
+    chatWorkspaceName: String,
+    onLeaveWorkspace: () -> Unit,
     connectChatBottomBars: Boolean,
     glassEffectsEnabled: Boolean,
     uiCornerRoundnessScale: Float,
@@ -1287,14 +1299,25 @@ private fun ChatContent(
                         ) {
                             CenterAlignedTopAppBar(
                                 title = {
-                                    Text(
-                                        text = "BamaChat · ${selectedPersona.displayName}",
-                                        style = headerTitleStyle,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    val inWorkspace = chatWorkspaceName.isNotBlank()
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = if (inWorkspace) chatWorkspaceName else "BamaChat \u00b7 ${selectedPersona.displayName}",
+                                            style = headerTitleStyle,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (inWorkspace) {
+                                            Text(
+                                                text = "Arbeitsbereich",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.White.copy(alpha = 0.7f),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                 },
                                 navigationIcon = {
                                     IconButton(onClick = onMenuClick) {
@@ -1302,6 +1325,11 @@ private fun ChatContent(
                                     }
                                 },
                                 actions = {
+                                    if (chatWorkspaceId != null) {
+                                        IconButton(onClick = onLeaveWorkspace) {
+                                            Icon(Icons.Default.Close, "Arbeitsbereich verlassen", tint = Color.White)
+                                        }
+                                    }
                                     IconButton(onClick = onPersonaClick) {
                                         Icon(Icons.Default.Psychology, "Persona", tint = Color.White)
                                     }
@@ -1488,39 +1516,6 @@ private fun ChatContent(
                                         }
                                     }
                                 }
-                                // P1-1: Workspace chip — read-only here. Tap opens settings → workspaces.
-                                if (activeWorkspaceName.isNotBlank()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            Color.White.copy(alpha = 0.22f)
-                                        ),
-                                        modifier = Modifier.clickable { onOpenWorkspaceClick() }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Folder,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = activeWorkspaceName,
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.widthIn(max = 120.dp)
-                                            )
-                                        }
-                                    }
-                                }
                                 Surface(
                                     shape = RoundedCornerShape(designTokens.chipCornerRadius),
                                     color = personaMood.cardSurface.copy(alpha = designTokens.bubbleSurfaceAlpha),
@@ -1569,7 +1564,7 @@ private fun ChatContent(
                     ) { showEmpty ->
                         if (showEmpty) {
                             Box(modifier = Modifier.fillMaxSize().graphicsLayer(alpha = messageContentAlpha)) {
-                                EmptyChatState(themeColor, selectedPersona)
+                                EmptyChatState(themeColor, selectedPersona, chatWorkspaceName)
                             }
                         } else {
                             LazyColumn(
