@@ -50,6 +50,7 @@ private data class SettingsEntryItem(
 @Composable
 fun SettingsScreen(
     settingsViewModel: SettingsViewModel,
+    cloudChatSyncUid: String? = null,
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
     initialSection: String? = null,
@@ -70,6 +71,7 @@ fun SettingsScreen(
     if (expandedSection != null) {
         SettingsDialog(
             viewModel = settingsViewModel,
+            cloudChatSyncUid = cloudChatSyncUid,
             onDismiss = { expandedSection = null },
             initialSection = expandedSection,
             onOpenPrivacyPolicy = onOpenPrivacyPolicy

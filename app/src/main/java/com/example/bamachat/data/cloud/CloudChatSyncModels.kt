@@ -3,6 +3,7 @@ package com.example.bamachat.data.cloud
 import com.example.bamachat.data.local.ChatMessageEntity
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.data.model.ChatMessage
+import com.example.bamachat.data.model.ConversationPersonaMetadata
 
 private const val ANDROID_SOURCE = "android"
 private const val MAX_PREVIEW_LENGTH = 120
@@ -10,7 +11,7 @@ private const val MAX_PREVIEW_LENGTH = 120
 data class CloudConversation(
     val id: String = "",
     val title: String = "",
-    val personaName: String = "ASSISTANT",
+    val personaName: String = ConversationPersonaMetadata.DEFAULT_PERSONA_DISPLAY_NAME,
     val workspaceName: String? = null,
     val createdAt: Long = 0L,
     val updatedAt: Long = 0L,
@@ -26,7 +27,7 @@ data class CloudMessage(
     val text: String = "",
     val isUser: Boolean = true,
     val timestamp: Long = 0L,
-    val role: String = "user",
+    val role: String = "USER",
     val imageUrl: String? = null,
     val lastModifiedBy: String = ANDROID_SOURCE,
     val deleted: Boolean = false,
@@ -55,7 +56,7 @@ fun ChatMessageEntity.toCloudMessage(): CloudMessage = CloudMessage(
     text = text,
     isUser = isUser,
     timestamp = timestamp,
-    role = if (isUser) "user" else "assistant",
+    role = if (isUser) "USER" else "ASSISTANT",
     imageUrl = imageUrl,
     lastModifiedBy = ANDROID_SOURCE,
     deleted = false,

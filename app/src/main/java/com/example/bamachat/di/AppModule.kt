@@ -3,6 +3,8 @@ package com.example.bamachat.di
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.bamachat.data.cloud.ChatCloudSyncGateway
+import com.example.bamachat.data.cloud.ChatSyncPolicy
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatDao
 import com.example.bamachat.data.repository.ChatRepository
@@ -47,6 +49,18 @@ object AppModule {
     @Singleton
     fun provideChatRepository(dao: ChatDao): ChatRepository {
         return ChatRepository(dao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatCloudSyncGateway(): ChatCloudSyncGateway {
+        return ChatCloudSyncGateway()
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatSyncPolicy(prefs: SharedPreferences): ChatSyncPolicy {
+        return ChatSyncPolicy(prefs)
     }
 
     @Provides

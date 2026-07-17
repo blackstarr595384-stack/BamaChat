@@ -8,7 +8,9 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator
 import com.example.bamachat.data.model.ChatMessage
+import com.example.bamachat.data.model.ConversationPersonaMetadata
 import com.example.bamachat.data.model.ChatSource
 import com.example.bamachat.data.model.ModelInfo
 import com.example.bamachat.data.repository.ChatRepository
@@ -84,6 +86,7 @@ enum class ToolCallStatus { RUNNING, DONE, ERROR }
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     application: Application,
+    private val chatSyncCoordinator: AndroidChatSyncCoordinator,
     val mcpServerManager: McpServerManager,
     val mcpWorkflowManager: McpWorkflowManager
 ) : AndroidViewModel(application) {
@@ -446,7 +449,7 @@ class ChatViewModel @Inject constructor(
     }
 
     enum class Persona(val displayName: String, val emoji: String, val systemPrompt: String) {
-        ASSISTANT("Assistent", "🤖", "Du bist BamaChat, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
+        ASSISTANT(ConversationPersonaMetadata.DEFAULT_PERSONA_DISPLAY_NAME, "🤖", "Du bist BamaChat, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
         DEVELOPER("Entwickler", "💻", "Du bist ein erfahrener Software-Entwickler. Hilf mit Code-Beispielen und technischen Erklärungen. Nutze Markdown-Codeblöcke. Antworte auf Deutsch."),
         TEACHER("Lehrer", "🎓", "Du bist ein geduldiger Lehrer. Erkläre Dinge einfach und verständlich, mit Beispielen. Antworte auf Deutsch."),
         TRANSLATOR("Übersetzer", "🌍", "Du bist ein professioneller Übersetzer. Übersetze den Text des Benutzers. Wenn er Deutsch ist, übersetze ins Englische. Wenn nicht, ins Deutsche. Erkläre kurz Schwierigkeiten."),
@@ -483,7 +486,7 @@ class ChatViewModel @Inject constructor(
     // ===== Conversations =====
     fun newConversation() {
         viewModelScope.launch {
-            val personaName = personaViewModel.selectedPersona.value.name
+            val personaName = personaViewModel.selectedPersona.value.displayName
             val chatWsId = _chatWorkspaceId.value
             if (chatWsId != null) {
                 val wsName = conversationService.activeWorkspaceName()
@@ -505,7 +508,7 @@ class ChatViewModel @Inject constructor(
         if (existing != null) {
             switchConversation(existing.id)
         } else {
-            val personaName = personaViewModel.selectedPersona.value.name
+            val personaName = personaViewModel.selectedPersona.value.displayName
             val conv = conversationService.createConversation(personaName, wsName)
             switchConversation(conv.id)
         }
@@ -518,7 +521,7 @@ class ChatViewModel @Inject constructor(
         if (existing != null) {
             switchConversation(existing.id)
         } else {
-            val personaName = personaViewModel.selectedPersona.value.name
+            val personaName = personaViewModel.selectedPersona.value.displayName
             val conv = conversationService.createNormalConversation(personaName)
             switchConversation(conv.id)
         }
@@ -552,12 +555,16 @@ class ChatViewModel @Inject constructor(
     }
 
     fun renameConversation(id: String, newTitle: String) {
-        viewModelScope.launch { conversationService.rename(id, newTitle) }
+        viewModelScope.launch {
+            conversationService.rename(id, newTitle)
+            scheduleConversationMetadataSync(id)
+        }
     }
 
     fun deleteConversation(id: String) {
         viewModelScope.launch {
             conversationService.delete(id)
+            scheduleConversationSoftDelete(id)
             if (_currentConversationId.value == id) {
                 val remaining = _conversations.value.filter { it.id != id }
                 if (remaining.isNotEmpty()) switchConversation(remaining.first().id)
@@ -569,6 +576,37 @@ class ChatViewModel @Inject constructor(
     fun clearChat() {
         val convId = _currentConversationId.value ?: return
         viewModelScope.launch { repo.clearMessages(convId) }
+    }
+
+    private suspend fun saveMessageLocally(
+        conversationId: String,
+        message: ChatMessage,
+        touchConversation: Boolean = true
+    ) {
+        repo.saveMessage(conversationId, message, touchConversation = touchConversation)
+    }
+
+    private fun scheduleMessageSync(conversationId: String, message: ChatMessage) {
+        val activePersonaName = personaViewModel.selectedPersona.value.displayName
+        viewModelScope.launch {
+            chatSyncCoordinator.syncMessageAfterLocalSave(conversationId, message, activePersonaName)
+        }
+    }
+
+    private fun scheduleConversationMetadataSync(conversationId: String) {
+        val activePersonaName = personaViewModel.selectedPersona.value.displayName
+        viewModelScope.launch {
+            chatSyncCoordinator.syncConversationMetadataAfterLocalChange(
+                conversationId,
+                activePersonaName
+            )
+        }
+    }
+
+    private fun scheduleConversationSoftDelete(conversationId: String) {
+        viewModelScope.launch {
+            chatSyncCoordinator.softDeleteConversationAfterLocalDelete(conversationId)
+        }
     }
 
     /**
@@ -617,7 +655,7 @@ class ChatViewModel @Inject constructor(
 
         if (convId == null) {
             viewModelScope.launch {
-                val personaName = personaViewModel.selectedPersona.value.name
+                val personaName = personaViewModel.selectedPersona.value.displayName
                 val wsName = conversationService.activeWorkspaceName()
                 val conv = conversationService.createConversation(personaName, wsName)
                 switchConversation(conv.id)
@@ -629,12 +667,13 @@ class ChatViewModel @Inject constructor(
         val userMessage = ChatMessage(id = UUID.randomUUID().toString(), text = trimmedText, isUser = true, timestamp = System.currentTimeMillis())
         _isLoading.value = true
         activeGenerationJob = viewModelScope.launch {
-            repo.saveMessage(convId, userMessage)
+            saveMessageLocally(convId, userMessage)
 
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
                 repo.renameConversation(convId, trimmedText.take(40).ifBlank { "Chat" })
             }
+            scheduleMessageSync(convId, userMessage)
 
             knowledgeService.extractAndSaveFacts(trimmedText, "GLOBAL", userMessage.id)
             knowledgeService.extractAndSaveEdges(trimmedText)
@@ -670,7 +709,7 @@ class ChatViewModel @Inject constructor(
 
         val convId = _currentConversationId.value ?: run {
             viewModelScope.launch {
-                val personaName = personaViewModel.selectedPersona.value.name
+                val personaName = personaViewModel.selectedPersona.value.displayName
                 val wsName = conversationService.activeWorkspaceName()
                 val conv = conversationService.createConversation(personaName, wsName)
                 switchConversation(conv.id)
@@ -684,18 +723,21 @@ class ChatViewModel @Inject constructor(
 
         _isLoading.value = true
         activeGenerationJob = viewModelScope.launch {
-            repo.saveMessage(convId, userMessage)
+            saveMessageLocally(convId, userMessage)
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
                 repo.renameConversation(convId, text.take(40).ifBlank { "Bild-Chat" })
             }
+            scheduleMessageSync(convId, userMessage)
             try {
                 val systemPrompt = getSystemPromptWithCache(personaViewModel.selectedPersona.value)
                 val result = mediaService.analyzeImage(systemPrompt, text, imageUri,
                     enableOcr = prefs.getBoolean("local_ocr_enabled", true))
                 if (result.success) {
-                    repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
-                        text = result.content, isUser = false, timestamp = System.currentTimeMillis()))
+                    val assistantMessage = ChatMessage(id = UUID.randomUUID().toString(),
+                        text = result.content, isUser = false, timestamp = System.currentTimeMillis())
+                    saveMessageLocally(convId, assistantMessage)
+                    scheduleMessageSync(convId, assistantMessage)
                     notificationService.show("BamaChat (Bildanalyse)", result.content, prefs.getBoolean("notifications_enabled", true))
                 } else {
                     _errorMessage.value = result.error
@@ -719,15 +761,17 @@ class ChatViewModel @Inject constructor(
         activeGenerationJob = viewModelScope.launch {
             var convId = _currentConversationId.value
             if (convId == null) {
-                val personaName = personaViewModel.selectedPersona.value.name
+                val personaName = personaViewModel.selectedPersona.value.displayName
                 val wsName = conversationService.activeWorkspaceName()
                 val conv = conversationService.createConversation(personaName, wsName)
                 switchConversation(conv.id)
                 convId = conv.id
             }
             if (!skipUserMessage) {
-                repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
-                    text = prompt, isUser = true, timestamp = System.currentTimeMillis()))
+                val userMessage = ChatMessage(id = UUID.randomUUID().toString(),
+                    text = prompt, isUser = true, timestamp = System.currentTimeMillis())
+                saveMessageLocally(convId, userMessage)
+                scheduleMessageSync(convId, userMessage)
             }
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
@@ -743,9 +787,11 @@ class ChatViewModel @Inject constructor(
                     return@launch
                 }
                 if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_GENERATION)) return@launch
-                repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
+                val assistantMessage = ChatMessage(id = UUID.randomUUID().toString(),
                     text = genReq.displayPrompt, isUser = false, timestamp = System.currentTimeMillis(),
-                    imageUrl = imageUrl))
+                    imageUrl = imageUrl)
+                saveMessageLocally(convId, assistantMessage)
+                scheduleMessageSync(convId, assistantMessage)
                 notificationService.show("BamaChat Bild", "Bild generiert: $prompt", prefs.getBoolean("notifications_enabled", true))
             } catch (e: Exception) { handleError(e) }
             finally { _isLoading.value = false }
@@ -860,7 +906,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
-        repo.saveMessage(convId, assistantMsg, touchConversation = false)
+        saveMessageLocally(convId, assistantMsg, touchConversation = false)
 
         var finalContent: String? = null
         var iteration = 0
@@ -969,7 +1015,13 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 return
             }
 
-            repo.saveMessage(convId, assistantMsg.copy(text = trimmedContent, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso), touchConversation = true)
+            val finalAssistantMessage = assistantMsg.copy(
+                text = trimmedContent,
+                sources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso
+            )
+            saveMessageLocally(convId, finalAssistantMessage, touchConversation = true)
+            scheduleMessageSync(convId, finalAssistantMessage)
             clearRetryContext()
             notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
         } catch (e: Exception) {
@@ -988,7 +1040,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
-        repo.saveMessage(convId, assistantMsg, touchConversation = false)
+        saveMessageLocally(convId, assistantMsg, touchConversation = false)
         val streamingBuffer = StringBuilder()
         val streamFlushInterval = 250L
         var lastFlushAt = System.currentTimeMillis()
@@ -1050,7 +1102,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 lastFlushAtProvider = { lastFlushAt },
                 updateLastFlushAt = { lastFlushAt = it },
                 saveMessage = { targetConvId, message, touchConversation ->
-                    repo.saveMessage(targetConvId, message, touchConversation = touchConversation)
+                    saveMessageLocally(targetConvId, message, touchConversation = touchConversation)
+                    if (touchConversation) {
+                        scheduleMessageSync(targetConvId, message)
+                    }
                 },
                 clearRetryContext = { clearRetryContext() },
                 showNotification = { finalText ->
@@ -1181,7 +1236,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 lastFlushAtProvider = lastFlushAtProvider,
                 updateLastFlushAt = updateLastFlushAt,
                 saveMessage = { targetConvId, message, touchConversation ->
-                    repo.saveMessage(targetConvId, message, touchConversation = touchConversation)
+                    saveMessageLocally(targetConvId, message, touchConversation = touchConversation)
+                    if (touchConversation) {
+                        scheduleMessageSync(targetConvId, message)
+                    }
                 },
                 clearRetryContext = { clearRetryContext() },
                 showNotification = { finalText ->
@@ -1282,7 +1340,8 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             sources = webContext?.sources.orEmpty(),
             webFetchedAtIso = webContext?.fetchedAtIso
         )
-        repo.saveMessage(convId, assistantMsg, touchConversation = true)
+        saveMessageLocally(convId, assistantMsg, touchConversation = true)
+        scheduleMessageSync(convId, assistantMsg)
         clearRetryContext()
         notificationService.show("BamaChat", content, prefs.getBoolean("notifications_enabled", true))
     }

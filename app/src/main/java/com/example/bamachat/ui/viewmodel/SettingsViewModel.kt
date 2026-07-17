@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.theme.AppDesignPreset
@@ -32,7 +33,8 @@ import java.util.concurrent.TimeUnit
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    application: Application
+    application: Application,
+    private val chatSyncCoordinator: AndroidChatSyncCoordinator
 ) : AndroidViewModel(application) {
     companion object {
         private const val KEY_CLOUD_PERSONA_LAST_SYNC_AT = "cloud_persona_last_sync_at"
@@ -456,6 +458,9 @@ class SettingsViewModel @Inject constructor(
         prefs.getString(KEY_CLOUD_PERSONA_LAST_SYNC_STATUS, "idle") ?: "idle"
     )
     val cloudPersonaLastSyncStatus: StateFlow<String> = _cloudPersonaLastSyncStatus.asStateFlow()
+    private val _cloudChatSyncPreferenceRevision = MutableStateFlow(0)
+    val cloudChatSyncPreferenceRevision: StateFlow<Int> = _cloudChatSyncPreferenceRevision.asStateFlow()
+    val cloudChatSyncRuntimeStatus = chatSyncCoordinator.runtimeStatus
 
     private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         when (key) {
@@ -687,6 +692,19 @@ class SettingsViewModel @Inject constructor(
         }
         return "$statusText • $age"
     }
+
+    fun isCloudChatSyncEnabledForUser(uid: String?): Boolean =
+        chatSyncCoordinator.isEnabledForUid(uid)
+
+    fun setCloudChatSyncEnabledForUser(uid: String?, enabled: Boolean) {
+        val cleanUid = uid?.trim().orEmpty()
+        if (cleanUid.isBlank()) return
+        chatSyncCoordinator.setEnabledForUid(cleanUid, enabled)
+        _cloudChatSyncPreferenceRevision.value += 1
+    }
+
+    fun hasLegacyGlobalCloudChatSyncPreference(): Boolean =
+        chatSyncCoordinator.hasLegacyGlobalPreference()
 
     fun completeOnboarding() {
         _onboardingCompleted.value = true

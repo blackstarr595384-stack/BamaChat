@@ -94,6 +94,7 @@ fun BamaChatApp() {
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsState()
     val developerRealtimeCollabTesting by settingsViewModel.developerRealtimeCollabTesting.collectAsState()
     val isAuthenticated by authViewModel.isAuthenticated.collectAsState()
+    val firebaseUser by authViewModel.firebaseUser.collectAsState()
     val onboardingCompleted by settingsViewModel.onboardingCompleted.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -415,6 +416,7 @@ fun BamaChatApp() {
                     ?.takeIf { it.isNotBlank() }
                 SettingsScreen(
                     settingsViewModel = settingsViewModel,
+                    cloudChatSyncUid = firebaseUser?.uid,
                     onBack = { navController.popBackStack() },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
                     initialSection = initialSection,

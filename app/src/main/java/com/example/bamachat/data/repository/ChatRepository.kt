@@ -59,6 +59,10 @@ class ChatRepository(private val chatDao: ChatDao) {
         chatDao.touchConversation(id, System.currentTimeMillis())
     }
 
+    suspend fun updateConversationPersonaName(id: String, personaName: String) {
+        chatDao.updateConversationPersonaName(id, personaName)
+    }
+
     suspend fun deleteConversation(id: String) {
         chatDao.deleteConversation(id)
     }

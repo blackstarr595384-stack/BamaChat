@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 // BuildConfig removed - using hardcoded values
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator.ChatSyncState
 import com.example.bamachat.ui.component.CompactTextAction
 import com.example.bamachat.ui.component.CompactTextActionRow
 import com.example.bamachat.ui.component.sanitizeForSpeech
@@ -62,6 +63,7 @@ import java.util.Locale
 fun SettingsDialog(
     onOpenPrivacyPolicy: () -> Unit = {},
     viewModel: SettingsViewModel,
+    cloudChatSyncUid: String? = null,
     onDismiss: () -> Unit,
     initialSection: String? = null,
     mcpServerManager: McpServerManager? = null,
@@ -153,6 +155,8 @@ fun SettingsDialog(
     val guestAutoClearOnSignOut by viewModel.guestAutoClearOnSignOut.collectAsState()
     val cloudPersonaLastSyncAt by viewModel.cloudPersonaLastSyncAt.collectAsState()
     val cloudPersonaLastSyncStatus by viewModel.cloudPersonaLastSyncStatus.collectAsState()
+    val cloudChatSyncPreferenceRevision by viewModel.cloudChatSyncPreferenceRevision.collectAsState()
+    val cloudChatSyncRuntimeStatus by viewModel.cloudChatSyncRuntimeStatus.collectAsState()
 
     val _uriHandler = LocalUriHandler.current
     val context = LocalContext.current
@@ -350,6 +354,18 @@ fun SettingsDialog(
     }
     val cloudSyncStatusText = remember(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus) {
         viewModel.formatCloudSyncStatus(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus)
+    }
+    val cloudChatSyncEnabled = remember(cloudChatSyncUid, cloudChatSyncPreferenceRevision) {
+        viewModel.isCloudChatSyncEnabledForUser(cloudChatSyncUid)
+    }
+    val cloudChatSyncAvailable = !cloudChatSyncUid.isNullOrBlank()
+    val cloudChatSyncStatusText = when {
+        !cloudChatSyncAvailable || !cloudChatSyncEnabled -> null
+        cloudChatSyncRuntimeStatus.uid != cloudChatSyncUid -> "Synchronisierung aktiv"
+        cloudChatSyncRuntimeStatus.state == ChatSyncState.Pending -> "Synchronisierung ausstehend"
+        cloudChatSyncRuntimeStatus.state == ChatSyncState.Success -> "Letzte Synchronisierung erfolgreich"
+        cloudChatSyncRuntimeStatus.state == ChatSyncState.Failed -> "Synchronisierung fehlgeschlagen – lokale Chats sind sicher"
+        else -> "Synchronisierung aktiv"
     }
     val activeWorkspaceLabel = remember(projectWorkspaces, activeWorkspaceId) {
         projectWorkspaces.firstOrNull { it.id == activeWorkspaceId }?.name ?: "Kein aktiver Workspace"
@@ -1541,6 +1557,13 @@ fun SettingsDialog(
                             )
                         )
                     }
+                    CloudChatSyncSettingCard(
+                        enabled = cloudChatSyncEnabled,
+                        available = cloudChatSyncAvailable,
+                        runtimeStatus = cloudChatSyncStatusText,
+                        legacyPreferencePresent = viewModel.hasLegacyGlobalCloudChatSyncPreference(),
+                        onEnabledChange = { viewModel.setCloudChatSyncEnabledForUser(cloudChatSyncUid, it) }
+                    )
                     SettingRow("Privacy-Modus (streng)", "Schützt private Daten in Logs und Statusmeldungen") {
                         Switch(
                             checked = privacyStrictModeEnabled,
@@ -1841,6 +1864,97 @@ private fun SettingRow(title: String, subtitle: String? = null, action: @Composa
             }
         }
         action()
+    }
+}
+
+@Composable
+private fun CloudChatSyncSettingCard(
+    enabled: Boolean,
+    available: Boolean,
+    runtimeStatus: String?,
+    legacyPreferencePresent: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF00BFA5).copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, Color(0xFF00BFA5).copy(alpha = 0.18f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Chat-Synchronisierung",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        "Synchronisiert neue Chatverläufe und Arbeitsbereiche über dein Firebase-Konto, damit du später auf Android und Windows weiterarbeiten kannst.",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+                Switch(
+                    checked = available && enabled,
+                    enabled = available,
+                    onCheckedChange = onEnabledChange
+                )
+            }
+            Text(
+                if (available) {
+                    if (enabled) "Neue Chats werden für Android und Windows synchronisiert" else "Nur lokal auf diesem Gerät"
+                } else {
+                    "Melde dich an, um Chats zwischen Geräten zu synchronisieren."
+                },
+                color = if (available && enabled) Color(0xFF7CFFCB) else Color.White.copy(alpha = 0.72f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            if (available && enabled && runtimeStatus != null) {
+                Text(
+                    runtimeStatus,
+                    color = if (runtimeStatus.startsWith("Synchronisierung fehlgeschlagen")) {
+                        Color(0xFFFFD166)
+                    } else {
+                        Color.White.copy(alpha = 0.72f)
+                    },
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+            Text(
+                "Hochgeladen werden Chattexte, Titel, Zeitstempel, Persona und Arbeitsbereichsname.",
+                color = Color.White.copy(alpha = 0.66f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            Text(
+                "Bereits vorhandene lokale Chats werden in dieser Phase noch nicht hochgeladen.",
+                color = Color.White.copy(alpha = 0.66f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            if (legacyPreferencePresent) {
+                Text(
+                    "Eine alte globale Sync-Einstellung wurde erkannt und bleibt aus Sicherheitsgründen deaktiviert.",
+                    color = Color(0xFFFFD166),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
     }
 }
 
