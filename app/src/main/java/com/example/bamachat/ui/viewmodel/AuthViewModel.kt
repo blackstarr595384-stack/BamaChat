@@ -18,10 +18,12 @@ import com.google.firebase.storage.FirebaseStorage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
 import java.net.HttpURLConnection
@@ -33,6 +35,7 @@ class AuthViewModel @Inject constructor(
 ) : AndroidViewModel(application) {
     companion object {
         private const val KEY_GUEST_MODE = "guest_mode_enabled"
+        private const val CLEAR_CREDENTIAL_STATE_TIMEOUT_MS = 3_500L
         private const val ACCOUNT_DELETE_ENDPOINT =
             "https://europe-west1-bamachat-d07fb.cloudfunctions.net/deleteAccount"
     }
@@ -481,29 +484,57 @@ class AuthViewModel @Inject constructor(
             .distinct()
     }
 
-    fun signOut() {
-        val wasGuest = _isGuestMode.value
-        auth?.signOut()
-        credentialManager?.let { manager ->
-            viewModelScope.launch {
-                runCatching {
-                    manager.clearCredentialState(ClearCredentialStateRequest())
-                }.onFailure {
-                    AppTelemetry.logError("auth_clear_credential_state", it)
+    fun signOut(onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _statusMessage.value = null
+
+            val wasGuest = _isGuestMode.value
+            var completionInvoked = false
+
+            try {
+                auth?.signOut()
+
+                credentialManager?.let { manager ->
+                    val cleared = withTimeoutOrNull(CLEAR_CREDENTIAL_STATE_TIMEOUT_MS) {
+                        runCatching {
+                            manager.clearCredentialState(ClearCredentialStateRequest())
+                        }.onFailure {
+                            AppTelemetry.logError("auth_clear_credential_state", it)
+                        }.isSuccess
+                    }
+                    if (cleared == null) {
+                        AppTelemetry.logEvent("auth_clear_credential_state_timeout")
+                    }
+                }
+
+                if (wasGuest && prefs.getBoolean("guest_auto_clear_on_signout", true)) {
+                    dataSanitizer.clearGuestSessionData(clearApiKeys = false)
+                }
+
+                AppTelemetry.logEvent("logout")
+            } catch (e: Exception) {
+                AppTelemetry.logError("auth_sign_out", e)
+                _errorMessage.value = e.message ?: "Abmeldung konnte nicht vollständig abgeschlossen werden."
+            } finally {
+                withContext(NonCancellable) {
+                    _isGuestMode.value = false
+                    prefs.edit().putBoolean(KEY_GUEST_MODE, false).apply()
+                    _firebaseUser.value = auth?.currentUser
+                    _profile.value = null
+                    _connectedProviders.value = emptyList()
+                    _isEmailVerified.value = false
+                    AppTelemetry.setUserId(null)
+                    refreshAuthState()
+                    _isLoading.value = false
+                    if (!completionInvoked) {
+                        completionInvoked = true
+                        onComplete()
+                    }
                 }
             }
         }
-        if (wasGuest && prefs.getBoolean("guest_auto_clear_on_signout", true)) {
-            viewModelScope.launch {
-                dataSanitizer.clearGuestSessionData(clearApiKeys = false)
-            }
-        }
-        _isGuestMode.value = false
-        prefs.edit().putBoolean(KEY_GUEST_MODE, false).apply()
-        _profile.value = null
-        AppTelemetry.logEvent("logout")
-        AppTelemetry.setUserId(null)
-        refreshAuthState()
     }
 
     fun deleteAccount(onDeleted: () -> Unit = {}) {

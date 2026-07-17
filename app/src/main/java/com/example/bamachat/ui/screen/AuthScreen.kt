@@ -1,6 +1,7 @@
 package com.example.bamachat.ui.screen
 
 import android.annotation.SuppressLint
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -93,6 +94,8 @@ fun AuthScreen(
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var emailExpanded by remember { mutableStateOf(false) }
+
+    BackHandler(onBack = onBack)
 
     @SuppressLint("DiscouragedApi")
     val defaultWebClientId = remember(context) {

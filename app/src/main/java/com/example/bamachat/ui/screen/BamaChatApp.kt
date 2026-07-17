@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -117,6 +118,18 @@ fun BamaChatApp() {
         }
     }
 
+    fun navigateWelcomeThenAuth() {
+        navController.navigate(Routes.WELCOME) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                inclusive = true
+            }
+            launchSingleTop = true
+        }
+        navController.navigate(Routes.AUTH) {
+            launchSingleTop = true
+        }
+    }
+
     fun navigateHomeHub() {
         if (!navController.popBackStack(Routes.HOME_HUB, false)) {
             navController.navigate(Routes.HOME_HUB) {
@@ -162,11 +175,28 @@ fun BamaChatApp() {
     val bottomNavRoutes = topLevelRoutes.filterNot { it == Routes.CHAT }.toSet()
     val shouldRenderBottomNav = normalizedRoute in bottomNavRoutes
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Scaffold(
+        bottomBar = {
+            if (shouldRenderBottomNav) {
+                BamaChatBottomNav(
+                    currentRoute = normalizedRoute,
+                    designPreset = designPreset,
+                    attachedToComposer = normalizedRoute == Routes.CHAT && connectChatBottomBars,
+                    cornerRoundnessScale = uiCornerRoundnessScale,
+                    shadowIntensityScale = uiShadowIntensityScale,
+                    surfaceOpacity = uiSurfaceOpacity,
+                    onNavigate = { route -> navigateTopLevel(route) }
+                )
+            }
+        },
+        containerColor = Color.Transparent
+    ) { innerPadding ->
         NavHost(
             navController = navController,
             startDestination = startDestination,
-            modifier = Modifier.fillMaxSize().statusBarsPadding(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
             enterTransition = {
                 val from = normalizeRoute(initialState.destination.route)
                 val to = normalizeRoute(targetState.destination.route)
@@ -309,7 +339,13 @@ fun BamaChatApp() {
             composable(Routes.AUTH) {
                 AuthScreen(
                     authViewModel = authViewModel,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navController.navigate(Routes.WELCOME) {
+                                launchSingleTop = true
+                            }
+                        }
+                    },
                     onOpenHelp = { navController.navigate(Routes.HELP) },
                     onAuthenticated = {
                         navController.navigate(Routes.HOME_HUB) {
@@ -405,12 +441,8 @@ fun BamaChatApp() {
                     authViewModel = authViewModel,
                     designPreset = designPreset,
                     onBack = { navController.popBackStack() },
-                    onRequireLogin = {
-                        navController.navigate(Routes.AUTH) {
-                            popUpTo(navController.graph.startDestinationId) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    }
+                    onRequireLogin = { navigateWelcomeThenAuth() },
+                    onOpenSettings = { navigateTopLevel(Routes.SETTINGS) }
                 )
             }
             composable(Routes.MINI_APPS) {
@@ -493,26 +525,6 @@ fun BamaChatApp() {
                     onBack = { navController.popBackStack() }
                 )
             }
-        }
-
-        // Bottom Navigation — positioned at bottom, no overlap
-        AnimatedVisibility(
-            visible = shouldRenderBottomNav,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-        ) {
-            BamaChatBottomNav(
-                currentRoute = normalizedRoute,
-                designPreset = designPreset,
-                attachedToComposer = normalizedRoute == Routes.CHAT && connectChatBottomBars,
-                cornerRoundnessScale = uiCornerRoundnessScale,
-                shadowIntensityScale = uiShadowIntensityScale,
-                surfaceOpacity = uiSurfaceOpacity,
-                onNavigate = { route -> navigateTopLevel(route) }
-            )
         }
     }
 }

@@ -118,13 +118,13 @@ fun SettingsScreen(
                 IconButton(onClick = onBack) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "ZurÃ¼ck",
+                        contentDescription = "Zurück",
                         tint = Color.White
                     )
                 }
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    text = "âš™ï¸ Einstellungen",
+                    text = "Einstellungen",
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White,
                     fontWeight = FontWeight.Bold
@@ -225,9 +225,14 @@ fun SettingsScreen(
                     color = Color.White.copy(alpha = 0.2f),
                     fontSize = 11.sp
                 )
+                Text(
+                    "Entwickler: M.D Baldé",
+                    color = Color.White.copy(alpha = 0.2f),
+                    fontSize = 11.sp
+                )
             }
 
-            Spacer(Modifier.height(88.dp))
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

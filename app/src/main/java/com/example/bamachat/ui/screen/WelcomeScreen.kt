@@ -175,22 +175,9 @@ fun WelcomeScreen(
                 lineHeight = 24.sp
             )
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
 
-            // Feature highlights
-            if (!isAuthenticated) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    FeaturePill("💬 Chat & Agents", NeonPurple)
-                    FeaturePill("🧩 Tools & Workflows", NeonCyan)
-                    FeaturePill("☁️ Cloud & Collab", NeonPink)
-                }
-                Spacer(Modifier.height(32.dp))
-            }
-
-            // Action buttons
+            // Action buttons (moved up for visibility)
             if (!isAuthenticated) {
                 Button(
                     onClick = onOpenAuth,
@@ -263,6 +250,20 @@ fun WelcomeScreen(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Feature highlights (moved below buttons)
+            if (!isAuthenticated) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    FeaturePill("💬 Chat & Agents", NeonPurple)
+                    FeaturePill("🧩 Tools & Workflows", NeonCyan)
+                    FeaturePill("☁️ Cloud & Collab", NeonPink)
                 }
             }
 

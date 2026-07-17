@@ -42,7 +42,8 @@ fun ProfileScreen(
     authViewModel: AuthViewModel,
     designPreset: String,
     onBack: () -> Unit,
-    onRequireLogin: () -> Unit
+    onRequireLogin: () -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val user by authViewModel.firebaseUser.collectAsStateWithLifecycle()
     val profile by authViewModel.profile.collectAsStateWithLifecycle()
@@ -53,6 +54,12 @@ fun ProfileScreen(
 
     var nameInput by remember(profile?.displayName) { mutableStateOf(profile?.displayName.orEmpty()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(user, isGuest) {
+        if (user == null && !isGuest) {
+            onRequireLogin()
+        }
+    }
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -90,7 +97,7 @@ fun ProfileScreen(
                 .fillMaxSize()
                 .verticalScroll(scrollState)
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 96.dp),
+                .padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header
@@ -112,8 +119,16 @@ fun ProfileScreen(
                     text = "👤 Profil",
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Einstellungen öffnen",
+                        tint = Color.White.copy(alpha = 0.7f)
+                    )
+                }
             }
 
             if (isGuest) {
@@ -397,8 +412,9 @@ fun ProfileScreen(
                         // Sign out
                         TextButton(
                             onClick = {
-                                authViewModel.signOut()
-                                onRequireLogin()
+                                authViewModel.signOut {
+                                    onRequireLogin()
+                                }
                             },
                             enabled = !isLoading,
                             modifier = Modifier.align(Alignment.CenterHorizontally)

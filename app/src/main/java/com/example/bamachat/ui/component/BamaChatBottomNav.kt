@@ -62,7 +62,7 @@ fun BamaChatBottomNav(
 
     Surface(
         modifier = modifier
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
             .shadow(
                 elevation = (24f * shadowIntensityScale).coerceIn(8f, 40f).dp,
                 shape = shape,
