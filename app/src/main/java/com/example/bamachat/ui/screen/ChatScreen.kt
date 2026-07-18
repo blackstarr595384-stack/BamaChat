@@ -1,15 +1,11 @@
 ﻿package com.example.bamachat.ui.screen
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.os.Bundle
 import android.content.pm.PackageManager
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
+import android.provider.Settings
 import android.widget.Toast
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.*
@@ -39,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -73,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.app.ActivityCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bamachat.data.model.ChatMessage
@@ -87,19 +85,22 @@ import com.example.bamachat.ui.component.TypingIndicator
 import com.example.bamachat.ui.component.ToolCallsDisplay
 import com.example.bamachat.ui.component.compactLabel
 import com.example.bamachat.ui.component.designTokensFor
-import com.example.bamachat.ui.component.sanitizeForSpeech
-import com.example.bamachat.ui.component.splitSpeechChunks
 import com.example.bamachat.ui.screen.PersonaMood
 import com.example.bamachat.ui.screen.moodForPersona
 import com.example.bamachat.ui.theme.AppDesignSystem
+import com.example.bamachat.ui.theme.NeonCyan
+import com.example.bamachat.ui.theme.NeonGreen
+import com.example.bamachat.ui.theme.NeonPink
+import com.example.bamachat.ui.theme.NeonPurple
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.ui.viewmodel.MonetizationViewModel
 import com.example.bamachat.ui.viewmodel.ToolCallProgress
-import com.example.bamachat.util.CloudVoiceManager
+import com.example.bamachat.voice.VoiceSessionState
+import com.example.bamachat.voice.VoiceSessionUiState
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -124,6 +125,7 @@ private fun createChatCameraCaptureUri(context: android.content.Context): Pair<F
 fun ChatScreen(
     viewModel: ChatViewModel,
     settingsViewModel: SettingsViewModel,
+    voiceViewModel: BamaVoiceViewModel,
     onBottomNavRoute: (String) -> Unit = {},
     onOpenMiniApps: () -> Unit = {},
     onOpenAgentHub: () -> Unit = {},
@@ -160,20 +162,7 @@ fun ChatScreen(
     val togetherApiKey by settingsViewModel.togetherApiKey.collectAsStateWithLifecycle()
     val openCodeApiKey by settingsViewModel.openCodeApiKey.collectAsStateWithLifecycle()
     val openCodeEndpoint by settingsViewModel.openCodeEndpoint.collectAsStateWithLifecycle()
-    val ttsEnabled by settingsViewModel.ttsEnabled.collectAsStateWithLifecycle()
-    val ttsSpeed by settingsViewModel.ttsSpeed.collectAsStateWithLifecycle()
-    val ttsPitch by settingsViewModel.ttsPitch.collectAsStateWithLifecycle()
-    val ttsVoiceStyle by settingsViewModel.ttsVoiceStyle.collectAsStateWithLifecycle()
-    val ttsProVoiceEnabled by settingsViewModel.ttsProVoiceEnabled.collectAsStateWithLifecycle()
-    val cloudVoiceEnabled by settingsViewModel.cloudVoiceEnabled.collectAsStateWithLifecycle()
-    val cloudVoiceProvider by settingsViewModel.cloudVoiceProvider.collectAsStateWithLifecycle()
-    val elevenLabsApiKey by settingsViewModel.elevenLabsApiKey.collectAsStateWithLifecycle()
-    val elevenLabsVoiceId by settingsViewModel.elevenLabsVoiceId.collectAsStateWithLifecycle()
-    val elevenLabsModelId by settingsViewModel.elevenLabsModelId.collectAsStateWithLifecycle()
-    val piperEndpoint by settingsViewModel.piperEndpoint.collectAsStateWithLifecycle()
-    val piperVoiceName by settingsViewModel.piperVoiceName.collectAsStateWithLifecycle()
     val voicePushToTalkEnabled by settingsViewModel.voicePushToTalkEnabled.collectAsStateWithLifecycle()
-    val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
     val automationQuickActionsEnabled by settingsViewModel.automationQuickActionsEnabled.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val workspaceChatFilterEnabled by settingsViewModel.workspaceChatFilterEnabled.collectAsStateWithLifecycle()
@@ -190,8 +179,8 @@ fun ChatScreen(
     val uiCornerRoundnessScale by settingsViewModel.uiCornerRoundnessScale.collectAsStateWithLifecycle()
     val uiShadowIntensityScale by settingsViewModel.uiShadowIntensityScale.collectAsStateWithLifecycle()
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsStateWithLifecycle()
-    val language by settingsViewModel.language.collectAsStateWithLifecycle()
     val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
+    val voiceUiState by voiceViewModel.uiState.collectAsStateWithLifecycle()
 
     var inputText by rememberSaveable { mutableStateOf("") }
     // P0-2: persist the selected image URI across recreation. We store the URI's
@@ -205,7 +194,6 @@ fun ChatScreen(
     val listState = key(currentConvId) { rememberLazyListState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
 
     val imagePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
@@ -258,7 +246,9 @@ fun ChatScreen(
                 duration = SnackbarDuration.Long
             )
             if (result == SnackbarResult.ActionPerformed && isErrorRetryable) {
-                viewModel.retryLastFailedMessage()
+                if (viewModel.retryLastFailedMessage()) {
+                    voiceViewModel.markTextMessageAccepted()
+                }
             }
             viewModel.dismissError()
         }
@@ -281,524 +271,156 @@ fun ChatScreen(
         return
     }
 
-    // TTS
-    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
-    var isTtsReady by remember { mutableStateOf(false) }
-    var activeSpeechMessageId by remember { mutableStateOf<String?>(null) }
-    var isSpeechPlaybackActive by remember { mutableStateOf(false) }
-    val stopActiveDictation = remember { mutableStateOf<() -> Unit>({}) }
-    val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
-    val cloudVoiceRequested = ttsProVoiceEnabled && cloudVoiceEnabled
-    val selectedCloudVoiceProvider = remember(cloudVoiceProvider) {
-        CloudVoiceManager.Provider.fromStorage(cloudVoiceProvider)
-    }
-    val cloudVoiceConfig = remember(
-        cloudVoiceRequested,
-        cloudVoiceProvider,
-        elevenLabsApiKey,
-        elevenLabsVoiceId,
-        elevenLabsModelId,
-        piperEndpoint,
-        piperVoiceName
-    ) {
-        if (!cloudVoiceRequested) {
-            null
-        } else {
-            CloudVoiceManager.resolveCloudVoiceConfig(
-                providerValue = cloudVoiceProvider,
-                elevenLabsApiKey = elevenLabsApiKey,
-                elevenLabsVoiceId = elevenLabsVoiceId,
-                elevenLabsModelId = elevenLabsModelId,
-                piperEndpoint = piperEndpoint,
-                piperVoiceName = piperVoiceName
-            )
-        }
-    }
-    val ttsLocale = remember(language) {
-        when (language) {
-            "en" -> Locale.ENGLISH
-            "fr" -> Locale.FRENCH
-            "es" -> Locale("es")
-            "tr" -> Locale("tr")
-            "ar" -> Locale("ar")
-            else -> Locale.GERMAN
-        }
-    }
-    DisposableEffect(Unit) {
-        lateinit var ttsInstance: TextToSpeech
-        ttsInstance = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                ttsInstance.language = ttsLocale
-                ttsInstance.setSpeechRate(ttsSpeed)
-                ttsInstance.setPitch(ttsPitch)
-                isTtsReady = true
-            } else {
-                isTtsReady = false
-            }
-        }
-        tts = ttsInstance
-        onDispose {
-            isTtsReady = false
-            ttsInstance.stop()
-            ttsInstance.shutdown()
-            cloudVoiceManager.release()
-        }
-    }
-    LaunchedEffect(ttsSpeed, ttsPitch, ttsLocale) {
-        tts?.language = ttsLocale
-        tts?.setSpeechRate(ttsSpeed)
-        tts?.setPitch(ttsPitch)
-    }
-    val speakWithLocalTts: (String) -> Unit = localSpeak@{ speakText ->
-        val engine = tts ?: return@localSpeak
-        val maxChunkChars = if (useClearVoiceStyle) 170 else 220
-        val pauseMs = if (useClearVoiceStyle) 80L else 140L
-        val chunks = splitSpeechChunks(speakText, maxChunkChars = maxChunkChars)
-        if (chunks.isEmpty()) return@localSpeak
-        runCatching { engine.stop() }
-        chunks.forEachIndexed { index, chunk ->
-            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-            engine.speak(
-                chunk,
-                queueMode,
-                null,
-                "bamachat_tts_${System.currentTimeMillis()}_$index"
-            )
-            if (index < chunks.lastIndex) {
-                engine.playSilentUtterance(
-                    pauseMs,
-                    TextToSpeech.QUEUE_ADD,
-                    "bamachat_tts_pause_$index"
-                )
-            }
-        }
-    }
-    val monitorSpeechPlayback: (String?) -> Unit = monitor@{ messageId ->
-        if (messageId == null) return@monitor
-        scope.launch {
-            var observedPlayback = false
-            var startWaitedMs = 0L
-
-            while (activeSpeechMessageId == messageId && startWaitedMs < 1500L) {
-                val speakingNow = tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()
-                if (speakingNow) {
-                    observedPlayback = true
-                    break
-                }
-                delay(80)
-                startWaitedMs += 80L
-            }
-
-            var idleChecks = 0
-            while (activeSpeechMessageId == messageId) {
-                val speakingNow = tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()
-                if (speakingNow) {
-                    observedPlayback = true
-                    idleChecks = 0
-                } else if (observedPlayback) {
-                    idleChecks += 1
-                    if (idleChecks >= 2) break
-                } else {
-                    break
-                }
-                delay(140)
-            }
-
-            if (activeSpeechMessageId == messageId) {
-                activeSpeechMessageId = null
-                isSpeechPlaybackActive = false
-            }
-        }
-    }
-    val stopSpeechPlayback: () -> Unit = {
-        activeSpeechMessageId = null
-        isSpeechPlaybackActive = false
-        runCatching { tts?.stop() }
-        scope.launch { runCatching { cloudVoiceManager.stop() } }
-    }
-    val speakMessage: (String?, String, Boolean) -> Unit = { messageId, text, userInitiated ->
-        val speakText = sanitizeForSpeech(text)
-        scope.launch {
-            stopActiveDictation.value.invoke()
-            if (messageId != null) {
-                activeSpeechMessageId = messageId
-                isSpeechPlaybackActive = true
-            }
-            if (cloudVoiceRequested) {
-                val config = cloudVoiceConfig
-                if (config == null) {
-                    if (activeSpeechMessageId == messageId) {
-                        activeSpeechMessageId = null
-                        isSpeechPlaybackActive = false
-                    }
-                    if (userInitiated) {
-                        Toast.makeText(
-                            context,
-                            "${selectedCloudVoiceProvider.displayName} ist aktiviert, aber die Konfiguration ist unvollständig.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                    return@launch
-                }
-                val cloudOk = runCatching {
-                    cloudVoiceManager.speak(
-                        text = speakText,
-                        config = config,
-                        voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
-                    )
-                }.getOrDefault(false)
-
-                // P0-3 fix: user may have pressed Stop while we were awaiting the
-                // ElevenLabs HTTP fetch. If activeSpeechMessageId no longer matches,
-                // the playback must be aborted instead of starting after-the-fact.
-                if (cloudOk && activeSpeechMessageId != messageId) {
-                    runCatching { cloudVoiceManager.stop() }
-                    return@launch
-                }
-
-                if (cloudOk) {
-                    monitorSpeechPlayback(messageId)
-                    return@launch
-                }
-
-                if (activeSpeechMessageId == messageId) {
-                    activeSpeechMessageId = null
-                    isSpeechPlaybackActive = false
-                }
-
-                if (userInitiated) {
-                    Toast.makeText(
-                        context,
-                        cloudVoiceManager.lastErrorMessage() ?: "ElevenLabs konnte nicht gestartet werden. Android-Stimme wird nicht genutzt.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-
-                return@launch
-            }
-            if (ttsEnabled && isTtsReady && tts != null) {
-                speakWithLocalTts(speakText)
-                monitorSpeechPlayback(messageId)
-                return@launch
-            }
-            if (activeSpeechMessageId == messageId) {
-                activeSpeechMessageId = null
-                isSpeechPlaybackActive = false
-            }
-            if (userInitiated) {
-                Toast.makeText(
-                    context,
-                    "Sprachausgabe ist nicht bereit. Prüfe Stimme und Berechtigungen.",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
-    val onSpeak: (String, String) -> Unit = { messageId, text ->
-        if (isSpeechPlaybackActive && activeSpeechMessageId == messageId) {
-            stopSpeechPlayback()
-        } else {
-            speakMessage(messageId, text, true)
-        }
-    }
-
-    // Auto-speak last AI message when TTS enabled (track by ID to avoid re-speaking)
-    var lastSpokenMessageId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(
-        messages.size,
-        ttsEnabled,
-        ttsProVoiceEnabled,
-        cloudVoiceEnabled,
-        cloudVoiceProvider,
-        elevenLabsApiKey,
-        elevenLabsVoiceId,
-        elevenLabsModelId,
-        piperEndpoint,
-        piperVoiceName
-    ) {
-        val canSpeak = if (cloudVoiceRequested) {
-            cloudVoiceConfig != null
-        } else {
-            ttsEnabled
-        }
-        if (canSpeak && messages.isNotEmpty()) {
-            val last = messages.last()
-            if (!last.isUser && last.text.isNotBlank() && last.id != lastSpokenMessageId) {
-                lastSpokenMessageId = last.id
-                speakMessage(last.id, last.text, false)
-            }
-        }
-    }
-
-    // STT
-    val isListeningState = remember { mutableStateOf(false) }
-    var isListening by isListeningState
-    var isSpeechStartPending by remember { mutableStateOf(false) }
-    var ignoreNextSpeechClientError by remember { mutableStateOf(false) }
-    var pushToTalkSessionActive by remember { mutableStateOf(false) }
-    var lastPartialUpdateAt by remember { mutableLongStateOf(0L) }
-    var lastVoiceAutoSendAt by remember { mutableLongStateOf(0L) }
-    var lastVoiceAutoSendText by remember { mutableStateOf("") }
-    var hasHadVoiceExchange by remember { mutableStateOf(false) }
-    val speechRecognitionAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
-    val speechRecognizer = remember(context, speechRecognitionAvailable) {
-        if (speechRecognitionAvailable) SpeechRecognizer.createSpeechRecognizer(context) else null
-    }
-    val recognizerLanguageTag = remember(ttsLocale) {
-        ttsLocale.toLanguageTag().ifBlank { ttsLocale.toString() }
-    }
-    val recognizerIntent = remember(recognizerLanguageTag, voiceChatMode) {
-        val completeSilenceMs = if (voiceChatMode) 700L else 1200L
-        val possiblyCompleteSilenceMs = if (voiceChatMode) 400L else 800L
-        val minimumSpeechMs = if (voiceChatMode) 300L else 600L
-        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognizerLanguageTag)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, recognizerLanguageTag)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possiblyCompleteSilenceMs)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minimumSpeechMs)
-        }
-    }
     val latestAutoSendVoice by rememberUpdatedState(autoSendVoice)
-    val latestVoiceChatMode by rememberUpdatedState(voiceChatMode)
-    val latestIsStreaming by rememberUpdatedState(isStreaming)
-    // P0-6: the recognizer listener is built once for the lifetime of speechRecognizer;
-    // it reads the intent through this updated-state so a voiceChatMode toggle is
-    // picked up on the very next startListening() without recreating the recognizer.
-    val latestRecognizerIntent by rememberUpdatedState(recognizerIntent)
-    val startSpeechRecognition: (Boolean) -> Unit = startSpeech@{ showPrompt ->
-        val recognizer = speechRecognizer ?: return@startSpeech
-        if (isListeningState.value || isSpeechStartPending) return@startSpeech
-        isSpeechStartPending = true
-        ignoreNextSpeechClientError = false
-        scope.launch {
-            runCatching { tts?.stop() }
-            try {
-                cloudVoiceManager.stop()
-            } catch (_: Exception) {
-            }
-            if (showPrompt) {
-                Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
-            }
-            val started = runCatching {
-                recognizer.startListening(recognizerIntent)
-                true
-            }.getOrElse {
-                isSpeechStartPending = false
-                Toast.makeText(
-                    context,
-                    "Spracherkennung konnte nicht gestartet werden.",
-                    Toast.LENGTH_SHORT
-                ).show()
-                false
-            }
-            if (!started) {
-                pushToTalkSessionActive = false
-            }
-        }
-    }
-    val stopSpeechRecognition: (Boolean) -> Unit = stopSpeech@{ forceCancel ->
-        val recognizer = speechRecognizer ?: return@stopSpeech
-        if (!isListeningState.value && !isSpeechStartPending) return@stopSpeech
-        ignoreNextSpeechClientError = true
-        isSpeechStartPending = false
-        runCatching {
-            if (forceCancel || !isListeningState.value) recognizer.cancel() else recognizer.stopListening()
-        }
-        if (forceCancel || !isListeningState.value) {
-            isListeningState.value = false
-        }
-    }
-    // P0-5 cleanup: wrap the MutableState write in SideEffect so we don't allocate
-    // a new lambda + State write on every recomposition.
-    SideEffect {
-        stopActiveDictation.value = {
-            if (isListeningState.value || isSpeechStartPending) {
-                stopSpeechRecognition(true)
-            }
-        }
-    }
+    val latestExtensionQuickAction by rememberUpdatedState(selectedExtensionQuickAction)
+    var showPermanentMicrophoneDenial by rememberSaveable { mutableStateOf(false) }
+    var microphonePermissionRequested by rememberSaveable { mutableStateOf(false) }
+    var microphonePermissionRequestHadHistory by rememberSaveable { mutableStateOf(false) }
+    var microphonePermissionPermanentlyDenied by rememberSaveable { mutableStateOf(false) }
+    var showVoicePanel by rememberSaveable { mutableStateOf(false) }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startSpeechRecognition(true)
+            microphonePermissionPermanentlyDenied = false
+            voiceViewModel.startListening()
         } else {
-            Toast.makeText(
-                context,
-                "Mikrofon-Berechtigung wurde abgelehnt.",
-                Toast.LENGTH_SHORT
-            ).show()
+            val activity = context as? Activity
+            val permanentlyDenied = microphonePermissionRequestHadHistory && activity != null &&
+                !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
+            microphonePermissionPermanentlyDenied = permanentlyDenied
+            showPermanentMicrophoneDenial = permanentlyDenied
+            voiceViewModel.reportPermissionDenied(permanentlyDenied)
         }
     }
-    // P0-6: keying on speechRecognizer only — rebuilding the listener every time the
-    // user toggles voiceChatMode (which changes recognizerIntent) tore down and
-    // recreated the SpeechRecognizer mid-session. The listener captures the current
-    // recognizerIntent via closure; the next startListening() picks up the new intent.
-    DisposableEffect(speechRecognizer) {
-        val recognizer = speechRecognizer
-        if (recognizer == null) {
-            onDispose {}
+    val requestMicrophonePermission: () -> Unit = {
+        if (microphonePermissionPermanentlyDenied) {
+            showPermanentMicrophoneDenial = true
         } else {
-            val listener = object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    isSpeechStartPending = false
-                    isListeningState.value = true
-                }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() { isListeningState.value = false }
-                override fun onError(error: Int) {
-                    val ignoreClientError = ignoreNextSpeechClientError && error == SpeechRecognizer.ERROR_CLIENT
-                    ignoreNextSpeechClientError = false
-                    isSpeechStartPending = false
-                    isListeningState.value = false
-                    pushToTalkSessionActive = false
-                    if (ignoreClientError) return
-                    val isSoftSpeechError =
-                        error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-                            error == SpeechRecognizer.ERROR_NO_MATCH
-
-                    if (latestVoiceChatMode && hasHadVoiceExchange && isSoftSpeechError) {
-                        scope.launch {
-                            delay(250)
-                            val audioOk = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-                            val localSpeaking = tts?.isSpeaking == true
-                            val cloudSpeaking = cloudVoiceManager.isSpeaking()
-                            if (
-                                audioOk &&
-                                !latestIsStreaming &&
-                                !localSpeaking &&
-                                !cloudSpeaking &&
-                                !isListeningState.value &&
-                                !isSpeechStartPending
-                            ) {
-                                isSpeechStartPending = true
-                                val restarted = runCatching {
-                                    recognizer.startListening(latestRecognizerIntent)
-                                    true
-                                }.getOrDefault(false)
-                                if (!restarted) {
-                                    isSpeechStartPending = false
-                                }
-                            }
-                        }
-                        return
-                    }
-
-                    val errorMsg = when (error) {
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Netzwerk-Zeitüberschreitung"
-                        SpeechRecognizer.ERROR_NETWORK -> "Netzwerkfehler"
-                        SpeechRecognizer.ERROR_AUDIO -> "Audio-Fehler"
-                        SpeechRecognizer.ERROR_CLIENT -> "Client-Fehler"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Keine Sprache erkannt"
-                        SpeechRecognizer.ERROR_NO_MATCH -> "Nichts erkannt"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Spracherkennung ausgelastet"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Keine Mikrofon-Berechtigung"
-                        else -> "Spracherkennungsfehler ($error)"
-                    }
-                    android.util.Log.w("ChatScreen", "SpeechRecognizer: $errorMsg")
-                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-                }
-                override fun onResults(results: Bundle?) {
-                    isSpeechStartPending = false
-                    val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    if (!data.isNullOrEmpty()) {
-                        val recognizedText = data[0].trim()
-                        inputText = recognizedText
-                        if (latestAutoSendVoice) {
-                            if (recognizedText.isNotBlank()) {
-                                val now = System.currentTimeMillis()
-                                val isDuplicateAutoSend =
-                                    recognizedText.equals(lastVoiceAutoSendText, ignoreCase = true) &&
-                                        (now - lastVoiceAutoSendAt) < 1500L
-                                if (isDuplicateAutoSend) {
-                                    isListeningState.value = false
-                                    return
-                                }
-                                lastVoiceAutoSendText = recognizedText
-                                lastVoiceAutoSendAt = now
-                                val imageUri = selectedImageUri
-                                val accepted = if (imageUri != null) {
-                                    viewModel.sendMessageWithImage(recognizedText, imageUri)
-                                } else {
-                                    viewModel.sendMessage(recognizedText)
-                                }
-                                if (accepted) {
-                                    inputText = ""
-                                    if (imageUri != null) {
-                                        selectedImageUri = null
-                                    }
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "Sprache erkannt, aber nicht gesendet.",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                                hasHadVoiceExchange = true
-                            }
-                        } else {
-                            Toast.makeText(context, "Erkannt: $recognizedText", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(context, "Keine Sprache erkannt.", Toast.LENGTH_SHORT).show()
-                    }
-                    pushToTalkSessionActive = false
-                    isListeningState.value = false
-                }
-                override fun onPartialResults(partialResults: Bundle?) {
-                    val data = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val partialText = data?.firstOrNull()?.trim().orEmpty()
-                    if (partialText.isBlank()) return
-                    val now = System.currentTimeMillis()
-                    if ((now - lastPartialUpdateAt) >= 120L) {
-                        inputText = partialText
-                        lastPartialUpdateAt = now
-                    }
-                }
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            }
-            recognizer.setRecognitionListener(listener)
-            onDispose { recognizer.destroy() }
+            microphonePermissionRequestHadHistory = microphonePermissionRequested
+            microphonePermissionRequested = true
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
-    // Sync state back to Compose
-    // (removed redundant LaunchedEffect: `isListening` is already a delegated MutableState read)
-
-    // Continuous voice mode: re-trigger listening when AI and TTS playback are both finished
-    LaunchedEffect(isStreaming, voiceChatMode, hasHadVoiceExchange, messages.lastOrNull()?.id) {
-        if (!voiceChatMode || isStreaming || !hasHadVoiceExchange) return@LaunchedEffect
-
-        var waitedMs = 0L
-        while ((tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()) && waitedMs < 6000L) {
-            delay(120)
-            waitedMs += 120L
+    val startVoiceInput: () -> Unit = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (isLoading || isStreaming) viewModel.cancelStream()
+            voiceViewModel.startListening()
+        } else {
+            requestMicrophonePermission()
         }
-        if (tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()) return@LaunchedEffect
-
-        val audioOk = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (audioOk && !isListeningState.value && !isSpeechStartPending) {
-            isSpeechStartPending = true
-            val restarted = runCatching {
-                speechRecognizer?.startListening(recognizerIntent)
-                true
-            }.getOrDefault(false)
-            if (!restarted) {
-                isSpeechStartPending = false
+    }
+    val toggleVoiceInput: () -> Unit = {
+        val state = voiceUiState.state
+        if (state is VoiceSessionState.Preparing || state is VoiceSessionState.Listening || state is VoiceSessionState.Transcribing) {
+            voiceViewModel.toggleListening()
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (isLoading || isStreaming) viewModel.cancelStream()
+            voiceViewModel.toggleListening()
+        } else {
+            requestMicrophonePermission()
+        }
+    }
+    val latestAssistantMessage = messages.lastOrNull { !it.isUser && it.text.isNotBlank() }
+    LaunchedEffect(latestAssistantMessage?.id, latestAssistantMessage?.text, isStreaming) {
+        latestAssistantMessage?.let { assistant ->
+            voiceViewModel.onAssistantTextChanged(assistant.id, assistant.text, isStreaming)
+        }
+    }
+    LaunchedEffect(voiceViewModel) {
+        voiceViewModel.finalTranscripts.collect { transcript ->
+            inputText = transcript.text
+            if (latestAutoSendVoice) {
+                val imageUri = selectedImageUri
+                val accepted = if (imageUri != null) {
+                    viewModel.sendMessageWithImage(transcript.text, imageUri)
+                } else {
+                    viewModel.sendMessage(transcript.text, latestExtensionQuickAction)
+                }
+                if (accepted) {
+                    inputText = ""
+                    if (imageUri != null) selectedImageUri = null
+                }
+                voiceViewModel.markTranscriptHandled(accepted)
+            } else {
+                voiceViewModel.markTranscriptHandled(false)
             }
         }
+    }
+    DisposableEffect(voiceViewModel) {
+        onDispose { voiceViewModel.leaveChatScreen() }
+    }
+
+    if (showPermanentMicrophoneDenial) {
+        AlertDialog(
+            onDismissRequest = { showPermanentMicrophoneDenial = false },
+            title = { Text("Mikrofonzugriff aktivieren") },
+            text = { Text("Öffne die App-Einstellungen und erlaube BamaChat den Mikrofonzugriff.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermanentMicrophoneDenial = false
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)
+                            )
+                        )
+                    }
+                ) { Text("Einstellungen öffnen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermanentMicrophoneDenial = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+    val isVoiceListening = when (voiceUiState.state) {
+        VoiceSessionState.Preparing,
+        VoiceSessionState.Listening,
+        is VoiceSessionState.Transcribing -> true
+        else -> false
+    }
+    val isSpeechPlaybackActive = voiceUiState.state == VoiceSessionState.Speaking
+    val activeSpeechMessageId = voiceUiState.activeOutputMessageId
+    val stopVoiceInteraction: () -> Unit = {
+        if (isLoading || isStreaming) viewModel.cancelStream()
+        voiceViewModel.stopAll()
+    }
+    val onSpeak: (String, String) -> Unit = { messageId, text ->
+        if (isSpeechPlaybackActive && activeSpeechMessageId == messageId) {
+            voiceViewModel.stopSpeaking()
+        } else {
+            voiceViewModel.speakMessage(messageId, text)
+        }
+    }
+    LaunchedEffect((voiceUiState.state as? VoiceSessionState.Error)?.userMessage) {
+        val voiceError = voiceUiState.state as? VoiceSessionState.Error ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = voiceError.userMessage,
+            actionLabel = if (voiceError.recoverable) "Erneut" else null,
+            withDismissAction = true,
+            duration = SnackbarDuration.Long
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            voiceViewModel.recoverFromError()
+            startVoiceInput()
+        } else {
+            voiceViewModel.recoverFromError()
+        }
+    }
+    if (showVoicePanel) {
+        BamaVoicePanel(
+            uiState = voiceUiState,
+            isListening = isVoiceListening,
+            onDismiss = { showVoicePanel = false },
+            onMicrophone = toggleVoiceInput,
+            onCancelListening = { voiceViewModel.cancelListening() },
+            onStopSpeaking = stopVoiceInteraction,
+            onEndConversation = {
+                stopVoiceInteraction()
+                showVoicePanel = false
+            }
+        )
     }
 
     // Theme colors
@@ -813,7 +435,13 @@ fun ChatScreen(
     )
 
     if (showSettingsDialog) {
-        SettingsDialog(viewModel = settingsViewModel, onDismiss = { showSettingsDialog = false }, mcpServerManager = viewModel.mcpServerManager, mcpWorkflowManager = viewModel.mcpWorkflowManager)
+        SettingsDialog(
+            viewModel = settingsViewModel,
+            voiceViewModel = voiceViewModel,
+            onDismiss = { showSettingsDialog = false },
+            mcpServerManager = viewModel.mcpServerManager,
+            mcpWorkflowManager = viewModel.mcpWorkflowManager
+        )
     }
     if (showPersonaDialog) {
         PersonaDialog(viewModel, onDismiss = { showPersonaDialog = false })
@@ -890,11 +518,15 @@ fun ChatScreen(
                     if (accepted) {
                         selectedImageUri = null
                         inputText = ""
+                        voiceViewModel.markTextMessageAccepted()
                     }
                     accepted
                 } else if (trimmedInput.isNotEmpty()) {
                     val accepted = viewModel.sendMessage(trimmedInput, selectedExtensionQuickAction)
-                    if (accepted) inputText = ""
+                    if (accepted) {
+                        inputText = ""
+                        voiceViewModel.markTextMessageAccepted()
+                    }
                     accepted
                 } else {
                     false
@@ -933,53 +565,14 @@ fun ChatScreen(
             },
             selectedImageUri = selectedImageUri,
             onClearImage = { selectedImageUri = null },
-            isListening = isListening,
+            isListening = isVoiceListening,
+            voiceUiState = voiceUiState,
             voicePushToTalkEnabled = voicePushToTalkEnabled,
-            onMicClick = {
-                if (!speechRecognitionAvailable) {
-                    Toast.makeText(
-                        context,
-                        "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else if (isListening || isSpeechStartPending) {
-                    stopSpeechRecognition(false)
-                } else if (ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    startSpeechRecognition(true)
-                } else {
-                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
-            onMicPressStart = {
-                if (!speechRecognitionAvailable) {
-                    Toast.makeText(
-                        context,
-                        "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else if (ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    if (!isListening && !isSpeechStartPending) {
-                        pushToTalkSessionActive = true
-                        startSpeechRecognition(true)
-                    }
-                } else {
-                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
-            onMicPressEnd = {
-                if (pushToTalkSessionActive) {
-                    pushToTalkSessionActive = false
-                    stopSpeechRecognition(!isListening)
-                }
-            },
+            onMicClick = toggleVoiceInput,
+            onMicPressStart = startVoiceInput,
+            onMicPressEnd = { voiceViewModel.finishListening() },
+            onVoicePanelClick = { showVoicePanel = true },
+            onStopVoice = stopVoiceInteraction,
             themeColor = themeColor,
             personaMood = personaMood,
             fontSize = fontSize,
@@ -1011,7 +604,10 @@ fun ChatScreen(
                 }
                 context.startActivity(Intent.createChooser(sendIntent, "Chat exportieren"))
             },
-            onStopGeneration = { viewModel.cancelStream() },
+            onStopGeneration = {
+                voiceViewModel.stopAll()
+                viewModel.cancelStream()
+            },
             onSpeak = onSpeak,
             activeSpeechMessageId = activeSpeechMessageId,
             isSpeechPlaybackActive = isSpeechPlaybackActive,
@@ -1075,6 +671,199 @@ private fun triggerBiometric(context: android.content.Context, onResult: (Boolea
     biometricPrompt.authenticate(promptInfo)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BamaVoicePanel(
+    uiState: VoiceSessionUiState,
+    isListening: Boolean,
+    onDismiss: () -> Unit,
+    onMicrophone: () -> Unit,
+    onCancelListening: () -> Unit,
+    onStopSpeaking: () -> Unit,
+    onEndConversation: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF141427),
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("BamaVoice", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(uiState.connectionLabel, color = NeonCyan, style = MaterialTheme.typography.labelLarge)
+                }
+                Surface(
+                    shape = RoundedCornerShape(50.dp),
+                    color = NeonPurple.copy(alpha = 0.16f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonPurple.copy(alpha = 0.45f))
+                ) {
+                    Text(
+                        uiState.mode.displayName,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                VoiceProviderBadge(
+                    label = "Eingabe: ${uiState.inputProvider.displayName}",
+                    icon = Icons.Default.Mic
+                )
+                VoiceProviderBadge(
+                    label = "Ausgabe: ${uiState.outputProvider.displayName}",
+                    icon = Icons.AutoMirrored.Filled.VolumeUp
+                )
+            }
+
+            VoiceTranscriptCard(
+                title = "Du",
+                text = uiState.partialTranscript.ifBlank { uiState.finalTranscript.ifBlank { "Noch keine Sprache erkannt." } },
+                accent = NeonCyan
+            )
+            VoiceTranscriptCard(
+                title = "BamaChat",
+                text = uiState.assistantTranscript.ifBlank { "Die Antwort erscheint hier während der Unterhaltung." },
+                accent = NeonPurple
+            )
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White.copy(alpha = 0.05f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Default.PrivacyTip, null, tint = NeonGreen, modifier = Modifier.size(20.dp))
+                    Column {
+                        Text("Datenschutz", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            uiState.privacyLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.72f)
+                        )
+                    }
+                }
+            }
+
+            if (uiState.mode == com.example.bamachat.voice.VoiceMode.LIVE && !uiState.realtimeAvailable) {
+                Text(
+                    "Live-Unterhaltung bleibt deaktiviert, bis ein sicherer Backend-Endpunkt kurzlebige Zugangsdaten ausstellt.",
+                    color = NeonPink,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilledIconButton(
+                    onClick = onMicrophone,
+                    modifier = Modifier.size(56.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (isListening) NeonPink else NeonPurple
+                    )
+                ) {
+                    Icon(
+                        if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = if (isListening) "Spracheingabe beenden" else "Spracheingabe starten"
+                    )
+                }
+                FilledTonalIconButton(
+                    onClick = onStopSpeaking,
+                    enabled = uiState.state == VoiceSessionState.Speaking ||
+                        uiState.state == VoiceSessionState.Thinking,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = "Sprachausgabe stoppen")
+                }
+                if (isListening) {
+                    FilledTonalIconButton(
+                        onClick = onCancelListening,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Spracheingabe abbrechen")
+                    }
+                }
+                FilledTonalButton(
+                    onClick = onEndConversation,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Icon(Icons.Default.CallEnd, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Beenden")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun VoiceProviderBadge(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White.copy(alpha = 0.06f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun VoiceTranscriptCard(
+    title: String,
+    text: String,
+    accent: Color
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = accent.copy(alpha = 0.08f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+            Text(
+                text,
+                color = Color.White.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 5,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 @Composable
 private fun LockScreen(primaryColorInt: Int, onUnlock: () -> Unit) {
     Box(
@@ -1107,10 +896,13 @@ private fun ChatContent(
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
     isListening: Boolean,
+    voiceUiState: VoiceSessionUiState,
     voicePushToTalkEnabled: Boolean,
     onMicClick: () -> Unit,
     onMicPressStart: () -> Unit,
     onMicPressEnd: () -> Unit,
+    onVoicePanelClick: () -> Unit,
+    onStopVoice: () -> Unit,
     themeColor: Color,
     personaMood: PersonaMood,
     fontSize: Float,
@@ -1774,10 +1566,13 @@ private fun ChatContent(
                         selectedImageUri = selectedImageUri,
                         onClearImage = onClearImage,
                         isListening = isListening,
+                        voiceUiState = voiceUiState,
                         voicePushToTalkEnabled = voicePushToTalkEnabled,
                         onMicClick = onMicClick,
                         onMicPressStart = onMicPressStart,
                         onMicPressEnd = onMicPressEnd,
+                        onVoicePanelClick = onVoicePanelClick,
+                        onStopVoice = onStopVoice,
                         themeColor = themeColor,
                         surfaceColor = personaMood.cardSurface,
                         isLoading = isLoading,

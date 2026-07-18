@@ -27,10 +27,13 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
 - Multi-Provider-Flow (OpenRouter, OpenCode, Gemini, Ollama + Fallback-Logik)
 - Optionale Live-Web-Recherche für Agenten (über Firebase Function Proxy + Quellenanhang)
 - Sprachfeatures:
-  - STT (Diktieren)
-  - TTS lokal
-  - optionale Cloud-Voice (ElevenLabs oder Piper)
-  - Natuerlicher Sprachmodus: Speech-Sanitizing (Markdown/Links/Code), chunked TTS mit kurzen Pausen, Anti-Echo zwischen TTS und STT
+  - BamaVoice Universal: Android-STT -> bestehender Chatprovider -> satzweise TTS-Ausgabe
+  - BamaVoice Local: On-Device-Erkennung mit Android TTS oder privatem Piper-Endpunkt, ohne Cloud-Voice-Anfrage
+  - Live-Teiltranskription, Eingabepegel, exakt-einmal-Finaltext und abbrechbare Spracheingabe
+  - Unterbrechbare Ausgabe mit Audio-Fokus, Anti-Echo-Turn-Taking und sicherem Stop während Generierung oder Playback
+  - optionale Cloud-Voice (ElevenLabs Flash/Multilingual oder Piper) mit Android-Fallback
+  - Speech-Sanitizing für Markdown, Links, Zitationen und Code sowie geordnete Satz-/Klausel-Chunks
+  - OpenAI Realtime ist als sichere Clientgrenze vorbereitet, benötigt aber einen Backend-Endpunkt für kurzlebige Zugangsdaten
   - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
   - Bild hochladen, Foto direkt aus dem Chat aufnehmen und analysieren

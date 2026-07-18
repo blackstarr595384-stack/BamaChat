@@ -22,6 +22,9 @@ import com.example.bamachat.util.PlayBillingManager
 import com.example.bamachat.util.ProjectWorkspace
 import com.example.bamachat.util.ProjectWorkspaceStore
 import com.example.bamachat.util.SecureSettingsStore
+import com.example.bamachat.voice.VoiceInputProvider
+import com.example.bamachat.voice.VoiceMode
+import com.example.bamachat.voice.VoiceOutputProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +55,12 @@ class SettingsViewModel @Inject constructor(
         private const val KEY_CLOUD_VOICE_PROVIDER = "cloud_voice_provider"
         private const val KEY_PIPER_ENDPOINT = "piper_endpoint"
         private const val KEY_PIPER_VOICE_NAME = "piper_voice_name"
+        private const val KEY_VOICE_MODE = "voice_mode"
+        private const val KEY_VOICE_INPUT_PROVIDER = "voice_input_provider"
+        private const val KEY_VOICE_OUTPUT_PROVIDER = "voice_output_provider"
+        private const val KEY_VOICE_INTERRUPTION_ENABLED = "voice_interruption_enabled"
+        private const val KEY_VOICE_PROVIDER_FALLBACK_ENABLED = "voice_provider_fallback_enabled"
+        private const val KEY_VOICE_SILENCE_TIMEOUT_MS = "voice_silence_timeout_ms"
         private const val LEGACY_OPENCODE_ENDPOINT = "https://api.opencode.ai/v1/"
         private const val LEGACY_OPENCODE_MODEL = "openai/gpt-4.1-mini"
         private const val DEFAULT_OPENCODE_ENDPOINT = "https://opencode.ai/zen/v1/"
@@ -78,6 +87,9 @@ class SettingsViewModel @Inject constructor(
         private const val CLEAR_TTS_PITCH = 0.96f
         private const val DEFAULT_OPENCODE_MODEL = ApiClient.OPENCODE_DEFAULT_MODEL
         internal fun resolveDeveloperModePreference(storedValue: Boolean?): Boolean {
+            return storedValue ?: false
+        }
+        internal fun resolveAutoSendVoicePreference(storedValue: Boolean?): Boolean {
             return storedValue ?: false
         }
         const val TTS_STYLE_NATURAL = "natural"
@@ -155,8 +167,53 @@ class SettingsViewModel @Inject constructor(
     private val _vibrationEnabled = MutableStateFlow(prefs.getBoolean("vibration_enabled", true))
     val vibrationEnabled: StateFlow<Boolean> = _vibrationEnabled.asStateFlow()
 
-    private val _autoSendVoice = MutableStateFlow(prefs.getBoolean("auto_send_voice", true))
+    private val _autoSendVoice = MutableStateFlow(
+        resolveAutoSendVoicePreference(
+            prefs.takeIf { it.contains("auto_send_voice") }?.getBoolean("auto_send_voice", false)
+        )
+    )
     val autoSendVoice: StateFlow<Boolean> = _autoSendVoice.asStateFlow()
+
+    private val _voiceMode = MutableStateFlow(
+        VoiceMode.fromStorage(prefs.getString(KEY_VOICE_MODE, VoiceMode.UNIVERSAL.storageValue))
+    )
+    val voiceMode: StateFlow<VoiceMode> = _voiceMode.asStateFlow()
+
+    private val _voiceInputProvider = MutableStateFlow(
+        VoiceInputProvider.fromStorage(
+            prefs.getString(KEY_VOICE_INPUT_PROVIDER, VoiceInputProvider.AUTOMATIC.storageValue)
+        )
+    )
+    val voiceInputProvider: StateFlow<VoiceInputProvider> = _voiceInputProvider.asStateFlow()
+
+    private val _voiceOutputProvider = MutableStateFlow(
+        prefs.getString(KEY_VOICE_OUTPUT_PROVIDER, null)
+            ?.let(VoiceOutputProvider::fromStorage)
+            ?: if (prefs.getBoolean("cloud_voice_enabled", false)) {
+                when (CloudVoiceManager.Provider.fromStorage(prefs.getString(KEY_CLOUD_VOICE_PROVIDER, null))) {
+                    CloudVoiceManager.Provider.ELEVENLABS -> VoiceOutputProvider.ELEVENLABS
+                    CloudVoiceManager.Provider.PIPER -> VoiceOutputProvider.PIPER
+                }
+            } else {
+                VoiceOutputProvider.AUTOMATIC
+            }
+    )
+    val voiceOutputProvider: StateFlow<VoiceOutputProvider> = _voiceOutputProvider.asStateFlow()
+
+    private val _voiceInterruptionEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_VOICE_INTERRUPTION_ENABLED, true)
+    )
+    val voiceInterruptionEnabled: StateFlow<Boolean> = _voiceInterruptionEnabled.asStateFlow()
+
+    private val _voiceProviderFallbackEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_VOICE_PROVIDER_FALLBACK_ENABLED, true)
+    )
+    val voiceProviderFallbackEnabled: StateFlow<Boolean> = _voiceProviderFallbackEnabled.asStateFlow()
+
+    private val _voiceSilenceTimeoutMs = MutableStateFlow(
+        prefs.getLong(KEY_VOICE_SILENCE_TIMEOUT_MS, 1_200L).coerceIn(700L, 5_000L)
+    )
+    val voiceSilenceTimeoutMs: StateFlow<Long> = _voiceSilenceTimeoutMs.asStateFlow()
 
     private val _voiceChatMode = MutableStateFlow(prefs.getBoolean("voice_chat_mode", false))
     val voiceChatMode: StateFlow<Boolean> = _voiceChatMode.asStateFlow()
@@ -200,7 +257,7 @@ class SettingsViewModel @Inject constructor(
     val elevenLabsVoiceId: StateFlow<String> = _elevenLabsVoiceId.asStateFlow()
 
     private val _elevenLabsModelId = MutableStateFlow(
-        prefs.getString("elevenlabs_model_id", "eleven_multilingual_v2") ?: "eleven_multilingual_v2"
+        prefs.getString("elevenlabs_model_id", "eleven_flash_v2_5") ?: "eleven_flash_v2_5"
     )
     val elevenLabsModelId: StateFlow<String> = _elevenLabsModelId.asStateFlow()
 
@@ -771,6 +828,58 @@ class SettingsViewModel @Inject constructor(
         prefs.edit().putBoolean("auto_send_voice", enabled).apply()
     }
 
+    fun setVoiceMode(mode: VoiceMode) {
+        _voiceMode.value = mode
+        prefs.edit().putString(KEY_VOICE_MODE, mode.storageValue).apply()
+    }
+
+    fun setVoiceInputProvider(provider: VoiceInputProvider) {
+        _voiceInputProvider.value = provider
+        prefs.edit().putString(KEY_VOICE_INPUT_PROVIDER, provider.storageValue).apply()
+    }
+
+    fun setVoiceOutputProvider(provider: VoiceOutputProvider) {
+        _voiceOutputProvider.value = provider
+        val editor = prefs.edit().putString(KEY_VOICE_OUTPUT_PROVIDER, provider.storageValue)
+        when (provider) {
+            VoiceOutputProvider.ELEVENLABS -> {
+                _cloudVoiceEnabled.value = true
+                _cloudVoiceProvider.value = CloudVoiceManager.Provider.ELEVENLABS.storageValue
+                editor.putBoolean("cloud_voice_enabled", true)
+                    .putString(KEY_CLOUD_VOICE_PROVIDER, CloudVoiceManager.Provider.ELEVENLABS.storageValue)
+            }
+            VoiceOutputProvider.PIPER -> {
+                _cloudVoiceEnabled.value = true
+                _cloudVoiceProvider.value = CloudVoiceManager.Provider.PIPER.storageValue
+                editor.putBoolean("cloud_voice_enabled", true)
+                    .putString(KEY_CLOUD_VOICE_PROVIDER, CloudVoiceManager.Provider.PIPER.storageValue)
+            }
+            VoiceOutputProvider.ANDROID -> {
+                _cloudVoiceEnabled.value = false
+                editor.putBoolean("cloud_voice_enabled", false)
+            }
+            VoiceOutputProvider.AUTOMATIC,
+            VoiceOutputProvider.OPENAI_LIVE -> Unit
+        }
+        editor.apply()
+    }
+
+    fun setVoiceInterruptionEnabled(enabled: Boolean) {
+        _voiceInterruptionEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_VOICE_INTERRUPTION_ENABLED, enabled).apply()
+    }
+
+    fun setVoiceProviderFallbackEnabled(enabled: Boolean) {
+        _voiceProviderFallbackEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_VOICE_PROVIDER_FALLBACK_ENABLED, enabled).apply()
+    }
+
+    fun setVoiceSilenceTimeoutMs(timeoutMs: Long) {
+        val clamped = timeoutMs.coerceIn(700L, 5_000L)
+        _voiceSilenceTimeoutMs.value = clamped
+        prefs.edit().putLong(KEY_VOICE_SILENCE_TIMEOUT_MS, clamped).apply()
+    }
+
     fun setVoiceChatMode(enabled: Boolean) {
         _voiceChatMode.value = enabled
         prefs.edit().putBoolean("voice_chat_mode", enabled).apply()
@@ -818,13 +927,28 @@ class SettingsViewModel @Inject constructor(
 
     fun setCloudVoiceEnabled(enabled: Boolean) {
         _cloudVoiceEnabled.value = enabled
-        prefs.edit().putBoolean("cloud_voice_enabled", enabled).apply()
+        if (!enabled && _voiceOutputProvider.value in setOf(VoiceOutputProvider.ELEVENLABS, VoiceOutputProvider.PIPER)) {
+            _voiceOutputProvider.value = VoiceOutputProvider.AUTOMATIC
+        }
+        prefs.edit()
+            .putBoolean("cloud_voice_enabled", enabled)
+            .putString(KEY_VOICE_OUTPUT_PROVIDER, _voiceOutputProvider.value.storageValue)
+            .apply()
     }
 
     fun setCloudVoiceProvider(provider: String) {
         val clean = normalizeCloudVoiceProvider(provider)
         _cloudVoiceProvider.value = clean
-        prefs.edit().putString(KEY_CLOUD_VOICE_PROVIDER, clean).apply()
+        if (_cloudVoiceEnabled.value) {
+            _voiceOutputProvider.value = when (CloudVoiceManager.Provider.fromStorage(clean)) {
+                CloudVoiceManager.Provider.ELEVENLABS -> VoiceOutputProvider.ELEVENLABS
+                CloudVoiceManager.Provider.PIPER -> VoiceOutputProvider.PIPER
+            }
+        }
+        prefs.edit()
+            .putString(KEY_CLOUD_VOICE_PROVIDER, clean)
+            .putString(KEY_VOICE_OUTPUT_PROVIDER, _voiceOutputProvider.value.storageValue)
+            .apply()
     }
 
     fun setElevenLabsApiKey(key: String) {

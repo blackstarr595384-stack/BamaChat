@@ -29,6 +29,7 @@ import com.example.bamachat.ui.component.BamaChatBottomNav
 import com.example.bamachat.ui.navigation.BottomNavigationRoutePolicy
 import com.example.bamachat.ui.navigation.BottomNavigationUiState
 import com.example.bamachat.ui.viewmodel.AuthViewModel
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
 import com.example.bamachat.ui.viewmodel.ExtensionManagerViewModel
@@ -80,6 +81,7 @@ private fun topLevelRank(route: String?): Int = topLevelRoutes.indexOf(normalize
 fun BamaChatApp() {
     val chatViewModel: ChatViewModel = hiltViewModel()
     val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val voiceViewModel: BamaVoiceViewModel = hiltViewModel()
     val authViewModel: AuthViewModel = hiltViewModel()
     val collabViewModel: CollabViewModel = hiltViewModel()
     val extensionManagerViewModel: ExtensionManagerViewModel = hiltViewModel()
@@ -408,6 +410,7 @@ fun BamaChatApp() {
                 ChatScreen(
                     viewModel = chatViewModel,
                     settingsViewModel = settingsViewModel,
+                    voiceViewModel = voiceViewModel,
                     onBottomNavRoute = { route -> navigateTopLevel(route) },
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
@@ -431,6 +434,7 @@ fun BamaChatApp() {
                     ?.takeIf { it.isNotBlank() }
                 SettingsScreen(
                     settingsViewModel = settingsViewModel,
+                    voiceViewModel = voiceViewModel,
                     cloudChatSyncUid = firebaseUser?.uid,
                     onBack = { navController.popBackStack() },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },

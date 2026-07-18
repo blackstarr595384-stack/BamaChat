@@ -33,6 +33,7 @@ import com.example.bamachat.ui.theme.SurfaceDarkCard
 import com.example.bamachat.ui.theme.SurfaceDarkElevated
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.util.MonetizationConfig
 
 private enum class SettingsMode { SIMPLE, ADVANCED }
@@ -50,6 +51,7 @@ private data class SettingsEntryItem(
 @Composable
 fun SettingsScreen(
     settingsViewModel: SettingsViewModel,
+    voiceViewModel: BamaVoiceViewModel,
     cloudChatSyncUid: String? = null,
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
@@ -71,6 +73,7 @@ fun SettingsScreen(
     if (expandedSection != null) {
         SettingsDialog(
             viewModel = settingsViewModel,
+            voiceViewModel = voiceViewModel,
             cloudChatSyncUid = cloudChatSyncUid,
             onDismiss = { expandedSection = null },
             initialSection = expandedSection,
@@ -82,7 +85,7 @@ fun SettingsScreen(
         SettingsEntryItem("Konto", "Profil, Anmeldung, E-Mail", Icons.Default.Person, NeonPurple, Color(0xFF7C4DFF), openProfile = true),
         SettingsEntryItem("KI & Modelle", "Provider, API-Keys, Abo, Credits", Icons.Default.Tune, NeonBlue, Color(0xFF0066CC), section = "ai"),
         SettingsEntryItem("Darstellung", "Farben, Layout, Chat-Anzeige", Icons.Default.Palette, NeonPink, Color(0xFFAA0055), section = "chat"),
-        SettingsEntryItem("Sprache & Stimme", "TTS, Cloud-Voice, Sprachmodus", Icons.Default.GraphicEq, NeonGreen, Color(0xFF008844), section = "voice"),
+        SettingsEntryItem("Sprache & Unterhaltung", "Modus, Eingabe, Stimme, Datenschutz", Icons.Default.GraphicEq, NeonGreen, Color(0xFF008844), section = "voice"),
         SettingsEntryItem("Arbeitsbereiche", "Bereiche, Filter, Automationen", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), section = "workspaces"),
         SettingsEntryItem("Datenschutz & Daten", "Sync, lokale Daten, Rechtliches", Icons.Default.Security, Color(0xFF00BFA5), Color(0xFF00796B), section = "data")
     )

@@ -222,12 +222,30 @@ Verhalten:
 - Die finale Konto-Löschung läuft ueber `AuthViewModel.deleteAccount()` und entfernt Auth, Cloud-Daten und lokale Daten; öffentliche Rechtstexte liegen unter `/privacy-policy/`, `/terms/`, `/delete-account/` und `/support/`.
 
 ## Voice
-- Lokale TTS/STT in `ChatScreen.kt`
-- Cloud-Voice in `CloudVoiceManager.kt`
-- Cloud-Voice Provider aktuell: `ElevenLabs` und `Piper`; die Settings-UI zeigt nur die Felder des gewählten Providers.
-- TTS nutzt Speech-Sanitizing + Chunking mit kurzen Pausen (`sanitizeForSpeech`, `splitSpeechChunks`) fuer natuerlicheres Sprechen.
-- Continuous Voice wartet auf abgeschlossenes Playback (lokal + Cloud), bevor STT neu startet (Anti-Echo/Loop-Schutz).
-- Settings enthalten ein "Natuerliches Preset" fuer TTS-Geschwindigkeit/Stimmhoehe.
+- `BamaVoiceSessionController` ist die einzige Autorität für Listening, Transcribing, Thinking, Speaking, Interrupt und Error.
+- `BamaVoiceViewModel` besitzt genau eine aktive STT-/TTS-Engine, reagiert auf Providerwechsel und gibt Recognizer/Player beim Verlassen des Chats frei.
+- `AndroidSpeechRecognizerEngine` liefert Pegel, Teiltext und genau ein finales Ergebnis. Ein finaler Ergebnis-Timeout verhindert dauerhaftes Transcribing.
+- `VoiceTextProcessor` entfernt Markdown, URLs, Zitationsmarker und Codeblöcke; `StreamingSpeechBuffer` gibt vollständige Sätze/Klauseln in stabiler Reihenfolge aus.
+- Ausgabefallbacks sind `ElevenLabs` (standardmäßig Flash v2.5), `Piper` und Android TTS. Ein bereits gestarteter Cloud-Chunk wird bei Fehlern nicht erneut über Android vorgelesen.
+- `AudioTranscriptionManager` bleibt ausschließlich für importierte Audio-/Videodateien in `MediaService`; die Live-Mikrofonsteuerung verwendet ihn nicht.
+- BamaVoice Universal verwendet den bestehenden Textprovider. BamaVoice Local erzwingt On-Device-STT und erlaubt nur Android TTS oder einen privaten Piper-Endpunkt.
+- Es gibt keinen Mikrofon-Foreground-Service: Aufnahme ist bewusst auf die sichtbare Chat-Oberfläche beschränkt.
+
+```text
+Chat UI -> BamaVoiceViewModel -> BamaVoiceSessionController
+                               |-> SpeechToTextEngine (Android)
+                               |-> bestehender ChatViewModel-Textstream
+                               |-> SpeechOutputEngine (ElevenLabs/Piper/Android)
+                               `-> VoiceAudioSession (Playback-Fokus + MODE_IN_COMMUNICATION)
+```
+
+Androids `SpeechRecognizer` besitzt den Aufnahmefokus selbst. BamaVoice fordert deshalb beim Listening keinen konkurrierenden App-Audiofokus an; eigener transienter Fokus wird nur für Sprachausgabe gehalten.
+
+### Realtime-Grenze
+- `RealtimeEphemeralCredentialProvider` und `RealtimeVoiceEngine` definieren die Clientgrenze; ohne Backend ist Live-Unterhaltung nicht als funktionale Auswahl sichtbar.
+- Ein künftiger Backend-Endpunkt, empfohlen `POST /api/voice/realtime-session`, muss authentifiziert eine kurzlebige OpenAI-Realtime-Clientberechtigung erzeugen. Ein permanenter OpenAI-Key darf nie an Android ausgeliefert oder in das APK eingebaut werden.
+- Der Endpoint sollte Provider, Realtime-Modell, Stimme und Sprachkennung validieren und nur Credential, Ablaufzeit und erlaubte Sessionparameter zurückgeben.
+- Gemini Live und xAI Voice benötigen separate, tatsächlich getestete Adapter und bleiben bis dahin ohne Produktionsbutton.
 
 ## Advanced-AI-Basis (Feature 1-8, aktueller MVP-Stand)
 - Persistent Memory:
