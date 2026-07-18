@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -26,6 +26,8 @@ import androidx.navigation.navArgument
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.example.bamachat.ui.component.BamaChatBottomNav
+import com.example.bamachat.ui.navigation.BottomNavigationRoutePolicy
+import com.example.bamachat.ui.navigation.BottomNavigationUiState
 import com.example.bamachat.ui.viewmodel.AuthViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
@@ -70,7 +72,7 @@ private val topLevelRoutes = listOf(
     Routes.WORKSPACES
 )
 
-private fun normalizeRoute(route: String?): String? = route?.substringBefore("?")?.substringBefore("/")
+private fun normalizeRoute(route: String?): String? = BottomNavigationRoutePolicy.normalize(route)
 
 private fun topLevelRank(route: String?): Int = topLevelRoutes.indexOf(normalizeRoute(route))
 
@@ -99,6 +101,22 @@ fun BamaChatApp() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val normalizedRoute = normalizeRoute(currentRoute)
+    val destinationHierarchyRoutes = navBackStackEntry
+        ?.destination
+        ?.hierarchy
+        ?.map { it.route }
+        ?.toList()
+        .orEmpty()
+    var previousBottomNavigationState by remember { mutableStateOf(BottomNavigationUiState()) }
+    val bottomNavigationState = BottomNavigationRoutePolicy.resolve(
+        previousState = previousBottomNavigationState,
+        destinationHierarchyRoutes = destinationHierarchyRoutes
+    )
+    SideEffect {
+        if (previousBottomNavigationState != bottomNavigationState) {
+            previousBottomNavigationState = bottomNavigationState
+        }
+    }
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
@@ -173,16 +191,13 @@ fun BamaChatApp() {
         }
     }
 
-    val bottomNavRoutes = topLevelRoutes.filterNot { it == Routes.CHAT }.toSet()
-    val shouldRenderBottomNav = normalizedRoute in bottomNavRoutes
-
     Scaffold(
         bottomBar = {
-            if (shouldRenderBottomNav) {
+            if (bottomNavigationState.visible) {
                 BamaChatBottomNav(
-                    currentRoute = normalizedRoute,
+                    currentRoute = bottomNavigationState.selectedRoute,
                     designPreset = designPreset,
-                    attachedToComposer = normalizedRoute == Routes.CHAT && connectChatBottomBars,
+                    attachedToComposer = bottomNavigationState.selectedRoute == Routes.CHAT && connectChatBottomBars,
                     cornerRoundnessScale = uiCornerRoundnessScale,
                     shadowIntensityScale = uiShadowIntensityScale,
                     surfaceOpacity = uiSurfaceOpacity,

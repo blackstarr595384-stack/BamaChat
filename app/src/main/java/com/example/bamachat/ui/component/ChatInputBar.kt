@@ -106,7 +106,6 @@ fun ChatInputBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
-            .navigationBarsPadding()
             .imePadding()
             .animateContentSize(animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing))
     ) {

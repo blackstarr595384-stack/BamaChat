@@ -14,7 +14,9 @@ import android.widget.Toast
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -48,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -73,7 +77,6 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.component.ChatBubble
-import com.example.bamachat.ui.component.BamaChatBottomNav
 import com.example.bamachat.ui.component.ChatDesignPreset
 import com.example.bamachat.ui.component.ChatDesignTokens
 import com.example.bamachat.ui.component.ChatDrawer
@@ -97,6 +100,7 @@ import com.example.bamachat.util.CloudVoiceManager
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -198,7 +202,7 @@ fun ChatScreen(
             restore = { stored -> if (stored.isBlank()) null else Uri.parse(stored) }
         )
     ) { mutableStateOf<Uri?>(null) }
-    val listState = rememberLazyListState()
+    val listState = key(currentConvId) { rememberLazyListState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
@@ -808,38 +812,6 @@ fun ChatScreen(
         animationSpec = tween(800), label = "themeColor"
     )
 
-    // Auto-scroll — P1-6: only auto-scroll when the user is already near the tail,
-    // or when a brand-new message id just arrived. If the user has scrolled up to
-    // re-read older messages, we leave the position alone.
-    var autoScrollTailId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(messages.lastOrNull()?.id, isStreaming) {
-        val tailId = messages.lastOrNull()?.id ?: return@LaunchedEffect
-        val targetIndex = messages.lastIndex
-        val isNewTail = tailId != autoScrollTailId
-        autoScrollTailId = tailId
-
-        val layoutInfo = listState.layoutInfo
-        val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        val distanceFromTail = targetIndex - lastVisibleIndex
-        // "Near the tail" = within ~2 items of the bottom, OR list was never scrolled yet.
-        val nearTail = lastVisibleIndex < 0 || distanceFromTail <= 2
-
-        // Only follow streaming updates if the user is still pinned near the tail.
-        // For brand-new messages, follow when near-tail OR when the new message is the user's own.
-        val isOwnLastMessage = messages.lastOrNull()?.isUser == true
-        if ((isStreaming && nearTail) || (isNewTail && (nearTail || isOwnLastMessage))) {
-            scope.launch {
-                val currentIndex = listState.firstVisibleItemIndex
-                val farDistance = (targetIndex - currentIndex) > 8
-                if (isStreaming || farDistance) {
-                    listState.scrollToItem(targetIndex)
-                } else {
-                    listState.animateScrollToItem(targetIndex)
-                }
-            }
-        }
-    }
-
     if (showSettingsDialog) {
         SettingsDialog(viewModel = settingsViewModel, onDismiss = { showSettingsDialog = false }, mcpServerManager = viewModel.mcpServerManager, mcpWorkflowManager = viewModel.mcpWorkflowManager)
     }
@@ -1207,12 +1179,35 @@ private fun ChatContent(
     val surfaceOpacity = uiSurfaceOpacity.coerceIn(0.55f, 1.0f)
     val density = LocalDensity.current
     val isKeyboardOpen = WindowInsets.ime.getBottom(density) > 0
+    val scrollScope = rememberCoroutineScope()
+    val nearBottomThresholdPx = with(density) { 56.dp.roundToPx() }
+    var autoFollowEnabled by remember(listState) { mutableStateOf(true) }
+    var programmaticScrollInProgress by remember(listState) { mutableStateOf(false) }
+    var explicitScrollInProgress by remember(listState) { mutableStateOf(false) }
+    var explicitScrollInterrupted by remember(listState) { mutableStateOf(false) }
+    val isNearBottom by remember(listState, nearBottomThresholdPx) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+            ChatScrollPolicy.isNearBottom(
+                totalItemsCount = layoutInfo.totalItemsCount,
+                lastVisibleItemIndex = lastVisibleItem?.index,
+                lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
+                viewportEndOffset = layoutInfo.viewportEndOffset,
+                thresholdPx = nearBottomThresholdPx
+            )
+        }
+    }
+    val showScrollToBottomButton = ChatScrollPolicy.shouldShowScrollButton(
+        hasMessages = messages.isNotEmpty(),
+        isNearBottom = isNearBottom,
+        autoFollowEnabled = autoFollowEnabled
+    )
     var compactInputBarMode by remember { mutableStateOf(false) }
-    var compactBottomNavVisible by remember { mutableStateOf(true) }
     val headerVerticalPadding = if (compactChatHeader) 2.dp else 5.dp
     val headerBottomSpacer = if (compactChatHeader) 0.dp else 2.dp
     val headerTitleStyle = if (compactChatHeader) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge
-    val chatScrollCollapseConnection = remember(isKeyboardOpen, messages.isNotEmpty()) {
+    val chatScrollCollapseConnection = remember(isKeyboardOpen, messages.isNotEmpty(), listState) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (
@@ -1222,16 +1217,88 @@ private fun ChatContent(
                     available.y != 0f
                 ) {
                     compactInputBarMode = true
-                    compactBottomNavVisible = true
+                    if (explicitScrollInProgress) {
+                        explicitScrollInterrupted = true
+                    }
+                    autoFollowEnabled = false
                 }
                 return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            Triple(
+                listState.isScrollInProgress,
+                isNearBottom,
+                programmaticScrollInProgress
+            )
+        }.collect { (isScrollInProgress, nearBottom, isProgrammaticScroll) ->
+            autoFollowEnabled = ChatScrollPolicy.resolveAutoFollow(
+                previousAutoFollow = autoFollowEnabled,
+                isScrollInProgress = isScrollInProgress,
+                isProgrammaticScroll = isProgrammaticScroll,
+                isNearBottom = nearBottom
+            )
+        }
+    }
+    val latestMessage = messages.lastOrNull()
+    LaunchedEffect(
+        listState,
+        latestMessage,
+        messages.size,
+        isLoading,
+        isStreaming,
+        activeToolCalls.size,
+        hasOlderMessages,
+        autoFollowEnabled,
+        explicitScrollInProgress
+    ) {
+        if (!autoFollowEnabled || explicitScrollInProgress || latestMessage == null) {
+            return@LaunchedEffect
+        }
+        val expectedItemCount = messages.size + if (hasOlderMessages) 1 else 0
+        snapshotFlow { listState.layoutInfo.totalItemsCount }
+            .first { it >= expectedItemCount }
+        withFrameNanos { }
+        val targetIndex = ChatScrollPolicy.newestItemIndex(
+            listState.layoutInfo.totalItemsCount
+        ) ?: return@LaunchedEffect
+        programmaticScrollInProgress = true
+        try {
+            val farDistance = kotlin.math.abs(targetIndex - listState.firstVisibleItemIndex) > 8
+            listState.scrollToNewestItem(
+                targetIndex = targetIndex,
+                animated = !isStreaming && !farDistance
+            )
+        } finally {
+            programmaticScrollInProgress = false
+        }
+    }
+    val scrollToNewest: () -> Unit = {
+        if (!explicitScrollInProgress && messages.isNotEmpty()) {
+            explicitScrollInterrupted = false
+            explicitScrollInProgress = true
+            scrollScope.launch {
+                programmaticScrollInProgress = true
+                try {
+                    val expectedItemCount = messages.size + if (hasOlderMessages) 1 else 0
+                    val totalItemsCount = snapshotFlow { listState.layoutInfo.totalItemsCount }
+                        .first { it >= expectedItemCount }
+                    ChatScrollPolicy.newestItemIndex(totalItemsCount)?.let { targetIndex ->
+                        listState.scrollToNewestItem(targetIndex = targetIndex, animated = true)
+                    }
+                } finally {
+                    programmaticScrollInProgress = false
+                    explicitScrollInProgress = false
+                    autoFollowEnabled = !explicitScrollInterrupted
+                }
             }
         }
     }
     LaunchedEffect(messages.isEmpty()) {
         if (messages.isEmpty()) {
             compactInputBarMode = false
-            compactBottomNavVisible = true
         }
     }
     val backgroundGradient = remember(designPalette) {
@@ -1634,6 +1701,23 @@ private fun ChatContent(
                         )
                     }
                 }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (messages.isEmpty()) 0.dp else 60.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showScrollToBottomButton,
+                        enter = fadeIn(tween(140)) + scaleIn(tween(160), initialScale = 0.82f),
+                        exit = fadeOut(tween(100)) + scaleOut(tween(120), targetScale = 0.82f)
+                    ) {
+                        ChatScrollToBottomButton(
+                            themeColor = themeColor,
+                            onClick = scrollToNewest
+                        )
+                    }
+                }
                 Box {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         // P1-1: Stop button visible only while generation/streaming is in flight.
@@ -1708,30 +1792,83 @@ private fun ChatContent(
                         selectedExtensionQuickAction = selectedExtensionQuickAction,
                         onSelectExtensionQuickAction = onSelectExtensionQuickAction,
                         compactMode = compactInputBarMode,
-                        onCompactBottomNavVisibilityChange = { compactBottomNavVisible = it },
                         promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
                         onSelectPromptTemplate = {}
                     )
                     }
                 }
-                AnimatedVisibility(
-                    visible = !isKeyboardOpen && (!compactInputBarMode || compactBottomNavVisible),
-                    enter = fadeIn(tween(160)) + expandVertically(animationSpec = tween(180)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(animationSpec = tween(150))
-                ) {
-                    BamaChatBottomNav(
-                        currentRoute = "chat",
-                        designPreset = uiDesignPreset,
-                        onNavigate = onBottomNavRoute,
-                        attachedToComposer = true,
-                        cornerRoundnessScale = uiCornerScale,
-                        shadowIntensityScale = uiShadowScale,
-                        surfaceOpacity = surfaceOpacity
-                    )
-                }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChatScrollToBottomButton(
+    themeColor: Color,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = if (isFocused) Color.White else themeColor.copy(alpha = 0.72f),
+        animationSpec = tween(120),
+        label = "scrollToBottomBorder"
+    )
+    FloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(52.dp)
+            .onFocusChanged { isFocused = it.isFocused }
+            .border(if (isFocused) 2.dp else 1.dp, borderColor, CircleShape)
+            .semantics {
+                contentDescription = "Zur neuesten Nachricht"
+                role = Role.Button
+            },
+        shape = CircleShape,
+        containerColor = Color(0xFF181321).copy(alpha = 0.97f),
+        contentColor = themeColor,
+        elevation = FloatingActionButtonDefaults.elevation(
+            defaultElevation = 8.dp,
+            pressedElevation = 4.dp,
+            focusedElevation = 10.dp,
+            hoveredElevation = 10.dp
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            modifier = Modifier.size(28.dp)
+        )
+    }
+}
+
+private suspend fun LazyListState.scrollToNewestItem(
+    targetIndex: Int,
+    animated: Boolean
+) {
+    var targetItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+    if (targetItem == null) {
+        if (animated) {
+            animateScrollToItem(targetIndex)
+        } else {
+            scrollToItem(targetIndex)
+        }
+        withFrameNanos { }
+        targetItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+    }
+
+    val remainingDistancePx = ChatScrollPolicy.remainingScrollToBottomPx(
+        totalItemsCount = layoutInfo.totalItemsCount,
+        lastVisibleItemIndex = targetItem?.index,
+        lastVisibleItemEndOffset = targetItem?.let { it.offset + it.size },
+        viewportEndOffset = layoutInfo.viewportEndOffset
+    ) ?: return
+    if (remainingDistancePx <= 0) return
+
+    if (animated) {
+        animateScrollBy(remainingDistancePx.toFloat())
+    } else {
+        scrollBy(remainingDistancePx.toFloat())
     }
 }
 
