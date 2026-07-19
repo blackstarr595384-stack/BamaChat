@@ -178,7 +178,10 @@ class ChatViewModelAiStreamConsumerTest {
 
         val error = events.filterIsInstance<AiStreamError>().single()
 
-        assertEquals("all providers failed", error.message)
+        assertEquals(
+            "OpenRouter hat nicht geantwortet. Bitte versuche es erneut oder wähle einen anderen Anbieter.",
+            error.message
+        )
         assertEquals(AiProviderId.OPENROUTER, error.provider)
         assertTrue(events.last() is AiStreamFinished)
     }
@@ -186,15 +189,17 @@ class ChatViewModelAiStreamConsumerTest {
     @Test
     fun legacyIntermediateOnErrorDoesNotEmitTerminalError() = runBlocking {
         val intermediateErrors = mutableListOf<String>()
+        val safeFallbackStatus =
+            "OpenRouter antwortet gerade nicht. BamaChat versucht einen anderen Anbieter."
         val events = legacyEvents(
             onIntermediateError = { intermediateErrors.add(it) }
         ) { onChunk, onError ->
-            onError("OpenRouter fehlgeschlagen, versuche Groq...")
+            onError(safeFallbackStatus)
             onChunk("ok")
             ApiManager.ApiResponse(success = true, content = "ok", usedProvider = ApiClient.Provider.GROQ)
         }
 
-        assertEquals(listOf("OpenRouter fehlgeschlagen, versuche Groq..."), intermediateErrors)
+        assertEquals(listOf(safeFallbackStatus), intermediateErrors)
         assertEquals(emptyList<AiStreamError>(), events.filterIsInstance<AiStreamError>())
         assertEquals("ok", events.filterIsInstance<AiStreamCompleted>().single().response.message.text)
     }
@@ -285,8 +290,32 @@ class ChatViewModelAiStreamConsumerTest {
 
         assertFalse(result.success)
         assertEquals("provider_error", result.fallbackReason)
-        assertEquals("legacy failed", result.errorMessage)
+        assertEquals(
+            "OpenRouter hat nicht geantwortet. Bitte versuche es erneut oder wähle einen anderen Anbieter.",
+            result.errorMessage
+        )
         assertEquals(false, terminalError?.retryable)
+    }
+
+    @Test
+    fun legacyEmptyResponseDoesNotSaveEmptyAssistantMessage() = runBlocking {
+        val saved = mutableListOf<SavedMessage>()
+
+        val result = consumeLegacy(
+            saveMessage = { convId, message, touchConversation ->
+                saved.add(SavedMessage(convId, message, touchConversation))
+            }
+        ) { _, _ ->
+            ApiManager.ApiResponse(
+                success = true,
+                content = "",
+                usedProvider = ApiClient.Provider.OPENROUTER
+            )
+        }
+
+        assertFalse(result.success)
+        assertTrue(saved.none { it.touchConversation || it.message.text.isBlank() })
+        assertFalse(result.errorMessage.orEmpty().contains("Legacy", ignoreCase = true))
     }
 
     @Test

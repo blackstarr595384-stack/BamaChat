@@ -1,9 +1,6 @@
 package com.example.bamachat
 
-import android.content.Context
-import android.content.Intent
 import android.os.SystemClock
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -21,7 +18,6 @@ import org.junit.runner.RunWith
 class AppE2ESmokeTest {
 
     companion object {
-        private const val PACKAGE_NAME = "com.example.bamachat"
         private const val TIMEOUT = 20_000L
     }
 
@@ -109,12 +105,14 @@ class AppE2ESmokeTest {
         val voiceA11y = waitForAnyDescContains(4_000L, "Spracherkennung starten", "Voice")
         assertTrue("A11y-Label für Sprachbutton fehlt", voiceA11y != null || chatStillVisible)
 
-        // Mini-Apps Smoke: Route öffnen und Kern-Apps laden
-        var miniAppsOpened = clickAnyText(3_500L, "Mini-Apps", "Mini Apps") ||
+        // Mini-Apps Smoke: aktuelle Tools-Route öffnen und erreichbare Apps laden
+        var miniAppsOpened = clickAnyDescContains(3_500L, "Tools") ||
+            clickAnyText(3_500L, "Tools", "Mini-Apps", "Mini Apps") ||
             clickAnyDescContains(3_500L, "Mini-Apps", "Mini Apps")
         if (!miniAppsOpened) {
-            val homeBack = clickAnyText(2_500L, "Home") || clickAnyDescContains(2_500L, "Home")
-            if (homeBack) {
+            val hubBack = clickAnyText(2_500L, "Hub", "Home") ||
+                clickAnyDescContains(2_500L, "Hub", "Home")
+            if (hubBack) {
                 miniAppsOpened = clickAnyText(5_000L, "Mini-Apps", "Mini Apps") ||
                     clickAnyDescContains(5_000L, "Mini-Apps", "Mini Apps")
             }
@@ -123,30 +121,29 @@ class AppE2ESmokeTest {
 
         val miniAppsVisible = waitForAnyText(
             TIMEOUT,
+            "AI Werkzeuge",
             "Mini-Apps V2",
             "Mini-Apps Discover",
             "Meine Apps"
         )
         assertNotNull("Mini-Apps Screen nicht geladen", miniAppsVisible)
 
-        val photoOpened = clickAnyText(6_000L, "Photo Studio")
-        assertTrue("Photo Studio konnte nicht geöffnet werden", photoOpened)
-        val photoUiVisible = waitForAnyText(6_000L, "Bild wählen", "In Galerie speichern")
-        assertNotNull("Photo Studio UI nicht sichtbar", photoUiVisible)
-        device.pressBack()
+        val promptLabOpened = clickAnyText(6_000L, "Prompt Lab")
+        assertTrue("Prompt Lab konnte nicht geöffnet werden", promptLabOpened)
+        val promptLabVisible = waitForAnyText(6_000L, "System Prompt", "Prompt Lab")
+        assertNotNull("Prompt Lab UI nicht sichtbar", promptLabVisible)
+        assertTrue("Mini-App-Zurück konnte nicht angeklickt werden", clickAnyDescContains(3_000L, "Zurück"))
+        assertNotNull("Mini-Apps Screen nach Zurück nicht sichtbar", waitForAnyText(6_000L, "AI Werkzeuge"))
 
-        val voiceOpened = clickAnyText(6_000L, "Voice Notes AI")
+        val voiceOpened = clickAnyText(6_000L, "Voice Notes")
         assertTrue("Voice Notes AI konnte nicht geöffnet werden", voiceOpened)
-        val voiceUiVisible = waitForAnyText(6_000L, "Spracheingabe", "Text speichern")
+        val voiceUiVisible = waitForAnyText(6_000L, "Voice Notes Transcriber", "Aufnahme starten")
         assertNotNull("Voice Notes AI UI nicht sichtbar", voiceUiVisible)
-        device.pressBack()
     }
 
     private fun launchApp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
-            ?: throw IllegalStateException("Launch Intent für $PACKAGE_NAME nicht gefunden")
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val launchIntent = TestAppIdentity.mainActivityIntent()
         device.pressHome()
         SystemClock.sleep(400)
         context.startActivity(launchIntent)
@@ -227,7 +224,7 @@ class AppE2ESmokeTest {
         val end = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < end) {
             allowRuntimeDialogsIfPresent()
-            val byPkg = device.hasObject(By.pkg(PACKAGE_NAME))
+            val byPkg = device.hasObject(By.pkg(TestAppIdentity.APPLICATION_ID))
             val byTitle = device.hasObject(By.textContains("BamaChat")) ||
                 device.hasObject(By.textContains("BamaHub")) ||
                 device.hasObject(By.textContains("Willkommen"))

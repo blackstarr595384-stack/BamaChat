@@ -20,6 +20,7 @@ import com.example.bamachat.service.ConversationService
 import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
+import com.example.bamachat.service.UserFacingAiErrorMapper
 import com.example.bamachat.service.ImageUrlResolver
 import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.shared.core.ChatSendDeduplicator
@@ -273,9 +274,10 @@ class ChatViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                val userFailure = UserFacingAiErrorMapper.terminal(provider, error.message)
                 send(
                     AiStreamError(
-                        message = error.message ?: "Legacy stream failed",
+                        message = userFailure.message,
                         exceptionClass = error::class.java.simpleName,
                         provider = provider,
                         model = model
@@ -301,9 +303,10 @@ class ChatViewModel @Inject constructor(
                 )
             } else {
                 onTerminalError(response)
+                val userFailure = UserFacingAiErrorMapper.terminal(finalProvider, response.error)
                 send(
                     AiStreamError(
-                        message = response.error.ifBlank { "Legacy stream returned an empty response" },
+                        message = userFailure.message,
                         provider = finalProvider,
                         model = model
                     )
@@ -389,6 +392,8 @@ class ChatViewModel @Inject constructor(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
+    private val _providerFallbackMessage = MutableStateFlow<String?>(null)
+    val providerFallbackMessage: StateFlow<String?> = _providerFallbackMessage.asStateFlow()
     private val _errorActionLabel = MutableStateFlow<String?>(null)
     val errorActionLabel: StateFlow<String?> = _errorActionLabel
     private val _isErrorRetryable = MutableStateFlow(false)
@@ -1082,10 +1087,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         convId: String, systemPrompt: String, messages: List<OpenRouterMessage>,
         webContext: ChatEngine.LiveWebContext?, startedAt: Long
     ) {
+        _providerFallbackMessage.value = null
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
-        saveMessageLocally(convId, assistantMsg, touchConversation = false)
         val streamingBuffer = StringBuilder()
         val streamFlushInterval = 250L
         var lastFlushAt = System.currentTimeMillis()
@@ -1123,15 +1128,14 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                             onError = onError
                         )
                     },
-                    onIntermediateError = { error ->
-                        publishError(
-                            message = error,
-                            retryable = true,
-                            actionLabel = "Erneut versuchen"
-                        )
+                    onIntermediateError = { safeStatus ->
+                        _providerFallbackMessage.value = safeStatus
                         AppTelemetry.logEvent(
-                            "chat_stream_error",
-                            mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString())
+                            "chat_stream_fallback",
+                            mapOf(
+                                "category" to "provider_fallback",
+                                "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                            )
                         )
                     },
                     onTerminalError = { response ->
@@ -1165,6 +1169,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 streamStartedAtMs = startedAt,
                 logStreamEvent = AppTelemetry::logEvent
             )
+            _providerFallbackMessage.value = null
 
             if (result.success) {
                 AppTelemetry.logEvent(
@@ -1177,10 +1182,12 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             } else {
                 val terminalError = terminalLegacyError
                 if (terminalError != null || !result.errorMessage.isNullOrBlank()) {
+                    val userFailure = UserFacingAiErrorMapper.terminal(
+                        AiProviderId.OPENROUTER,
+                        terminalError?.error
+                    )
                     publishError(
-                        message = terminalError?.error?.takeIf { it.isNotBlank() }
-                            ?: result.errorMessage
-                            ?: "Legacy stream failed",
+                        message = result.errorMessage ?: userFailure.message,
                         retryable = terminalError?.retryable ?: true,
                         actionLabel = if (terminalError?.retryable != false) "Erneut versuchen" else null
                     )
@@ -1200,6 +1207,8 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         } catch (e: Exception) {
             handleError(e)
             repo.deleteMessage(assistantMsg.id)
+        } finally {
+            _providerFallbackMessage.value = null
         }
     }
 
@@ -1446,6 +1455,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _errorMessage.value = null
         _errorActionLabel.value = null
         _isErrorRetryable.value = false
+    }
+
+    fun dismissProviderFallbackStatus() {
+        _providerFallbackMessage.value = null
     }
 
     fun retryLastFailedMessage(): Boolean {

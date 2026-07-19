@@ -21,6 +21,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,6 +39,21 @@ data class BottomNavItem(
     val route: String,
     val badgeCount: Int = 0
 )
+
+internal object BamaChatBottomNavLayout {
+    val ContainerHeight = 80.dp
+    val OuterVerticalPadding = 4.dp
+    val ContentClearance = 20.dp
+}
+
+private fun bottomNavigationTestTag(route: String): String = when (route) {
+    "home_hub" -> "bottom_nav_hub"
+    "chat" -> "bottom_nav_chat"
+    "mini_apps" -> "bottom_nav_tools"
+    "profile" -> "bottom_nav_profile"
+    "settings" -> "bottom_nav_settings"
+    else -> "bottom_nav_$route"
+}
 
 @Composable
 fun BamaChatBottomNav(
@@ -62,7 +80,10 @@ fun BamaChatBottomNav(
 
     Surface(
         modifier = modifier
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(
+                horizontal = 12.dp,
+                vertical = BamaChatBottomNavLayout.OuterVerticalPadding
+            )
             .shadow(
                 elevation = (24f * shadowIntensityScale).coerceIn(8f, 40f).dp,
                 shape = shape,
@@ -76,6 +97,7 @@ fun BamaChatBottomNav(
         NavigationBar(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = BamaChatBottomNavLayout.ContainerHeight)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
@@ -99,6 +121,9 @@ fun BamaChatBottomNav(
                 )
 
                 NavigationBarItem(
+                    modifier = Modifier
+                        .testTag(bottomNavigationTestTag(item.route))
+                        .semantics { contentDescription = item.label },
                     selected = isSelected,
                     onClick = { onNavigate(item.route) },
                     colors = NavigationBarItemDefaults.colors(

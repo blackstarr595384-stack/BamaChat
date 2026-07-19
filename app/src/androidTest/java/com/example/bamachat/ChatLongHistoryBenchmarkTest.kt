@@ -1,10 +1,8 @@
 package com.example.bamachat
 
 import android.content.Context
-import android.content.Intent
 import android.os.SystemClock
 import android.os.ParcelFileDescriptor
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -23,7 +21,6 @@ import org.junit.runner.RunWith
 class ChatLongHistoryBenchmarkTest {
 
     companion object {
-        private const val PACKAGE_NAME = "com.example.bamachat"
         private const val TIMEOUT = 25_000L
     }
 
@@ -38,52 +35,66 @@ class ChatLongHistoryBenchmarkTest {
     fun longHistoryChat_scrollBenchmark() = runBlocking {
         val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
         val benchmarkConversationId = "benchmark-long-history-1200"
-        seedConversation(targetContext, benchmarkConversationId, 1_200)
+        val preferences = targetContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val previousConversationId = preferences.getString("current_conversation_id", null)
 
-        device.pressHome()
-        SystemClock.sleep(400)
-        executeShell("dumpsys gfxinfo $PACKAGE_NAME reset")
-        launchApp()
+        try {
+            seedConversation(targetContext, benchmarkConversationId, 1_200)
 
-        clickAnyText("Als Gast starten", "Als Gast fortfahren", "Zum BamaHub")
-        if (!device.hasObject(By.textContains("BamaChat"))) {
-            clickAnyText("Chat", "Chats", "Nachrichten")
+            device.pressHome()
+            SystemClock.sleep(400)
+            executeShell("dumpsys gfxinfo ${TestAppIdentity.APPLICATION_ID} reset")
+            launchApp()
+
+            clickAnyText("Als Gast starten", "Als Gast fortfahren", "Zum BamaHub")
+            if (!device.hasObject(By.textContains("BamaChat"))) {
+                clickAnyText("Chat", "Chats", "Nachrichten")
+            }
+            val chatVisible = device.wait(Until.hasObject(By.textContains("BamaChat")), TIMEOUT)
+            assertTrue("Chat-Screen wurde nicht geöffnet", chatVisible)
+
+            repeat(22) { index ->
+                if (index % 2 == 0) swipeUp() else swipeDown()
+            }
+            device.waitForIdle()
+            SystemClock.sleep(600)
+
+            val gfxOutput = executeShell("dumpsys gfxinfo ${TestAppIdentity.APPLICATION_ID}")
+            val totalFrames = Regex("""Total frames rendered:\s+(\d+)""")
+                .find(gfxOutput)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toIntOrNull()
+                ?: 0
+
+            val jankPercent = Regex("""Janky frames:\s+\d+\s+\(([\d.]+)%\)""")
+                .find(gfxOutput)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toFloatOrNull()
+                ?: -1f
+
+            println("CHAT_BENCHMARK totalFrames=$totalFrames jankPercent=$jankPercent")
+            assertTrue("Scroll-Benchmark lieferte keine Frames", totalFrames > 0)
+            assertTrue("Jank-Wert konnte nicht gelesen werden", jankPercent >= 0f)
+        } finally {
+            device.pressHome()
+            cleanupBenchmarkConversation(targetContext, benchmarkConversationId)
+            preferences.edit().apply {
+                if (previousConversationId == null) {
+                    remove("current_conversation_id")
+                } else {
+                    putString("current_conversation_id", previousConversationId)
+                }
+            }.commit()
         }
-        val chatVisible = device.wait(Until.hasObject(By.textContains("BamaChat")), TIMEOUT)
-        assertTrue("Chat-Screen wurde nicht geöffnet", chatVisible)
-
-        repeat(22) { index ->
-            if (index % 2 == 0) swipeUp() else swipeDown()
-        }
-        device.waitForIdle()
-        SystemClock.sleep(600)
-
-        val gfxOutput = executeShell("dumpsys gfxinfo $PACKAGE_NAME")
-        val totalFrames = Regex("""Total frames rendered:\s+(\d+)""")
-            .find(gfxOutput)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.toIntOrNull()
-            ?: 0
-
-        val jankPercent = Regex("""Janky frames:\s+\d+\s+\(([\d.]+)%\)""")
-            .find(gfxOutput)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.toFloatOrNull()
-            ?: -1f
-
-        println("CHAT_BENCHMARK totalFrames=$totalFrames jankPercent=$jankPercent")
-        // UIAutomator + Gerätezustand führen bei gfxinfo zu stark schwankenden Zahlen.
-        // Deshalb hier nur Smoke-Gate: Benchmark muss messbar sein und Parsing funktionieren.
-        assertTrue("Scroll-Benchmark lieferte keine Frames", totalFrames > 0)
-        assertTrue("Jank-Wert konnte nicht gelesen werden", jankPercent >= 0f)
     }
 
     private suspend fun seedConversation(context: Context, conversationId: String, messageCount: Int) {
         val dao = ChatDatabase.getDatabase(context).chatDao()
-        dao.deleteAllMessages()
-        dao.deleteAllConversations()
+        dao.deleteMessagesForConversation(conversationId)
+        dao.deleteMessagesFtsForConversation(conversationId)
+        dao.deleteConversation(conversationId)
 
         val now = System.currentTimeMillis()
         dao.insertConversation(
@@ -120,13 +131,18 @@ class ChatLongHistoryBenchmarkTest {
     }
 
     private fun launchApp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
-            ?: throw IllegalStateException("Launch Intent für $PACKAGE_NAME nicht gefunden")
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val launchIntent = TestAppIdentity.mainActivityIntent()
         device.pressHome()
         SystemClock.sleep(350)
         context.startActivity(launchIntent)
+    }
+
+    private suspend fun cleanupBenchmarkConversation(context: Context, conversationId: String) {
+        val dao = ChatDatabase.getDatabase(context).chatDao()
+        dao.deleteMessagesForConversation(conversationId)
+        dao.deleteMessagesFtsForConversation(conversationId)
+        dao.deleteConversation(conversationId)
     }
 
     private fun clickAnyText(vararg values: String): Boolean {

@@ -52,6 +52,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -86,6 +87,8 @@ import com.example.bamachat.ui.component.EmptyChatState
 import com.example.bamachat.ui.component.PremiumPaywallDialog
 import com.example.bamachat.ui.component.TypingIndicator
 import com.example.bamachat.ui.component.ToolCallsDisplay
+import com.example.bamachat.ui.component.voice.VoiceRuntimeDisclosure
+import com.example.bamachat.ui.component.voice.VoiceStartConfirmationDialog
 import com.example.bamachat.ui.component.compactLabel
 import com.example.bamachat.ui.component.designTokensFor
 import com.example.bamachat.ui.screen.PersonaMood
@@ -95,6 +98,7 @@ import com.example.bamachat.ui.theme.NeonCyan
 import com.example.bamachat.ui.theme.NeonGreen
 import com.example.bamachat.ui.theme.NeonPink
 import com.example.bamachat.ui.theme.NeonPurple
+import com.example.bamachat.ui.voice.VoiceRuntimePresentation
 import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
@@ -136,7 +140,8 @@ fun ChatScreen(
     onOpenAgentHub: () -> Unit = {},
     onOpenComposeLab: () -> Unit = {},
     onOpenWorkspace: () -> Unit = {},
-    onSearchClick: () -> Unit = {}
+    onSearchClick: () -> Unit = {},
+    onOpenSettings: () -> Unit = {}
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
@@ -145,6 +150,7 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val isStreaming by viewModel.isStreaming.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val providerFallbackMessage by viewModel.providerFallbackMessage.collectAsStateWithLifecycle()
     val errorActionLabel by viewModel.errorActionLabel.collectAsStateWithLifecycle()
     val isErrorRetryable by viewModel.isErrorRetryable.collectAsStateWithLifecycle()
     val hasOlderMessages by viewModel.hasOlderMessages.collectAsStateWithLifecycle()
@@ -186,6 +192,7 @@ fun ChatScreen(
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsStateWithLifecycle()
     val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
     val voiceUiState by voiceViewModel.uiState.collectAsStateWithLifecycle()
+    val liveRuntimePresentation = VoiceRuntimePresentation.resolve()
 
     var inputText by rememberSaveable { mutableStateOf("") }
     // P0-2: persist the selected image URI across recreation. We store the URI's
@@ -237,13 +244,24 @@ fun ChatScreen(
             Toast.makeText(context, "Kamera-Berechtigung wurde abgelehnt.", Toast.LENGTH_SHORT).show()
         }
     }
-    var showSettingsDialog by remember { mutableStateOf(false) }
     var showPersonaDialog by remember { mutableStateOf(false) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val snackbarHostState = remember { SnackbarHostState() }
 
+    LaunchedEffect(providerFallbackMessage) {
+        providerFallbackMessage?.let { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                withDismissAction = true,
+                duration = SnackbarDuration.Indefinite
+            )
+            viewModel.dismissProviderFallbackStatus()
+        }
+    }
+
     LaunchedEffect(errorMessage, isErrorRetryable, errorActionLabel) {
         errorMessage?.let {
+            snackbarHostState.currentSnackbarData?.dismiss()
             val result = snackbarHostState.showSnackbar(
                 message = it,
                 actionLabel = if (isErrorRetryable) (errorActionLabel ?: "Erneut") else null,
@@ -289,7 +307,13 @@ fun ChatScreen(
     var livePrivacyConfirmed by rememberSaveable {
         mutableStateOf(settingsPreferences.getBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, false))
     }
+    var simulationStartConfirmed by rememberSaveable { mutableStateOf(false) }
     var showLivePrivacyConfirmation by rememberSaveable { mutableStateOf(false) }
+    val liveStartConfirmed = if (liveRuntimePresentation.persistsPrivacyConfirmation) {
+        livePrivacyConfirmed
+    } else {
+        simulationStartConfirmed
+    }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -318,18 +342,23 @@ fun ChatScreen(
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
+    val startConfirmedLiveInput: () -> Unit = {
+        if (voiceUiState.liveSessionActive) {
+            voiceViewModel.beginLiveUserTurn()
+        } else {
+            voiceViewModel.startLiveSession(selectedPersona.displayName)
+        }
+    }
     val startVoiceInput: () -> Unit = {
         if (voiceUiState.mode == VoiceMode.LIVE && !voiceUiState.realtimeAvailable) {
             showVoicePanel = true
-        } else if (voiceUiState.mode == VoiceMode.LIVE && !livePrivacyConfirmed) {
+        } else if (voiceUiState.mode == VoiceMode.LIVE && !liveStartConfirmed) {
             showLivePrivacyConfirmation = true
+        } else if (voiceUiState.mode == VoiceMode.LIVE && !liveRuntimePresentation.requiresMicrophonePermission) {
+            startConfirmedLiveInput()
         } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             if (voiceUiState.mode == VoiceMode.LIVE) {
-                if (voiceUiState.liveSessionActive) {
-                    voiceViewModel.beginLiveUserTurn()
-                } else {
-                    voiceViewModel.startLiveSession(selectedPersona.displayName)
-                }
+                startConfirmedLiveInput()
             } else {
                 if (isLoading || isStreaming) viewModel.cancelStream()
                 voiceViewModel.startListening()
@@ -342,8 +371,8 @@ fun ChatScreen(
         if (voiceUiState.mode == VoiceMode.LIVE) {
             when {
                 !voiceUiState.realtimeAvailable -> showVoicePanel = true
-                !livePrivacyConfirmed -> showLivePrivacyConfirmation = true
-                ContextCompat.checkSelfPermission(
+                !liveStartConfirmed -> showLivePrivacyConfirmation = true
+                liveRuntimePresentation.requiresMicrophonePermission && ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.RECORD_AUDIO
                 ) != PackageManager.PERMISSION_GRANTED -> requestMicrophonePermission()
@@ -434,41 +463,30 @@ fun ChatScreen(
         )
     }
     if (showLivePrivacyConfirmation) {
-        AlertDialog(
-            onDismissRequest = { showLivePrivacyConfirmation = false },
-            title = { Text("Live-Unterhaltung aktivieren") },
-            text = {
-                Text(
-                    "Im Live-Modus verlässt Mikrofon-Audio das Gerät und wird von OpenAI verarbeitet. " +
-                        "Der dauerhafte OpenAI-Schlüssel wird nicht in der App gespeichert. " +
-                        "Finale Transkripte können im bestehenden BamaChat-Verlauf gespeichert werden. " +
-                        "Die Live-Sitzung endet nach drei Minuten ohne Aktivität oder spätestens nach dem Serverlimit. " +
-                        "Für mehr Privatsphäre bleibt der lokale Modus verfügbar."
-                )
+        VoiceStartConfirmationDialog(
+            presentation = liveRuntimePresentation,
+            onConfirm = {
+                if (liveRuntimePresentation.persistsPrivacyConfirmation) {
+                    livePrivacyConfirmed = true
+                    settingsPreferences.edit()
+                        .putBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, true)
+                        .apply()
+                } else {
+                    simulationStartConfirmed = true
+                }
+                showLivePrivacyConfirmation = false
+                if (liveRuntimePresentation.requiresMicrophonePermission &&
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    requestMicrophonePermission()
+                } else {
+                    startConfirmedLiveInput()
+                }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        livePrivacyConfirmed = true
-                        settingsPreferences.edit()
-                            .putBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, true)
-                            .apply()
-                        showLivePrivacyConfirmation = false
-                        if (ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-                        ) {
-                            voiceViewModel.startLiveSession(selectedPersona.displayName)
-                        } else {
-                            requestMicrophonePermission()
-                        }
-                    }
-                ) { Text("Zustimmen und starten") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLivePrivacyConfirmation = false }) { Text("Abbrechen") }
-            }
+            onDismiss = { showLivePrivacyConfirmation = false }
         )
     }
     val isVoiceListening = if (voiceUiState.mode == VoiceMode.LIVE) {
@@ -543,15 +561,6 @@ fun ChatScreen(
         animationSpec = tween(800), label = "themeColor"
     )
 
-    if (showSettingsDialog) {
-        SettingsDialog(
-            viewModel = settingsViewModel,
-            voiceViewModel = voiceViewModel,
-            onDismiss = { showSettingsDialog = false },
-            mcpServerManager = viewModel.mcpServerManager,
-            mcpWorkflowManager = viewModel.mcpWorkflowManager
-        )
-    }
     if (showPersonaDialog) {
         PersonaDialog(viewModel, onDismiss = { showPersonaDialog = false })
     }
@@ -589,6 +598,7 @@ fun ChatScreen(
     }
 
     ModalNavigationDrawer(
+        modifier = Modifier.testTag("chat_screen"),
         drawerState = drawerState,
         drawerContent = {
             ChatDrawer(
@@ -706,7 +716,7 @@ fun ChatScreen(
             onBottomNavRoute = onBottomNavRoute,
             onSearchClick = onSearchClick,
             onMenuClick = { scope.launch { drawerState.open() } },
-            onSettingsClick = { showSettingsDialog = true },
+            onSettingsClick = onOpenSettings,
             onOpenWorkspaceClick = onOpenWorkspace,
             onMiniAppsClick = onOpenMiniApps,
             onAgentHubClick = onOpenAgentHub,
@@ -798,6 +808,12 @@ private fun BamaVoicePanel(
     onEndConversation: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val runtimePresentation = VoiceRuntimePresentation.resolve()
+    val displayedConnectionLabel = if (uiState.mode == VoiceMode.LIVE) {
+        runtimePresentation.statusText(uiState.state) ?: uiState.connectionLabel
+    } else {
+        uiState.connectionLabel
+    }
     val sessionElapsedSeconds by produceState(
         initialValue = 0L,
         key1 = uiState.sessionStartedAtEpochMillis,
@@ -830,7 +846,7 @@ private fun BamaVoicePanel(
             ) {
                 Column {
                     Text("BamaVoice", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(uiState.connectionLabel, color = NeonCyan, style = MaterialTheme.typography.labelLarge)
+                    Text(displayedConnectionLabel, color = NeonCyan, style = MaterialTheme.typography.labelLarge)
                 }
                 Surface(
                     shape = RoundedCornerShape(50.dp),
@@ -838,25 +854,37 @@ private fun BamaVoicePanel(
                     border = androidx.compose.foundation.BorderStroke(1.dp, NeonPurple.copy(alpha = 0.45f))
                 ) {
                     Text(
-                        uiState.mode.displayName,
+                        if (uiState.mode == VoiceMode.LIVE) runtimePresentation.modeLabel else uiState.mode.displayName,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
             }
 
+            if (uiState.mode == VoiceMode.LIVE) {
+                VoiceRuntimeDisclosure(runtimePresentation)
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 VoiceProviderBadge(
-                    label = "Eingabe: ${uiState.inputProvider.displayName}",
+                    label = if (uiState.mode == VoiceMode.LIVE) {
+                        runtimePresentation.inputProviderLabel ?: "Eingabe: ${uiState.inputProvider.displayName}"
+                    } else {
+                        "Eingabe: ${uiState.inputProvider.displayName}"
+                    },
                     icon = Icons.Default.Mic
                 )
                 VoiceProviderBadge(
-                    label = "Ausgabe: ${uiState.outputProvider.displayName}",
+                    label = if (uiState.mode == VoiceMode.LIVE) {
+                        runtimePresentation.outputProviderLabel ?: "Ausgabe: ${uiState.outputProvider.displayName}"
+                    } else {
+                        "Ausgabe: ${uiState.outputProvider.displayName}"
+                    },
                     icon = Icons.AutoMirrored.Filled.VolumeUp
                 )
             }
 
-            if (uiState.mode == VoiceMode.LIVE) {
+            if (uiState.mode == VoiceMode.LIVE && runtimePresentation.showRealtimeVoice) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -883,11 +911,13 @@ private fun BamaVoicePanel(
                     style = MaterialTheme.typography.labelMedium,
                     color = NeonCyan
                 )
-                Text(
-                    "Automatisches Ende nach 3 Min. Inaktivität; Serverlimit wird oben angezeigt.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.62f)
-                )
+                if (runtimePresentation.showServerDurationPolicy) {
+                    Text(
+                        "Automatisches Ende nach 3 Min. Inaktivität; Serverlimit wird oben angezeigt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.62f)
+                    )
+                }
             }
 
             VoiceTranscriptCard(
@@ -925,7 +955,7 @@ private fun BamaVoicePanel(
 
             if (uiState.mode == com.example.bamachat.voice.VoiceMode.LIVE && !uiState.realtimeAvailable) {
                 Text(
-                    "Für Live-Unterhaltung muss zuerst der sichere BamaVoice-Server eingerichtet werden.",
+                    runtimePresentation.unavailableNotice,
                     color = NeonPink,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -950,7 +980,11 @@ private fun BamaVoicePanel(
                         } else {
                             Icons.Default.Mic
                         },
-                        contentDescription = if (isListening) "Spracheingabe beenden" else "Spracheingabe starten"
+                        contentDescription = if (isListening) {
+                            runtimePresentation.stopInputActionDescription ?: "Spracheingabe beenden"
+                        } else {
+                            runtimePresentation.startInputActionDescription ?: "Spracheingabe starten"
+                        }
                     )
                 }
                 FilledTonalIconButton(
@@ -1369,7 +1403,10 @@ private fun ChatContent(
                                         Icon(Icons.Default.Share, "Teilen", tint = Color.White)
                                     }
                                     Box {
-                                        IconButton(onClick = { topMenuExpanded = true }) {
+                                        IconButton(
+                                            onClick = { topMenuExpanded = true },
+                                            modifier = Modifier.testTag("chat_more_button")
+                                        ) {
                                             Icon(Icons.Default.MoreVert, "Mehr", tint = Color.White)
                                         }
                                         DropdownMenu(
@@ -1417,6 +1454,7 @@ private fun ChatContent(
                                                 }
                                             )
                                             DropdownMenuItem(
+                                                modifier = Modifier.testTag("chat_settings_button"),
                                                 text = { Text("Einstellungen") },
                                                 leadingIcon = { Icon(Icons.Default.Settings, null) },
                                                 onClick = {

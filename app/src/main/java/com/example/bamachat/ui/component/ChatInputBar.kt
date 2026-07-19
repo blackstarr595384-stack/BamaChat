@@ -44,11 +44,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.bamachat.ui.theme.NeonPurple
+import com.example.bamachat.ui.voice.VoiceRuntimePresentation
 import com.example.bamachat.ui.theme.NeonCyan
 import com.example.bamachat.ui.theme.NeonPink
 import com.example.bamachat.ui.theme.SurfaceDarkElevated
 import com.example.bamachat.ui.theme.SurfaceDarkInput
 import com.example.bamachat.ui.viewmodel.ChatViewModel
+import com.example.bamachat.voice.VoiceMode
 import com.example.bamachat.voice.VoiceSessionState
 import com.example.bamachat.voice.VoiceSessionUiState
 
@@ -454,7 +456,12 @@ private fun VoiceSessionStatus(
     onStopVoice: () -> Unit
 ) {
     val state = uiState.state
-    val statusText = when (state) {
+    val runtimeStatusText = if (uiState.mode == VoiceMode.LIVE) {
+        VoiceRuntimePresentation.resolve().statusText(state)
+    } else {
+        null
+    }
+    val statusText = runtimeStatusText ?: when (state) {
         VoiceSessionState.Idle -> ""
         VoiceSessionState.Preparing -> "Mikrofon wird vorbereitet …"
         VoiceSessionState.Connecting -> "Sichere Verbindung wird hergestellt …"

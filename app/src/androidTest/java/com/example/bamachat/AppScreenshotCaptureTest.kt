@@ -1,7 +1,6 @@
 package com.example.bamachat
 
 import android.content.Context
-import android.content.Intent
 import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -21,7 +20,6 @@ import java.io.File
 class AppScreenshotCaptureTest {
 
     companion object {
-        private const val PACKAGE_NAME = "com.example.bamachat"
         private const val TIMEOUT = 25_000L
     }
 
@@ -83,10 +81,8 @@ class AppScreenshotCaptureTest {
     }
 
     private fun launchApp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
-            ?: throw IllegalStateException("Launch Intent für $PACKAGE_NAME nicht gefunden")
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val launchIntent = TestAppIdentity.mainActivityIntent()
         device.pressHome()
         SystemClock.sleep(400)
         context.startActivity(launchIntent)
@@ -133,7 +129,7 @@ class AppScreenshotCaptureTest {
         val end = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < end) {
             allowRuntimeDialogsIfPresent()
-            val byPkg = device.hasObject(By.pkg(PACKAGE_NAME))
+            val byPkg = device.hasObject(By.pkg(TestAppIdentity.APPLICATION_ID))
             val byTitle = device.hasObject(By.textContains("BamaChat")) ||
                 device.hasObject(By.textContains("BamaHub")) ||
                 device.hasObject(By.textContains("Willkommen"))

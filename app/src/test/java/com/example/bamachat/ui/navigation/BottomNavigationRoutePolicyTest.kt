@@ -92,4 +92,15 @@ class BottomNavigationRoutePolicyTest {
         assertTrue(state.visible)
         assertEquals("settings", state.selectedRoute)
     }
+
+    @Test
+    fun settingsVoiceSubpageKeepsSettingsSelectedAndVisible() {
+        val state = BottomNavigationRoutePolicy.resolve(
+            previousState = BottomNavigationUiState(visible = true, selectedRoute = "settings"),
+            destinationHierarchyRoutes = listOf("settings/voice-audio")
+        )
+
+        assertTrue(state.visible)
+        assertEquals("settings", state.selectedRoute)
+    }
 }
