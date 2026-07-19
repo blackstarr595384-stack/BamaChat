@@ -77,6 +77,9 @@ private fun normalizeRoute(route: String?): String? = BottomNavigationRoutePolic
 
 private fun topLevelRank(route: String?): Int = topLevelRoutes.indexOf(normalizeRoute(route))
 
+internal fun shouldEndLiveVoiceSession(previousUid: String?, currentUid: String?): Boolean =
+    previousUid != null && previousUid != currentUid
+
 @Composable
 fun BamaChatApp() {
     val chatViewModel: ChatViewModel = hiltViewModel()
@@ -99,6 +102,14 @@ fun BamaChatApp() {
     val developerRealtimeCollabTesting by settingsViewModel.developerRealtimeCollabTesting.collectAsState()
     val isAuthenticated by authViewModel.isAuthenticated.collectAsState()
     val firebaseUser by authViewModel.firebaseUser.collectAsState()
+    var previousFirebaseUid by remember { mutableStateOf(firebaseUser?.uid) }
+    LaunchedEffect(firebaseUser?.uid) {
+        val currentUid = firebaseUser?.uid
+        if (shouldEndLiveVoiceSession(previousFirebaseUid, currentUid)) {
+            voiceViewModel.endLiveSession()
+        }
+        previousFirebaseUid = currentUid
+    }
     val onboardingCompleted by settingsViewModel.onboardingCompleted.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route

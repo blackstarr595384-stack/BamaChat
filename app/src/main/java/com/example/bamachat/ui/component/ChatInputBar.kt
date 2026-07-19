@@ -457,11 +457,14 @@ private fun VoiceSessionStatus(
     val statusText = when (state) {
         VoiceSessionState.Idle -> ""
         VoiceSessionState.Preparing -> "Mikrofon wird vorbereitet …"
+        VoiceSessionState.Connecting -> "Sichere Verbindung wird hergestellt …"
+        is VoiceSessionState.Reconnecting -> "Verbindung wird wiederhergestellt …"
         VoiceSessionState.Listening -> "Ich höre zu …"
         is VoiceSessionState.Transcribing -> state.partialText.ifBlank { "Ich höre zu …" }
         VoiceSessionState.Thinking -> "BamaChat denkt …"
         VoiceSessionState.Speaking -> "BamaChat spricht …"
         VoiceSessionState.Interrupted -> "Sprachausgabe unterbrochen"
+        VoiceSessionState.Ended -> "Live-Unterhaltung beendet"
         is VoiceSessionState.Error -> state.userMessage
     }
     Surface(
@@ -480,7 +483,9 @@ private fun VoiceSessionStatus(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             when (state) {
-                VoiceSessionState.Preparing -> CircularProgressIndicator(
+                VoiceSessionState.Preparing,
+                VoiceSessionState.Connecting,
+                is VoiceSessionState.Reconnecting -> CircularProgressIndicator(
                     modifier = Modifier.size(22.dp),
                     strokeWidth = 2.dp,
                     color = NeonCyan
@@ -490,6 +495,7 @@ private fun VoiceSessionStatus(
                 VoiceSessionState.Speaking -> VoiceVisualizer(NeonPurple)
                 VoiceSessionState.Thinking -> Icon(Icons.Default.AutoAwesome, null, tint = NeonCyan)
                 VoiceSessionState.Interrupted -> Icon(Icons.Default.PauseCircle, null, tint = NeonPink)
+                VoiceSessionState.Ended -> Icon(Icons.Default.CallEnd, null, tint = NeonCyan)
                 is VoiceSessionState.Error -> Icon(Icons.Default.ErrorOutline, null, tint = NeonPink)
                 VoiceSessionState.Idle -> Unit
             }

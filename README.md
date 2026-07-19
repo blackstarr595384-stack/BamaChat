@@ -33,7 +33,8 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
   - Unterbrechbare Ausgabe mit Audio-Fokus, Anti-Echo-Turn-Taking und sicherem Stop während Generierung oder Playback
   - optionale Cloud-Voice (ElevenLabs Flash/Multilingual oder Piper) mit Android-Fallback
   - Speech-Sanitizing für Markdown, Links, Zitationen und Code sowie geordnete Satz-/Klausel-Chunks
-  - OpenAI Realtime ist als sichere Clientgrenze vorbereitet, benötigt aber einen Backend-Endpunkt für kurzlebige Zugangsdaten
+  - BamaVoice Live nutzt natives WebRTC und kurzlebige OpenAI-Realtime-Berechtigungen über eine Firebase-Auth-geschützte Function; ohne manuell konfigurierten Server bleibt der Modus sicher deaktiviert
+  - Backend-, Secret- und Endpoint-Einrichtung: [`BAMAVOICE_REALTIME_SETUP.md`](./BAMAVOICE_REALTIME_SETUP.md)
   - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
   - Bild hochladen, Foto direkt aus dem Chat aufnehmen und analysieren

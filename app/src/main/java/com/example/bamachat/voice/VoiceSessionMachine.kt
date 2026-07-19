@@ -26,6 +26,26 @@ class VoiceSessionMachine {
         return true
     }
 
+    fun connecting() {
+        activeSessionId = null
+        state = VoiceSessionState.Connecting
+    }
+
+    fun reconnecting(attempt: Int, maximumAttempts: Int) {
+        activeSessionId = null
+        state = VoiceSessionState.Reconnecting(attempt, maximumAttempts)
+    }
+
+    fun realtimeListening() {
+        activeSessionId = null
+        state = VoiceSessionState.Listening
+    }
+
+    fun realtimeTranscribing(text: String) {
+        activeSessionId = null
+        state = VoiceSessionState.Transcribing(text.trim())
+    }
+
     fun partial(sessionId: Long, text: String): Boolean {
         if (activeSessionId != sessionId) return false
         val cleanText = text.trim()
@@ -63,6 +83,11 @@ class VoiceSessionMachine {
     fun interrupted() {
         activeSessionId = null
         state = VoiceSessionState.Interrupted
+    }
+
+    fun ended() {
+        activeSessionId = null
+        state = VoiceSessionState.Ended
     }
 
     fun fail(error: VoiceFailure) {

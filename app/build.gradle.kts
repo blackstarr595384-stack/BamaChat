@@ -20,6 +20,18 @@ val googleServicesFiles = listOf(
 ).map { layout.projectDirectory.file(it).asFile }
 val hasGoogleServicesJson = googleServicesFiles.any { it.exists() }
 
+fun String.asBuildConfigString(): String =
+    "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+val bamaVoiceRealtimeSessionUrl = providers.gradleProperty("bamaVoiceRealtimeSessionUrl")
+    .orElse(providers.environmentVariable("BAMA_VOICE_REALTIME_SESSION_URL"))
+    .orElse("")
+    .get()
+val bamaVoiceRealtimeSessionEndUrl = providers.gradleProperty("bamaVoiceRealtimeSessionEndUrl")
+    .orElse(providers.environmentVariable("BAMA_VOICE_REALTIME_SESSION_END_URL"))
+    .orElse("")
+    .get()
+
 if (hasGoogleServicesJson) {
     apply(plugin = "com.google.gms.google-services")
 } else {
@@ -86,9 +98,23 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "BAMA_VOICE_REALTIME_SESSION_URL", "\"\"")
+            buildConfigField("String", "BAMA_VOICE_REALTIME_SESSION_END_URL", "\"\"")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            buildConfigField(
+                "String",
+                "BAMA_VOICE_REALTIME_SESSION_URL",
+                bamaVoiceRealtimeSessionUrl.asBuildConfigString()
+            )
+            buildConfigField(
+                "String",
+                "BAMA_VOICE_REALTIME_SESSION_END_URL",
+                bamaVoiceRealtimeSessionEndUrl.asBuildConfigString()
+            )
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -219,7 +245,9 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-analytics")
+    implementation(libs.webrtc.android)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
     androidTestImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")

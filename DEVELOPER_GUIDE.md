@@ -242,9 +242,12 @@ Chat UI -> BamaVoiceViewModel -> BamaVoiceSessionController
 Androids `SpeechRecognizer` besitzt den Aufnahmefokus selbst. BamaVoice fordert deshalb beim Listening keinen konkurrierenden App-Audiofokus an; eigener transienter Fokus wird nur für Sprachausgabe gehalten.
 
 ### Realtime-Grenze
-- `RealtimeEphemeralCredentialProvider` und `RealtimeVoiceEngine` definieren die Clientgrenze; ohne Backend ist Live-Unterhaltung nicht als funktionale Auswahl sichtbar.
-- Ein künftiger Backend-Endpunkt, empfohlen `POST /api/voice/realtime-session`, muss authentifiziert eine kurzlebige OpenAI-Realtime-Clientberechtigung erzeugen. Ein permanenter OpenAI-Key darf nie an Android ausgeliefert oder in das APK eingebaut werden.
-- Der Endpoint sollte Provider, Realtime-Modell, Stimme und Sprachkennung validieren und nur Credential, Ablaufzeit und erlaubte Sessionparameter zurückgeben.
+- `FirebaseRealtimeSessionCredentialProvider` sendet einen aktuellen Firebase ID-Token an `voiceRealtimeSession`; die Function verifiziert die UID serverseitig und liefert nur eine kurzlebige OpenAI-Realtime-Clientberechtigung.
+- `OpenAiRealtimeVoiceEngine` besitzt Credential, Reconnect-Grenze und Event-Mapping. `AndroidRealtimePeerConnectionController` stellt natives WebRTC-Audio und den Data Channel `oai-events` bereit; `ChatScreen` steuert WebRTC nie direkt.
+- Der dauerhafte OpenAI-Key ist ausschließlich als Firebase-Secret `OPENAI_API_KEY` gebunden. Ohne beide konfigurierten Function-URLs bleibt Live-Unterhaltung deaktiviert; es gibt keinen unsicheren Fallback-Key im APK.
+- Live-Transkripte gehen über `BamaVoiceSessionController` in `ChatViewModel.persistRealtimeVoiceTurn`: nur finale, stabile Realtime-IDs werden lokal gespeichert und anschließend an die bestehende opt-in Cloud-Synchronisierung übergeben. Der normale Textprovider und ElevenLabs/Android-TTS werden im Live-Modus nicht parallel gestartet.
+- Sessions sind serverseitig auf 15 Minuten und clientseitig zusätzlich auf drei Minuten Inaktivität begrenzt; Reconnect endet nach zwei Versuchen.
+- Einrichtung und manuelle Deploy-Schritte stehen in [`BAMAVOICE_REALTIME_SETUP.md`](./BAMAVOICE_REALTIME_SETUP.md).
 - Gemini Live und xAI Voice benötigen separate, tatsächlich getestete Adapter und bleiben bis dahin ohne Produktionsbutton.
 
 ## Advanced-AI-Basis (Feature 1-8, aktueller MVP-Stand)

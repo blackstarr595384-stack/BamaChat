@@ -48,15 +48,45 @@ enum class VoiceOutputProvider(
 sealed interface VoiceSessionState {
     data object Idle : VoiceSessionState
     data object Preparing : VoiceSessionState
+    data object Connecting : VoiceSessionState
+    data class Reconnecting(val attempt: Int, val maximumAttempts: Int) : VoiceSessionState
     data object Listening : VoiceSessionState
     data class Transcribing(val partialText: String) : VoiceSessionState
     data object Thinking : VoiceSessionState
     data object Speaking : VoiceSessionState
     data object Interrupted : VoiceSessionState
+    data object Ended : VoiceSessionState
     data class Error(
         val userMessage: String,
         val recoverable: Boolean = true
     ) : VoiceSessionState
+}
+
+enum class RealtimeVoice(
+    val storageValue: String,
+    val displayName: String
+) {
+    MARIN("marin", "Marin"),
+    CEDAR("cedar", "Cedar");
+
+    companion object {
+        fun fromStorage(value: String?): RealtimeVoice =
+            entries.firstOrNull { it.storageValue == value?.trim()?.lowercase() } ?: MARIN
+    }
+}
+
+enum class RealtimeTurnTaking(
+    val storageValue: String,
+    val displayName: String
+) {
+    SEMANTIC("semantic", "Natürlich / Semantic"),
+    FAST("fast", "Schnell"),
+    PUSH_TO_TALK("push_to_talk", "Push-to-talk");
+
+    companion object {
+        fun fromStorage(value: String?): RealtimeTurnTaking =
+            entries.firstOrNull { it.storageValue == value?.trim()?.lowercase() } ?: SEMANTIC
+    }
 }
 
 enum class VoiceFailureCategory {
@@ -151,7 +181,11 @@ data class VoiceSessionConfiguration(
     val silenceTimeoutMs: Long = 1_200L,
     val speechSpeed: Float = 1.0f,
     val speechPitch: Float = 1.0f,
-    val selectedVoiceLabel: String = "Android Standard"
+    val selectedVoiceLabel: String = "Android Standard",
+    val realtimeVoice: RealtimeVoice = RealtimeVoice.MARIN,
+    val realtimeTurnTaking: RealtimeTurnTaking = RealtimeTurnTaking.SEMANTIC,
+    val realtimePersonaName: String = "BamaChat",
+    val realtimeNoiseReduction: String = "near_field"
 )
 
 data class VoiceFinalTranscript(
@@ -172,7 +206,14 @@ data class VoiceSessionUiState(
     val selectedVoiceLabel: String = "Android Standard",
     val connectionLabel: String = "Bereit",
     val privacyLabel: String = "Android-Spracherkennung und lokale Geräteausgabe",
-    val realtimeAvailable: Boolean = false
+    val realtimeProviderLabel: String = "OpenAI Realtime",
+    val realtimeTransportStatusLabel: String = "Noch nicht verbunden · OpenAI Realtime",
+    val realtimeAvailable: Boolean = false,
+    val liveSessionActive: Boolean = false,
+    val microphoneMuted: Boolean = false,
+    val secureConnection: Boolean = false,
+    val sessionStartedAtEpochMillis: Long? = null,
+    val sessionDurationLimitSeconds: Long? = null
 )
 
 interface VoiceDiagnostics {
@@ -189,24 +230,85 @@ data class RealtimeVoiceSessionRequest(
     val provider: String,
     val model: String,
     val voice: String,
-    val languageTag: String
+    val languageTag: String,
+    val personaName: String = "BamaChat",
+    val turnTaking: RealtimeTurnTaking = RealtimeTurnTaking.SEMANTIC,
+    val noiseReduction: String = "near_field",
+    val interruptResponse: Boolean = true
 )
 
 data class EphemeralVoiceCredential(
     val value: String,
-    val expiresAtEpochSeconds: Long
+    val expiresAtEpochSeconds: Long,
+    val model: String,
+    val voice: String,
+    val leaseId: String,
+    val sessionExpiresAtEpochSeconds: Long
 )
 
 interface RealtimeEphemeralCredentialProvider {
+    val isConfigured: Boolean
     suspend fun requestCredential(request: RealtimeVoiceSessionRequest): Result<EphemeralVoiceCredential>
+    suspend fun releaseCredential(leaseId: String)
 }
+
+sealed interface RealtimeVoiceEvent {
+    data object Connecting : RealtimeVoiceEvent
+    data object Connected : RealtimeVoiceEvent
+    data class SessionStarted(val sessionExpiresAtEpochSeconds: Long) : RealtimeVoiceEvent
+    data class Reconnecting(val attempt: Int, val maximumAttempts: Int) : RealtimeVoiceEvent
+    data class SpeechStarted(val itemId: String?) : RealtimeVoiceEvent
+    data object SpeechStopped : RealtimeVoiceEvent
+    data class UserTranscriptDelta(val itemId: String?, val delta: String) : RealtimeVoiceEvent
+    data class UserTranscriptCompleted(val itemId: String, val transcript: String) : RealtimeVoiceEvent
+    data class ResponseCreated(val responseId: String) : RealtimeVoiceEvent
+    data class AssistantTranscriptDelta(
+        val responseId: String,
+        val itemId: String?,
+        val delta: String
+    ) : RealtimeVoiceEvent
+    data class AssistantTranscriptCompleted(
+        val responseId: String,
+        val itemId: String?,
+        val transcript: String
+    ) : RealtimeVoiceEvent
+    data class ResponseCompleted(val responseId: String) : RealtimeVoiceEvent
+    data class ResponseCancelled(val responseId: String) : RealtimeVoiceEvent
+    data class Failure(val error: VoiceFailure) : RealtimeVoiceEvent
+    data object Closed : RealtimeVoiceEvent
+}
+
+fun interface RealtimeVoiceListener {
+    fun onEvent(event: RealtimeVoiceEvent)
+}
+
+data class RealtimeFinalizedTurn(
+    val messageId: String,
+    val text: String,
+    val isUser: Boolean,
+    val timestamp: Long
+)
 
 interface RealtimeVoiceEngine {
     val isAvailable: Boolean
-    suspend fun start(request: RealtimeVoiceSessionRequest): VoiceOperationResult
+    val providerLabel: String
+        get() = "OpenAI Realtime"
+    val privacyLabel: String
+        get() = "Live-Audio wird zur Verarbeitung an OpenAI übertragen. Der dauerhafte Provider-Schlüssel ist nicht in der App gespeichert."
+    val connectedStatusLabel: String
+        get() = "Sichere Verbindung · OpenAI Realtime"
+    val disconnectedStatusLabel: String
+        get() = "Noch nicht verbunden · OpenAI Realtime"
+    suspend fun start(
+        request: RealtimeVoiceSessionRequest,
+        listener: RealtimeVoiceListener
+    ): VoiceOperationResult
     suspend fun mute(muted: Boolean)
+    suspend fun beginUserTurn()
+    suspend fun finishUserTurn()
     suspend fun interrupt()
     suspend fun stop()
+    suspend fun release()
 }
 
 object VoiceProviderCatalog {

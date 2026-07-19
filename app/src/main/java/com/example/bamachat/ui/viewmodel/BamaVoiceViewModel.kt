@@ -6,7 +6,6 @@ import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import com.example.bamachat.util.CloudVoiceManager
 import com.example.bamachat.util.SecureSettingsStore
-import com.example.bamachat.voice.AppVoiceDiagnostics
 import com.example.bamachat.voice.BamaVoiceSessionController
 import com.example.bamachat.voice.FallbackSpeechOutputEngine
 import com.example.bamachat.voice.SpeechOutputEngine
@@ -16,12 +15,18 @@ import com.example.bamachat.voice.VoiceInputProvider
 import com.example.bamachat.voice.VoiceMode
 import com.example.bamachat.voice.VoiceOutputProvider
 import com.example.bamachat.voice.VoiceProviderPolicy
+import com.example.bamachat.voice.RealtimeFinalizedTurn
+import com.example.bamachat.voice.RealtimeVoiceEngineFactory
+import com.example.bamachat.voice.RealtimeTurnTaking
+import com.example.bamachat.voice.RealtimeVoice
 import com.example.bamachat.voice.VoiceSessionConfiguration
+import com.example.bamachat.voice.VoiceDiagnostics
 import com.example.bamachat.voice.VoiceSessionUiState
 import com.example.bamachat.voice.android.AndroidSpeechRecognizerEngine
 import com.example.bamachat.voice.android.AndroidTextToSpeechEngine
 import com.example.bamachat.voice.android.AndroidVoiceAudioSession
 import com.example.bamachat.voice.android.CloudSpeechOutputEngine
+import com.example.bamachat.voice.realtime.RealtimeAudioRoutePolicy
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -34,7 +39,9 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class BamaVoiceViewModel @Inject constructor(
-    application: Application
+    application: Application,
+    realtimeVoiceEngineFactory: RealtimeVoiceEngineFactory,
+    voiceDiagnostics: VoiceDiagnostics
 ) : AndroidViewModel(application), SharedPreferences.OnSharedPreferenceChangeListener {
     private data class EngineKey(
         val mode: VoiceMode,
@@ -48,7 +55,9 @@ class BamaVoiceViewModel @Inject constructor(
         val piperEndpoint: String,
         val piperVoiceName: String,
         val fallbackEnabled: Boolean,
-        val clearVoiceStyle: Boolean
+        val clearVoiceStyle: Boolean,
+        val realtimeVoice: RealtimeVoice,
+        val realtimeTurnTaking: RealtimeTurnTaking
     )
 
     private data class EngineBundle(
@@ -62,16 +71,19 @@ class BamaVoiceViewModel @Inject constructor(
     private val voiceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var engineKey = readEngineKey()
     private var engineBundle = createEngines(engineKey)
+    private val realtimeEngine = realtimeVoiceEngineFactory.create()
     private val controller = BamaVoiceSessionController(
         scope = voiceScope,
         initialInputEngine = engineBundle.input,
         initialOutputEngine = engineBundle.output,
         audioSession = AndroidVoiceAudioSession(appContext),
-        diagnostics = AppVoiceDiagnostics
+        realtimeEngine = realtimeEngine,
+        diagnostics = voiceDiagnostics
     )
 
     val uiState: StateFlow<VoiceSessionUiState> = controller.uiState
     val finalTranscripts: SharedFlow<VoiceFinalTranscript> = controller.finalTranscripts
+    val realtimeTurns: SharedFlow<RealtimeFinalizedTurn> = controller.realtimeTurns
 
     init {
         prefs.registerOnSharedPreferenceChangeListener(this)
@@ -107,6 +119,16 @@ class BamaVoiceViewModel @Inject constructor(
     fun stopSpeaking() = controller.stopSpeaking(interrupted = true)
 
     fun stopAll() = controller.stopAll()
+
+    fun startLiveSession(personaName: String) = controller.startLiveSession(personaName)
+
+    fun endLiveSession() = controller.endLiveSession()
+
+    fun toggleLiveMicrophone() = controller.toggleLiveMicrophone()
+
+    fun beginLiveUserTurn() = controller.beginLiveUserTurn()
+
+    fun finishLiveUserTurn() = controller.finishLiveUserTurn()
 
     fun leaveChatScreen() {
         val currentKey = readEngineKey()
@@ -183,7 +205,13 @@ class BamaVoiceViewModel @Inject constructor(
             piperVoiceName = prefs.getString(KEY_PIPER_VOICE_NAME, "").orEmpty(),
             fallbackEnabled = prefs.getBoolean(KEY_VOICE_PROVIDER_FALLBACK, true),
             clearVoiceStyle = prefs.getString(KEY_TTS_VOICE_STYLE, SettingsViewModel.TTS_STYLE_NATURAL) ==
-                SettingsViewModel.TTS_STYLE_CLEAR
+                SettingsViewModel.TTS_STYLE_CLEAR,
+            realtimeVoice = RealtimeVoice.fromStorage(
+                prefs.getString(KEY_REALTIME_VOICE, RealtimeVoice.MARIN.storageValue)
+            ),
+            realtimeTurnTaking = RealtimeTurnTaking.fromStorage(
+                prefs.getString(KEY_REALTIME_TURN_TAKING, RealtimeTurnTaking.SEMANTIC.storageValue)
+            )
         )
     }
 
@@ -212,7 +240,10 @@ class BamaVoiceViewModel @Inject constructor(
             silenceTimeoutMs = prefs.getLong(KEY_VOICE_SILENCE_TIMEOUT_MS, DEFAULT_SILENCE_TIMEOUT_MS),
             speechSpeed = prefs.getFloat(KEY_TTS_SPEED, 1.0f),
             speechPitch = prefs.getFloat(KEY_TTS_PITCH, 1.0f),
-            selectedVoiceLabel = selectedVoiceLabel
+            selectedVoiceLabel = selectedVoiceLabel,
+            realtimeVoice = key.realtimeVoice,
+            realtimeTurnTaking = key.realtimeTurnTaking,
+            realtimeNoiseReduction = RealtimeAudioRoutePolicy.noiseReductionMode(appContext)
         )
     }
 
@@ -342,6 +373,8 @@ class BamaVoiceViewModel @Inject constructor(
         private const val KEY_PIPER_VOICE_NAME = "piper_voice_name"
         private const val KEY_LANGUAGE = "language"
         private const val KEY_AUTO_LANGUAGE_DETECTION = "auto_language_detection_enabled"
+        private const val KEY_REALTIME_VOICE = "voice_realtime_voice"
+        private const val KEY_REALTIME_TURN_TAKING = "voice_realtime_turn_taking"
         private const val DEFAULT_ELEVENLABS_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
         private const val DEFAULT_ELEVENLABS_MODEL_ID = "eleven_flash_v2_5"
         private const val DEFAULT_SILENCE_TIMEOUT_MS = 1_200L
@@ -366,7 +399,9 @@ class BamaVoiceViewModel @Inject constructor(
             KEY_PIPER_ENDPOINT,
             KEY_PIPER_VOICE_NAME,
             KEY_LANGUAGE,
-            KEY_AUTO_LANGUAGE_DETECTION
+            KEY_AUTO_LANGUAGE_DETECTION,
+            KEY_REALTIME_VOICE,
+            KEY_REALTIME_TURN_TAKING
         )
     }
 }

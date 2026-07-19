@@ -52,6 +52,7 @@ import com.example.bamachat.shared.core.ai.AiStreamError
 import com.example.bamachat.shared.core.ai.AiStreamEvent
 import com.example.bamachat.shared.core.ai.AiStreamFinished
 import com.example.bamachat.shared.core.ai.AiStreamStarted
+import com.example.bamachat.voice.RealtimeFinalizedTurn
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.google.gson.Gson
 import kotlinx.coroutines.CancellationException
@@ -120,6 +121,19 @@ class ChatViewModel @Inject constructor(
 
         internal fun normalizeWorkspaceName(raw: String): String =
             WorkspaceNaming.normalizeWorkspaceName(raw)
+
+        internal fun toRealtimeChatMessage(turn: RealtimeFinalizedTurn): ChatMessage? {
+            val cleanText = turn.text.trim()
+            val cleanId = turn.messageId.trim()
+            if (cleanText.isBlank() || cleanId.isBlank() || cleanId.length > 200) return null
+            return ChatMessage(
+                id = cleanId,
+                text = cleanText,
+                isUser = turn.isUser,
+                timestamp = turn.timestamp,
+                role = if (turn.isUser) "USER" else "ASSISTANT"
+            )
+        }
 
         internal suspend fun consumeAiStreamEvents(
             events: Flow<AiStreamEvent>,
@@ -607,6 +621,37 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             chatSyncCoordinator.softDeleteConversationAfterLocalDelete(conversationId)
         }
+    }
+
+    fun persistRealtimeVoiceTurn(turn: RealtimeFinalizedTurn): Boolean {
+        val message = toRealtimeChatMessage(turn) ?: return false
+        viewModelScope.launch {
+            var conversationId = _currentConversationId.value
+            if (conversationId == null) {
+                val personaName = personaViewModel.selectedPersona.value.displayName
+                val conversation = if (_chatWorkspaceId.value != null) {
+                    conversationService.createConversation(
+                        personaName,
+                        conversationService.activeWorkspaceName()
+                    )
+                } else {
+                    conversationService.createNormalConversation(personaName)
+                }
+                conversationId = conversation.id
+                switchConversation(conversation.id)
+            }
+            val resolvedConversationId = conversationId ?: return@launch
+            saveMessageLocally(resolvedConversationId, message)
+            val current = repo.getConversation(resolvedConversationId)
+            if (message.isUser && current != null && conversationService.isPlaceholderTitle(current.title)) {
+                repo.renameConversation(
+                    resolvedConversationId,
+                    message.text.take(40).ifBlank { "Chat" }
+                )
+            }
+            scheduleMessageSync(resolvedConversationId, message)
+        }
+        return true
     }
 
     /**

@@ -73,6 +73,9 @@ import androidx.core.content.FileProvider
 import androidx.core.app.ActivityCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.component.ChatBubble
 import com.example.bamachat.ui.component.ChatDesignPreset
@@ -99,9 +102,11 @@ import com.example.bamachat.ui.viewmodel.MonetizationViewModel
 import com.example.bamachat.ui.viewmodel.ToolCallProgress
 import com.example.bamachat.voice.VoiceSessionState
 import com.example.bamachat.voice.VoiceSessionUiState
+import com.example.bamachat.voice.VoiceMode
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -278,12 +283,23 @@ fun ChatScreen(
     var microphonePermissionRequestHadHistory by rememberSaveable { mutableStateOf(false) }
     var microphonePermissionPermanentlyDenied by rememberSaveable { mutableStateOf(false) }
     var showVoicePanel by rememberSaveable { mutableStateOf(false) }
+    val settingsPreferences = remember(context) {
+        context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    }
+    var livePrivacyConfirmed by rememberSaveable {
+        mutableStateOf(settingsPreferences.getBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, false))
+    }
+    var showLivePrivacyConfirmation by rememberSaveable { mutableStateOf(false) }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             microphonePermissionPermanentlyDenied = false
-            voiceViewModel.startListening()
+            if (voiceUiState.mode == VoiceMode.LIVE) {
+                voiceViewModel.startLiveSession(selectedPersona.displayName)
+            } else {
+                voiceViewModel.startListening()
+            }
         } else {
             val activity = context as? Activity
             val permanentlyDenied = microphonePermissionRequestHadHistory && activity != null &&
@@ -303,19 +319,46 @@ fun ChatScreen(
         }
     }
     val startVoiceInput: () -> Unit = {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            if (isLoading || isStreaming) viewModel.cancelStream()
-            voiceViewModel.startListening()
+        if (voiceUiState.mode == VoiceMode.LIVE && !voiceUiState.realtimeAvailable) {
+            showVoicePanel = true
+        } else if (voiceUiState.mode == VoiceMode.LIVE && !livePrivacyConfirmed) {
+            showLivePrivacyConfirmation = true
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (voiceUiState.mode == VoiceMode.LIVE) {
+                if (voiceUiState.liveSessionActive) {
+                    voiceViewModel.beginLiveUserTurn()
+                } else {
+                    voiceViewModel.startLiveSession(selectedPersona.displayName)
+                }
+            } else {
+                if (isLoading || isStreaming) viewModel.cancelStream()
+                voiceViewModel.startListening()
+            }
         } else {
             requestMicrophonePermission()
         }
     }
     val toggleVoiceInput: () -> Unit = {
-        val state = voiceUiState.state
-        if (state is VoiceSessionState.Preparing || state is VoiceSessionState.Listening || state is VoiceSessionState.Transcribing) {
-            voiceViewModel.toggleListening()
+        if (voiceUiState.mode == VoiceMode.LIVE) {
+            when {
+                !voiceUiState.realtimeAvailable -> showVoicePanel = true
+                !livePrivacyConfirmed -> showLivePrivacyConfirmation = true
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) != PackageManager.PERMISSION_GRANTED -> requestMicrophonePermission()
+                voiceUiState.liveSessionActive -> voiceViewModel.toggleLiveMicrophone()
+                else -> voiceViewModel.startLiveSession(selectedPersona.displayName)
+            }
         } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            if (isLoading || isStreaming) viewModel.cancelStream()
+            val state = voiceUiState.state
+            if (state !is VoiceSessionState.Preparing &&
+                state !is VoiceSessionState.Listening &&
+                state !is VoiceSessionState.Transcribing &&
+                (isLoading || isStreaming)
+            ) {
+                viewModel.cancelStream()
+            }
             voiceViewModel.toggleListening()
         } else {
             requestMicrophonePermission()
@@ -347,6 +390,22 @@ fun ChatScreen(
             }
         }
     }
+    LaunchedEffect(voiceViewModel) {
+        voiceViewModel.realtimeTurns.collect { turn ->
+            viewModel.persistRealtimeVoiceTurn(turn)
+        }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val latestLiveSessionActive by rememberUpdatedState(voiceUiState.liveSessionActive)
+    DisposableEffect(lifecycleOwner, voiceViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && latestLiveSessionActive) {
+                voiceViewModel.endLiveSession()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     DisposableEffect(voiceViewModel) {
         onDispose { voiceViewModel.leaveChatScreen() }
     }
@@ -374,17 +433,63 @@ fun ChatScreen(
             }
         )
     }
-    val isVoiceListening = when (voiceUiState.state) {
-        VoiceSessionState.Preparing,
-        VoiceSessionState.Listening,
-        is VoiceSessionState.Transcribing -> true
-        else -> false
+    if (showLivePrivacyConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showLivePrivacyConfirmation = false },
+            title = { Text("Live-Unterhaltung aktivieren") },
+            text = {
+                Text(
+                    "Im Live-Modus verlässt Mikrofon-Audio das Gerät und wird von OpenAI verarbeitet. " +
+                        "Der dauerhafte OpenAI-Schlüssel wird nicht in der App gespeichert. " +
+                        "Finale Transkripte können im bestehenden BamaChat-Verlauf gespeichert werden. " +
+                        "Die Live-Sitzung endet nach drei Minuten ohne Aktivität oder spätestens nach dem Serverlimit. " +
+                        "Für mehr Privatsphäre bleibt der lokale Modus verfügbar."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        livePrivacyConfirmed = true
+                        settingsPreferences.edit()
+                            .putBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, true)
+                            .apply()
+                        showLivePrivacyConfirmation = false
+                        if (ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            voiceViewModel.startLiveSession(selectedPersona.displayName)
+                        } else {
+                            requestMicrophonePermission()
+                        }
+                    }
+                ) { Text("Zustimmen und starten") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLivePrivacyConfirmation = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+    val isVoiceListening = if (voiceUiState.mode == VoiceMode.LIVE) {
+        voiceUiState.liveSessionActive && !voiceUiState.microphoneMuted
+    } else {
+        when (voiceUiState.state) {
+            VoiceSessionState.Preparing,
+            VoiceSessionState.Listening,
+            is VoiceSessionState.Transcribing -> true
+            else -> false
+        }
     }
     val isSpeechPlaybackActive = voiceUiState.state == VoiceSessionState.Speaking
     val activeSpeechMessageId = voiceUiState.activeOutputMessageId
     val stopVoiceInteraction: () -> Unit = {
-        if (isLoading || isStreaming) viewModel.cancelStream()
-        voiceViewModel.stopAll()
+        if (voiceUiState.mode == VoiceMode.LIVE) {
+            voiceViewModel.stopSpeaking()
+        } else {
+            if (isLoading || isStreaming) viewModel.cancelStream()
+            voiceViewModel.stopAll()
+        }
     }
     val onSpeak: (String, String) -> Unit = { messageId, text ->
         if (isSpeechPlaybackActive && activeSpeechMessageId == messageId) {
@@ -417,7 +522,11 @@ fun ChatScreen(
             onCancelListening = { voiceViewModel.cancelListening() },
             onStopSpeaking = stopVoiceInteraction,
             onEndConversation = {
-                stopVoiceInteraction()
+                if (voiceUiState.mode == VoiceMode.LIVE) {
+                    voiceViewModel.endLiveSession()
+                } else {
+                    stopVoiceInteraction()
+                }
                 showVoicePanel = false
             }
         )
@@ -570,7 +679,13 @@ fun ChatScreen(
             voicePushToTalkEnabled = voicePushToTalkEnabled,
             onMicClick = toggleVoiceInput,
             onMicPressStart = startVoiceInput,
-            onMicPressEnd = { voiceViewModel.finishListening() },
+            onMicPressEnd = {
+                if (voiceUiState.mode == VoiceMode.LIVE) {
+                    voiceViewModel.finishLiveUserTurn()
+                } else {
+                    voiceViewModel.finishListening()
+                }
+            },
             onVoicePanelClick = { showVoicePanel = true },
             onStopVoice = stopVoiceInteraction,
             themeColor = themeColor,
@@ -683,6 +798,17 @@ private fun BamaVoicePanel(
     onEndConversation: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sessionElapsedSeconds by produceState(
+        initialValue = 0L,
+        key1 = uiState.sessionStartedAtEpochMillis,
+        key2 = uiState.liveSessionActive
+    ) {
+        while (uiState.liveSessionActive && uiState.sessionStartedAtEpochMillis != null) {
+            value = ((System.currentTimeMillis() - uiState.sessionStartedAtEpochMillis) / 1_000L)
+                .coerceAtLeast(0L)
+            delay(1_000L)
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -730,6 +856,40 @@ private fun BamaVoicePanel(
                 )
             }
 
+            if (uiState.mode == VoiceMode.LIVE) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (uiState.secureConnection) Icons.Default.Lock else Icons.Default.LockOpen,
+                        contentDescription = null,
+                        tint = if (uiState.secureConnection) NeonGreen else Color.White.copy(alpha = 0.55f)
+                    )
+                    Text(
+                        uiState.realtimeTransportStatusLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "${formatVoiceDuration(sessionElapsedSeconds)}" +
+                            uiState.sessionDurationLimitSeconds?.let { " / ${formatVoiceDuration(it)}" }.orEmpty(),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                Text(
+                    "Stimme: ${uiState.selectedVoiceLabel}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NeonCyan
+                )
+                Text(
+                    "Automatisches Ende nach 3 Min. Inaktivität; Serverlimit wird oben angezeigt.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.62f)
+                )
+            }
+
             VoiceTranscriptCard(
                 title = "Du",
                 text = uiState.partialTranscript.ifBlank { uiState.finalTranscript.ifBlank { "Noch keine Sprache erkannt." } },
@@ -765,7 +925,7 @@ private fun BamaVoicePanel(
 
             if (uiState.mode == com.example.bamachat.voice.VoiceMode.LIVE && !uiState.realtimeAvailable) {
                 Text(
-                    "Live-Unterhaltung bleibt deaktiviert, bis ein sicherer Backend-Endpunkt kurzlebige Zugangsdaten ausstellt.",
+                    "Für Live-Unterhaltung muss zuerst der sichere BamaVoice-Server eingerichtet werden.",
                     color = NeonPink,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -778,13 +938,18 @@ private fun BamaVoicePanel(
             ) {
                 FilledIconButton(
                     onClick = onMicrophone,
+                    enabled = uiState.mode != VoiceMode.LIVE || uiState.realtimeAvailable,
                     modifier = Modifier.size(56.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = if (isListening) NeonPink else NeonPurple
                     )
                 ) {
                     Icon(
-                        if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                        if ((uiState.mode == VoiceMode.LIVE && uiState.microphoneMuted) || isListening) {
+                            Icons.Default.MicOff
+                        } else {
+                            Icons.Default.Mic
+                        },
                         contentDescription = if (isListening) "Spracheingabe beenden" else "Spracheingabe starten"
                     )
                 }
@@ -817,6 +982,11 @@ private fun BamaVoicePanel(
         }
     }
 }
+
+private fun formatVoiceDuration(seconds: Long): String =
+    "%02d:%02d".format(Locale.ROOT, seconds / 60L, seconds % 60L)
+
+private const val KEY_LIVE_VOICE_PRIVACY_CONFIRMED = "voice_live_privacy_confirmed"
 
 @Composable
 private fun VoiceProviderBadge(

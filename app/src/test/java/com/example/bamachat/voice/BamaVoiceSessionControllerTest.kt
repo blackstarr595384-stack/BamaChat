@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -171,9 +172,206 @@ class BamaVoiceSessionControllerTest {
         assertTrue(fallback.spokenChunks.isEmpty())
     }
 
+    @Test
+    fun liveFinalTranscriptsPersistExactlyOnceAndPartialsRemainUiOnly() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        val turns = mutableListOf<RealtimeFinalizedTurn>()
+        val collector = fixture.scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fixture.controller.realtimeTurns.collect(turns::add)
+        }
+        fixture.controller.updateConfiguration(
+            VoiceSessionConfiguration(mode = VoiceMode.LIVE)
+        )
+
+        fixture.controller.startLiveSession("Entwickler")
+        realtime.emit(RealtimeVoiceEvent.UserTranscriptDelta("user-1", "Teil"))
+        realtime.emit(RealtimeVoiceEvent.AssistantTranscriptDelta("response-1", "assistant-1", "Zwischenstand"))
+        assertTrue(turns.isEmpty())
+
+        realtime.emit(RealtimeVoiceEvent.UserTranscriptCompleted("user-1", "Finale Frage"))
+        realtime.emit(RealtimeVoiceEvent.UserTranscriptCompleted("user-1", "Finale Frage"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCreated("response-1"))
+        realtime.emit(
+            RealtimeVoiceEvent.AssistantTranscriptCompleted(
+                "response-1",
+                "assistant-1",
+                "Finale Antwort"
+            )
+        )
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("response-1"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("response-1"))
+
+        assertEquals(listOf(true, false), turns.map { it.isUser })
+        assertEquals(listOf("rt-user-user-1", "rt-assistant-response-1"), turns.map { it.messageId })
+        assertEquals("Entwickler", realtime.lastRequest?.personaName)
+        assertTrue(fixture.output.spokenChunks.isEmpty())
+        collector.cancel()
+        fixture.release()
+    }
+
+    @Test
+    fun cancelledRealtimeResponseIsNeverPersistedOrReplayed() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        val turns = mutableListOf<RealtimeFinalizedTurn>()
+        val collector = fixture.scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fixture.controller.realtimeTurns.collect(turns::add)
+        }
+        fixture.controller.updateConfiguration(VoiceSessionConfiguration(mode = VoiceMode.LIVE))
+        fixture.controller.startLiveSession("BamaChat")
+
+        realtime.emit(RealtimeVoiceEvent.ResponseCreated("cancelled-response"))
+        realtime.emit(
+            RealtimeVoiceEvent.AssistantTranscriptDelta(
+                "cancelled-response",
+                "assistant-2",
+                "Nicht vollständig gehört"
+            )
+        )
+        realtime.emit(RealtimeVoiceEvent.ResponseCancelled("cancelled-response"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("cancelled-response"))
+
+        assertFalse(turns.any { !it.isUser })
+        assertTrue(fixture.output.spokenChunks.isEmpty())
+        collector.cancel()
+        fixture.release()
+    }
+
+    @Test
+    fun lateCancelledResponseCannotClearOrPersistTheNextResponse() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        val turns = mutableListOf<RealtimeFinalizedTurn>()
+        val collector = fixture.scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fixture.controller.realtimeTurns.collect(turns::add)
+        }
+        fixture.controller.updateConfiguration(VoiceSessionConfiguration(mode = VoiceMode.LIVE))
+        fixture.controller.startLiveSession("BamaChat")
+
+        realtime.emit(RealtimeVoiceEvent.ResponseCreated("old-response"))
+        realtime.emit(RealtimeVoiceEvent.AssistantTranscriptDelta("old-response", null, "Alt"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCancelled("old-response"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCreated("new-response"))
+        realtime.emit(RealtimeVoiceEvent.AssistantTranscriptDelta("new-response", null, "Neu"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("old-response"))
+
+        assertEquals("Neu", fixture.controller.uiState.value.assistantTranscript)
+        assertEquals(VoiceSessionState.Speaking, fixture.controller.uiState.value.state)
+
+        realtime.emit(
+            RealtimeVoiceEvent.AssistantTranscriptCompleted(
+                "new-response",
+                null,
+                "Neue Antwort"
+            )
+        )
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("new-response"))
+
+        assertEquals(listOf("rt-assistant-new-response"), turns.filter { !it.isUser }.map { it.messageId })
+        collector.cancel()
+        fixture.release()
+    }
+
+    @Test
+    fun speechBargeInDiscardsLateCompletionFromInterruptedResponse() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        val turns = mutableListOf<RealtimeFinalizedTurn>()
+        val collector = fixture.scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fixture.controller.realtimeTurns.collect(turns::add)
+        }
+        fixture.controller.updateConfiguration(VoiceSessionConfiguration(mode = VoiceMode.LIVE))
+        fixture.controller.startLiveSession("BamaChat")
+        realtime.emit(RealtimeVoiceEvent.ResponseCreated("interrupted-response"))
+        realtime.emit(
+            RealtimeVoiceEvent.AssistantTranscriptDelta(
+                "interrupted-response",
+                null,
+                "Nur teilweise gehört"
+            )
+        )
+
+        realtime.emit(RealtimeVoiceEvent.SpeechStarted("new-user-item"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("interrupted-response"))
+
+        assertEquals(1, realtime.interruptCalls)
+        assertFalse(turns.any { !it.isUser })
+        collector.cancel()
+        fixture.release()
+    }
+
+    @Test
+    fun eventsArrivingAfterExplicitSessionEndAreIgnored() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        val turns = mutableListOf<RealtimeFinalizedTurn>()
+        val collector = fixture.scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            fixture.controller.realtimeTurns.collect(turns::add)
+        }
+        fixture.controller.updateConfiguration(VoiceSessionConfiguration(mode = VoiceMode.LIVE))
+        fixture.controller.startLiveSession("BamaChat")
+
+        fixture.controller.endLiveSession()
+        realtime.emit(RealtimeVoiceEvent.UserTranscriptCompleted("late-user", "Zu spät"))
+        realtime.emit(RealtimeVoiceEvent.ResponseCreated("late-response"))
+        realtime.emit(
+            RealtimeVoiceEvent.AssistantTranscriptCompleted(
+                "late-response",
+                null,
+                "Ebenfalls zu spät"
+            )
+        )
+        realtime.emit(RealtimeVoiceEvent.ResponseCompleted("late-response"))
+
+        assertTrue(turns.isEmpty())
+        assertEquals(VoiceSessionState.Ended, fixture.controller.uiState.value.state)
+        collector.cancel()
+        fixture.release()
+    }
+
+    @Test
+    fun leavingChatStopsTheActiveRealtimeSession() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        fixture.controller.updateConfiguration(VoiceSessionConfiguration(mode = VoiceMode.LIVE))
+        fixture.controller.startLiveSession("BamaChat")
+
+        fixture.controller.leaveScreen()
+
+        assertEquals(1, realtime.stopCalls)
+        assertEquals(VoiceSessionState.Idle, fixture.controller.uiState.value.state)
+        fixture.release()
+    }
+
+    @Test
+    fun realtimeFailureStopsTransportAndLeavesRecoverableTextChatState() = runBlocking {
+        val realtime = FakeRealtimeEngine()
+        val fixture = fixture(realtime = realtime)
+        fixture.controller.updateConfiguration(VoiceSessionConfiguration(mode = VoiceMode.LIVE))
+        fixture.controller.startLiveSession("BamaChat")
+
+        realtime.emit(
+            RealtimeVoiceEvent.Failure(
+                VoiceFailure(
+                    VoiceFailureCategory.TEMPORARY_SERVICE_ERROR,
+                    "Live vorübergehend nicht verfügbar"
+                )
+            )
+        )
+
+        assertEquals(1, realtime.stopCalls)
+        assertEquals(
+            VoiceSessionState.Error("Live vorübergehend nicht verfügbar", true),
+            fixture.controller.uiState.value.state
+        )
+        fixture.release()
+    }
+
     private fun fixture(
         input: FakeInput = FakeInput(),
         output: FakeOutput = FakeOutput(),
+        realtime: FakeRealtimeEngine = FakeRealtimeEngine(isAvailable = false),
         clock: TestClock = TestClock()
     ): Fixture {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
@@ -183,6 +381,7 @@ class BamaVoiceSessionControllerTest {
             initialInputEngine = input,
             initialOutputEngine = output,
             audioSession = audio,
+            realtimeEngine = realtime,
             nowMillis = clock::now
         )
         return Fixture(controller, input, output, scope, clock)
@@ -297,5 +496,48 @@ class BamaVoiceSessionControllerTest {
         ): VoiceOperationResult = VoiceOperationResult.Success
 
         override suspend fun deactivate() = Unit
+    }
+
+    private class FakeRealtimeEngine(
+        override val isAvailable: Boolean = true
+    ) : RealtimeVoiceEngine {
+        var startCalls = 0
+        var stopCalls = 0
+        var releaseCalls = 0
+        var interruptCalls = 0
+        var lastRequest: RealtimeVoiceSessionRequest? = null
+        private var listener: RealtimeVoiceListener? = null
+
+        override suspend fun start(
+            request: RealtimeVoiceSessionRequest,
+            listener: RealtimeVoiceListener
+        ): VoiceOperationResult {
+            startCalls++
+            lastRequest = request
+            this.listener = listener
+            listener.onEvent(RealtimeVoiceEvent.Connected)
+            listener.onEvent(RealtimeVoiceEvent.SessionStarted(3_600L))
+            return VoiceOperationResult.Success
+        }
+
+        override suspend fun mute(muted: Boolean) = Unit
+        override suspend fun beginUserTurn() = Unit
+        override suspend fun finishUserTurn() = Unit
+
+        override suspend fun interrupt() {
+            interruptCalls++
+        }
+
+        override suspend fun stop() {
+            stopCalls++
+        }
+
+        override suspend fun release() {
+            releaseCalls++
+        }
+
+        fun emit(event: RealtimeVoiceEvent) {
+            listener?.onEvent(event)
+        }
     }
 }

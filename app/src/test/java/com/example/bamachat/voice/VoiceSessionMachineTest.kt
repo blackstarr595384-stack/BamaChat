@@ -65,4 +65,20 @@ class VoiceSessionMachineTest {
         machine.idle()
         assertEquals(VoiceSessionState.Idle, machine.state)
     }
+
+    @Test
+    fun realtimeConnectionStatesRemainInTheAuthoritativeMachine() {
+        val machine = VoiceSessionMachine()
+
+        machine.connecting()
+        assertEquals(VoiceSessionState.Connecting, machine.state)
+        machine.reconnecting(attempt = 1, maximumAttempts = 2)
+        assertEquals(VoiceSessionState.Reconnecting(1, 2), machine.state)
+        machine.realtimeListening()
+        assertEquals(VoiceSessionState.Listening, machine.state)
+        machine.realtimeTranscribing(" Teil ")
+        assertEquals(VoiceSessionState.Transcribing("Teil"), machine.state)
+        machine.ended()
+        assertEquals(VoiceSessionState.Ended, machine.state)
+    }
 }

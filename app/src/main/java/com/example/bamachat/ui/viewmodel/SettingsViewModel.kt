@@ -25,6 +25,8 @@ import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.voice.VoiceInputProvider
 import com.example.bamachat.voice.VoiceMode
 import com.example.bamachat.voice.VoiceOutputProvider
+import com.example.bamachat.voice.RealtimeTurnTaking
+import com.example.bamachat.voice.RealtimeVoice
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +63,8 @@ class SettingsViewModel @Inject constructor(
         private const val KEY_VOICE_INTERRUPTION_ENABLED = "voice_interruption_enabled"
         private const val KEY_VOICE_PROVIDER_FALLBACK_ENABLED = "voice_provider_fallback_enabled"
         private const val KEY_VOICE_SILENCE_TIMEOUT_MS = "voice_silence_timeout_ms"
+        private const val KEY_REALTIME_VOICE = "voice_realtime_voice"
+        private const val KEY_REALTIME_TURN_TAKING = "voice_realtime_turn_taking"
         private const val LEGACY_OPENCODE_ENDPOINT = "https://api.opencode.ai/v1/"
         private const val LEGACY_OPENCODE_MODEL = "openai/gpt-4.1-mini"
         private const val DEFAULT_OPENCODE_ENDPOINT = "https://opencode.ai/zen/v1/"
@@ -214,6 +218,18 @@ class SettingsViewModel @Inject constructor(
         prefs.getLong(KEY_VOICE_SILENCE_TIMEOUT_MS, 1_200L).coerceIn(700L, 5_000L)
     )
     val voiceSilenceTimeoutMs: StateFlow<Long> = _voiceSilenceTimeoutMs.asStateFlow()
+
+    private val _realtimeVoice = MutableStateFlow(
+        RealtimeVoice.fromStorage(prefs.getString(KEY_REALTIME_VOICE, RealtimeVoice.MARIN.storageValue))
+    )
+    val realtimeVoice: StateFlow<RealtimeVoice> = _realtimeVoice.asStateFlow()
+
+    private val _realtimeTurnTaking = MutableStateFlow(
+        RealtimeTurnTaking.fromStorage(
+            prefs.getString(KEY_REALTIME_TURN_TAKING, RealtimeTurnTaking.SEMANTIC.storageValue)
+        )
+    )
+    val realtimeTurnTaking: StateFlow<RealtimeTurnTaking> = _realtimeTurnTaking.asStateFlow()
 
     private val _voiceChatMode = MutableStateFlow(prefs.getBoolean("voice_chat_mode", false))
     val voiceChatMode: StateFlow<Boolean> = _voiceChatMode.asStateFlow()
@@ -878,6 +894,16 @@ class SettingsViewModel @Inject constructor(
         val clamped = timeoutMs.coerceIn(700L, 5_000L)
         _voiceSilenceTimeoutMs.value = clamped
         prefs.edit().putLong(KEY_VOICE_SILENCE_TIMEOUT_MS, clamped).apply()
+    }
+
+    fun setRealtimeVoice(voice: RealtimeVoice) {
+        _realtimeVoice.value = voice
+        prefs.edit().putString(KEY_REALTIME_VOICE, voice.storageValue).apply()
+    }
+
+    fun setRealtimeTurnTaking(turnTaking: RealtimeTurnTaking) {
+        _realtimeTurnTaking.value = turnTaking
+        prefs.edit().putString(KEY_REALTIME_TURN_TAKING, turnTaking.storageValue).apply()
     }
 
     fun setVoiceChatMode(enabled: Boolean) {

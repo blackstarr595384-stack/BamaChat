@@ -1,6 +1,11 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+const {
+  createFirestoreVoiceSessionLimiter,
+  createRealtimeSessionHandlers
+} = require("./realtime-session");
 let sharp = null;
 try {
   sharp = require("sharp");
@@ -11,6 +16,51 @@ try {
 if (admin.apps.length === 0) {
   admin.initializeApp();
 }
+
+const openAiApiKey = defineSecret("OPENAI_API_KEY");
+const realtimeSessionHandlers = createRealtimeSessionHandlers({
+  auth: admin.auth(),
+  limiter: createFirestoreVoiceSessionLimiter(admin.firestore()),
+  getOpenAiApiKey: () => openAiApiKey.value(),
+  logger,
+  policy: {
+    perUserWindowMs: Number(process.env.VOICE_RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000),
+    perUserMaxStarts: Number(process.env.VOICE_RATE_LIMIT_MAX_STARTS || 4),
+    globalWindowMs: Number(process.env.VOICE_GLOBAL_LIMIT_WINDOW_MS || 60 * 1000),
+    globalMaxStarts: Number(process.env.VOICE_GLOBAL_LIMIT_MAX_STARTS || 60),
+    clientSecretTtlSeconds: Number(process.env.VOICE_CLIENT_SECRET_TTL_SECONDS || 30),
+    sessionDurationSeconds: Number(process.env.VOICE_SESSION_DURATION_SECONDS || 15 * 60),
+    providerTimeoutMs: Number(process.env.VOICE_PROVIDER_TIMEOUT_MS || 8_000),
+    providerMaxAttempts: Number(process.env.VOICE_PROVIDER_MAX_ATTEMPTS || 2)
+  }
+});
+
+exports.voiceRealtimeSession = onRequest(
+  {
+    region: "europe-west1",
+    cors: false,
+    invoker: "public",
+    timeoutSeconds: 15,
+    memory: "256MiB",
+    maxInstances: 10,
+    concurrency: 20,
+    secrets: [openAiApiKey]
+  },
+  realtimeSessionHandlers.start
+);
+
+exports.voiceRealtimeSessionEnd = onRequest(
+  {
+    region: "europe-west1",
+    cors: false,
+    invoker: "public",
+    timeoutSeconds: 10,
+    memory: "256MiB",
+    maxInstances: 10,
+    concurrency: 40
+  },
+  realtimeSessionHandlers.end
+);
 
 const DEFAULT_ALLOWED_DOMAINS = [
   "wikipedia.org",

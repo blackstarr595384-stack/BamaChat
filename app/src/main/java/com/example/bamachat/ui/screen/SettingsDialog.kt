@@ -58,6 +58,8 @@ import com.example.bamachat.voice.VoiceMode
 import com.example.bamachat.voice.VoiceOutputProvider
 import com.example.bamachat.voice.VoiceProviderCatalog
 import com.example.bamachat.voice.VoiceSessionState
+import com.example.bamachat.voice.RealtimeTurnTaking
+import com.example.bamachat.voice.RealtimeVoice
 import java.util.Locale
 
 @Suppress("UNUSED_VARIABLE", "UNUSED_PARAMETER")
@@ -122,6 +124,8 @@ fun SettingsDialog(
     val voiceInterruptionEnabled by viewModel.voiceInterruptionEnabled.collectAsState()
     val voiceProviderFallbackEnabled by viewModel.voiceProviderFallbackEnabled.collectAsState()
     val voiceSilenceTimeoutMs by viewModel.voiceSilenceTimeoutMs.collectAsState()
+    val realtimeVoice by viewModel.realtimeVoice.collectAsState()
+    val realtimeTurnTaking by viewModel.realtimeTurnTaking.collectAsState()
     val voiceChatMode by viewModel.voiceChatMode.collectAsState()
     val ttsEnabled by viewModel.ttsEnabled.collectAsState()
     val ttsSpeed by viewModel.ttsSpeed.collectAsState()
@@ -186,10 +190,32 @@ fun SettingsDialog(
         voiceViewModel.previewVoice(sample.text)
     }
     val latestPreviewPlaying by rememberUpdatedState(voicePreviewPlaying)
+    var pendingRealtimeVoiceRestart by remember { mutableStateOf<RealtimeVoice?>(null) }
     DisposableEffect(voiceViewModel) {
         onDispose {
             if (latestPreviewPlaying) voiceViewModel.stopSpeaking()
         }
+    }
+    pendingRealtimeVoiceRestart?.let { pendingVoice ->
+        AlertDialog(
+            onDismissRequest = { pendingRealtimeVoiceRestart = null },
+            title = { Text("Live-Sitzung neu starten?") },
+            text = {
+                Text("Die Stimme kann nach der ersten Audioausgabe nicht innerhalb derselben Live-Sitzung gewechselt werden.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        voiceViewModel.endLiveSession()
+                        viewModel.setRealtimeVoice(pendingVoice)
+                        pendingRealtimeVoiceRestart = null
+                    }
+                ) { Text("Beenden und wechseln") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRealtimeVoiceRestart = null }) { Text("Abbrechen") }
+            }
+        )
     }
     LaunchedEffect(
         elevenLabsApiKey,
@@ -203,6 +229,8 @@ fun SettingsDialog(
         voiceInterruptionEnabled,
         voiceProviderFallbackEnabled,
         voiceSilenceTimeoutMs,
+        realtimeVoice,
+        realtimeTurnTaking,
         ttsSpeed,
         ttsPitch,
         ttsVoiceStyle
@@ -495,12 +523,18 @@ fun SettingsDialog(
                     Text("Voice-Modus", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(
-                            items = listOf(VoiceMode.AUTOMATIC, VoiceMode.UNIVERSAL, VoiceMode.LOCAL),
+                            items = listOf(
+                                VoiceMode.AUTOMATIC,
+                                VoiceMode.LIVE,
+                                VoiceMode.UNIVERSAL,
+                                VoiceMode.LOCAL
+                            ),
                             key = { it.storageValue }
                         ) { mode ->
                             FilterChip(
                                 selected = voiceMode == mode,
                                 onClick = { viewModel.setVoiceMode(mode) },
+                                enabled = mode != VoiceMode.LIVE || voiceUiState.realtimeAvailable,
                                 label = { Text(mode.displayName, fontSize = 11.sp) }
                             )
                         }
@@ -508,8 +542,69 @@ fun SettingsDialog(
                     VoiceRecommendationCard(
                         title = VoiceMode.LIVE.displayName,
                         recommendation = VoiceProviderCatalog.OPENAI_REALTIME_RECOMMENDATION,
-                        detail = "Noch nicht aktiv: Für mobile Realtime-Sitzungen fehlt ein sicherer Backend-Endpunkt für kurzlebige Zugangsdaten."
+                        detail = if (voiceUiState.realtimeAvailable) {
+                            "Native WebRTC-Verbindung mit kurzlebiger Berechtigung vom sicheren BamaVoice-Server."
+                        } else {
+                            "Für Live-Unterhaltung muss zuerst der sichere BamaVoice-Server eingerichtet werden."
+                        }
                     )
+
+                    if (voiceMode == VoiceMode.LIVE) {
+                        Text("Live-Stimme", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RealtimeVoice.entries.forEach { voice ->
+                                FilterChip(
+                                    selected = realtimeVoice == voice,
+                                    onClick = {
+                                        if (voiceUiState.liveSessionActive) {
+                                            pendingRealtimeVoiceRestart = voice
+                                        } else {
+                                            viewModel.setRealtimeVoice(voice)
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            if (voice == RealtimeVoice.MARIN) "Marin · empfohlen" else "Cedar · Alternative",
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                )
+                            }
+                        }
+
+                        Text("Sprecherwechsel", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(RealtimeTurnTaking.entries, key = { it.storageValue }) { turnTaking ->
+                                FilterChip(
+                                    selected = realtimeTurnTaking == turnTaking,
+                                    onClick = {
+                                        if (voiceUiState.liveSessionActive) voiceViewModel.endLiveSession()
+                                        viewModel.setRealtimeTurnTaking(turnTaking)
+                                    },
+                                    label = { Text(turnTaking.displayName, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("Live-Audio wird zur Verarbeitung an OpenAI übertragen.", fontSize = 11.sp)
+                                Text(
+                                    "Ein dauerhafter OpenAI-Schlüssel wird nicht in der App gespeichert. Finale Transkripte folgen dem bestehenden Chatverlauf.",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
+                                )
+                            }
+                        }
+                    }
 
                     Text("Spracheingabe", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1777,6 +1872,8 @@ private fun VoicePrivacyCard(
     outputProvider: VoiceOutputProvider
 ) {
     val privacyText = when {
+        mode == VoiceMode.LIVE ->
+            "Live-Audio wird direkt über eine sichere WebRTC-Verbindung von OpenAI verarbeitet. Der dauerhafte Provider-Schlüssel bleibt auf dem Server; nur finale Transkripte können im BamaChat-Verlauf gespeichert werden."
         mode == VoiceMode.LOCAL ->
             "Nur lokal: BamaVoice startet keine Cloud-Sprachverarbeitung. Erkennung und Ausgabe benötigen verfügbare On-Device-Komponenten oder einen privaten Piper-Endpoint."
         outputProvider == VoiceOutputProvider.ELEVENLABS ->
