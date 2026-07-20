@@ -8,6 +8,11 @@ import com.example.bamachat.data.cloud.ChatSyncPolicy
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatDao
 import com.example.bamachat.data.repository.ChatRepository
+import com.example.bamachat.data.provider.ProviderSecretStorage
+import com.example.bamachat.data.provider.ProviderSecretStore
+import com.example.bamachat.data.provider.local.ProviderDao
+import com.example.bamachat.data.provider.local.ProviderStore
+import com.example.bamachat.data.provider.local.RoomProviderStore
 import com.example.bamachat.service.ChatEngine
 import com.example.bamachat.service.ConversationService
 import com.example.bamachat.service.KnowledgeService
@@ -44,6 +49,18 @@ object AppModule {
     fun provideChatDao(db: ChatDatabase): ChatDao {
         return db.chatDao()
     }
+
+    @Provides
+    @Singleton
+    fun provideProviderDao(db: ChatDatabase): ProviderDao = db.providerDao()
+
+    @Provides
+    @Singleton
+    fun provideProviderStore(dao: ProviderDao): ProviderStore = RoomProviderStore(dao)
+
+    @Provides
+    @Singleton
+    fun provideProviderSecretStorage(store: ProviderSecretStore): ProviderSecretStorage = store
 
     @Provides
     @Singleton

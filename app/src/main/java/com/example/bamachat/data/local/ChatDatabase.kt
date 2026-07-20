@@ -7,6 +7,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.example.bamachat.data.provider.local.ProviderDao
+import com.example.bamachat.data.provider.local.ProviderEntity
+import com.example.bamachat.data.provider.local.ProviderModelEntity
+import com.example.bamachat.data.provider.local.ProviderRoomSchema
 
 @Database(
     entities = [
@@ -14,13 +18,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PersonaMemoryEntity::class, PersonaFeedbackEntity::class,
         PersonaPromptVersionEntity::class, UserMemoryFactEntity::class,
         KnowledgeChunkEntity::class, KnowledgeEdgeEntity::class,
-        PersonaTrainingExampleEntity::class, ChatMessageFtsEntity::class
+        PersonaTrainingExampleEntity::class, ChatMessageFtsEntity::class,
+        ProviderEntity::class, ProviderModelEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
+    abstract fun providerDao(): ProviderDao
 
     companion object {
         @Volatile private var INSTANCE: ChatDatabase? = null
@@ -202,6 +208,12 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                ProviderRoomSchema.createTables(db)
+            }
+        }
+
         fun getDatabase(context: Context): ChatDatabase {
             return INSTANCE ?: synchronized(this) {
                 var instance = INSTANCE
@@ -214,7 +226,7 @@ abstract class ChatDatabase : RoomDatabase() {
                         .addMigrations(
                             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                             MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                            MIGRATION_7_8
+                            MIGRATION_7_8, MIGRATION_8_9
                         )
                         .addCallback(object : RoomDatabase.Callback() {
                             override fun onDestructiveMigration(db: SupportSQLiteDatabase) {
