@@ -1,9 +1,22 @@
 package com.example.bamachat.ui.navigation
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsNavigationPolicyTest {
+    @Test
+    fun onlyProviderManagementSubpagesUseFullscreenSettingsPresentation() {
+        assertFalse(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.OVERVIEW))
+        assertFalse(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.LEGACY_SECTION_PATTERN))
+        assertFalse(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.VOICE_AUDIO))
+        assertTrue(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.AI_MODELS))
+        assertTrue(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.PROVIDERS))
+        assertTrue(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.PROVIDER_ADD))
+        assertTrue(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.PROVIDER_EDIT_PATTERN))
+        assertTrue(SettingsNavigationPolicy.isFullscreenSubpage("settings/ai-models/providers/custom:11111111-2222-3333-4444-555555555555"))
+    }
     @Test
     fun chatAndBottomNavigationShareTheOverviewDestination() {
         assertEquals("settings", SettingsNavigationRoutes.OVERVIEW)
@@ -31,10 +44,15 @@ class SettingsNavigationPolicyTest {
 
     @Test
     fun settingsSubpageReturnsToExistingOverview() {
-        assertEquals(
-            SettingsOverviewNavigationAction.PopToOverview,
-            SettingsNavigationPolicy.overviewAction(SettingsNavigationRoutes.VOICE_AUDIO)
-        )
+        listOf(
+            SettingsNavigationRoutes.VOICE_AUDIO,
+            SettingsNavigationRoutes.AI_MODELS,
+            SettingsNavigationRoutes.PROVIDERS,
+            SettingsNavigationRoutes.PROVIDER_ADD,
+            SettingsNavigationRoutes.PROVIDER_EDIT_PATTERN
+        ).forEach { route ->
+            assertEquals(SettingsOverviewNavigationAction.PopToOverview, SettingsNavigationPolicy.overviewAction(route))
+        }
     }
 
     @Test
@@ -49,6 +67,10 @@ class SettingsNavigationPolicyTest {
         listOf(
             SettingsNavigationRoutes.OVERVIEW,
             SettingsNavigationRoutes.VOICE_AUDIO,
+            SettingsNavigationRoutes.AI_MODELS,
+            SettingsNavigationRoutes.PROVIDERS,
+            SettingsNavigationRoutes.PROVIDER_ADD,
+            SettingsNavigationRoutes.PROVIDER_EDIT_PATTERN,
             SettingsNavigationRoutes.LEGACY_SECTION_PATTERN
         ).forEach { route ->
             assertEquals(true, SettingsNavigationPolicy.shouldExitSettingsFlow(route, "chat"))

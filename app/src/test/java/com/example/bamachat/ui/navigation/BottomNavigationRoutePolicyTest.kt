@@ -103,4 +103,50 @@ class BottomNavigationRoutePolicyTest {
         assertTrue(state.visible)
         assertEquals("settings", state.selectedRoute)
     }
+
+    @Test
+    fun providerManagementRoutesHideBottomNavigation() {
+        listOf(
+            "settings/ai-models",
+            "settings/ai-models/providers",
+            "settings/ai-models/providers/add",
+            "settings/ai-models/providers/{providerId}"
+        ).forEach { route ->
+            val state = BottomNavigationRoutePolicy.resolve(
+                previousState = BottomNavigationUiState(visible = true, selectedRoute = "settings"),
+                destinationHierarchyRoutes = listOf(route)
+            )
+            assertFalse(route, state.visible)
+            assertEquals(route, "settings", state.selectedRoute)
+        }
+    }
+
+    @Test
+    fun settingsOverviewRemainsVisibleWhileNestedProviderPagesAreFullscreen() {
+        val overview = BottomNavigationRoutePolicy.resolve(
+            previousState = BottomNavigationUiState(),
+            destinationHierarchyRoutes = listOf("settings")
+        )
+        val nested = BottomNavigationRoutePolicy.resolve(
+            previousState = overview,
+            destinationHierarchyRoutes = listOf("settings/ai-models/providers/custom:11111111-2222-3333-4444-555555555555")
+        )
+
+        assertTrue(overview.visible)
+        assertEquals("settings", overview.selectedRoute)
+        assertFalse(nested.visible)
+        assertEquals("settings", nested.selectedRoute)
+    }
+
+    @Test
+    fun hubChatToolsAndProfileVisibilityRemainsUnchanged() {
+        listOf("home_hub", "chat", "mini_apps", "profile").forEach { route ->
+            val state = BottomNavigationRoutePolicy.resolve(
+                previousState = BottomNavigationUiState(),
+                destinationHierarchyRoutes = listOf(route)
+            )
+            assertTrue(route, state.visible)
+            assertEquals(route, state.selectedRoute)
+        }
+    }
 }

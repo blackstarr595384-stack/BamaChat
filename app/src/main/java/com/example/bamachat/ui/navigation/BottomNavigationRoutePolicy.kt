@@ -47,7 +47,14 @@ internal object BottomNavigationRoutePolicy {
         previousState: BottomNavigationUiState,
         destinationHierarchyRoutes: Iterable<String?>
     ): BottomNavigationUiState {
-        val normalizedRoutes = destinationHierarchyRoutes.mapNotNull(::normalize)
+        val routes = destinationHierarchyRoutes.toList()
+        if (routes.any(SettingsNavigationPolicy::isFullscreenSubpage)) {
+            return BottomNavigationUiState(
+                visible = false,
+                selectedRoute = previousState.selectedRoute
+            )
+        }
+        val normalizedRoutes = routes.mapNotNull(::normalize)
         val visibleRoute = normalizedRoutes.firstOrNull { it in visibleRoutes }
         if (visibleRoute != null) {
             return BottomNavigationUiState(

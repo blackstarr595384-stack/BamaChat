@@ -69,6 +69,7 @@ fun SettingsOverviewScreen(
     cloudChatSyncUid: String? = null,
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
+    onOpenAiModels: () -> Unit,
     onOpenVoiceAudio: () -> Unit,
     onOpenWorkspaceSettings: () -> Unit,
     initialLegacySection: String? = null,
@@ -132,7 +133,7 @@ fun SettingsOverviewScreen(
         onOpenAccount = onOpenProfile,
         onOpenWorkspaces = onOpenWorkspaceSettings,
         onOpenGeneral = { legacySection = "general" },
-        onOpenAiModels = { legacySection = "ai" },
+        onOpenAiModels = onOpenAiModels,
         onOpenVoiceAudio = onOpenVoiceAudio,
         onOpenPrivacyData = { legacySection = "data" },
         onOpenAdvanced = { legacySection = "ai" }

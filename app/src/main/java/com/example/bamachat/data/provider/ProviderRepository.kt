@@ -138,6 +138,14 @@ class ProviderRepository @Inject constructor(
         }
     }
 
+    suspend fun clearDefaultModel(providerId: ProviderId) = storageCall {
+        ensureBuiltInsSeeded()
+        ensureProviderExists(providerId)
+        if (store.setDefaultModel(providerId.value, null, System.currentTimeMillis()) != 1) {
+            throw ProviderRepositoryException(ProviderRepositoryError.STORAGE_FAILURE, "Das Standardmodell konnte nicht entfernt werden.")
+        }
+    }
+
     suspend fun replaceModels(providerId: ProviderId, models: List<ProviderModelDefinition>) = storageCall {
         ensureBuiltInsSeeded()
         ensureProviderExists(providerId)

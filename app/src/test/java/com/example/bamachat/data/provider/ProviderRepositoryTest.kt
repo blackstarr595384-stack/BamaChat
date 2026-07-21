@@ -130,6 +130,19 @@ class ProviderRepositoryTest {
     }
 
     @Test
+    fun defaultModelCanBeClearedExplicitly() = runBlocking {
+        val fixture = fixture()
+        val provider = customDefinition()
+        fixture.repository.createCustomProvider(provider)
+        fixture.repository.addManualModel(provider.id, manualModel(provider.id, "first"))
+        fixture.repository.setDefaultModel(provider.id, "first")
+
+        fixture.repository.clearDefaultModel(provider.id)
+
+        assertNull(fixture.repository.getProvider(provider.id)?.defaultModelId)
+    }
+
+    @Test
     fun repositoryAndUrlPolicyHaveNoNetworkOrLegacyPreferenceDependency() {
         val constructorTypes = ProviderRepository::class.java.declaredConstructors.flatMap { it.parameterTypes.toList() }
         assertTrue(constructorTypes.none { type ->

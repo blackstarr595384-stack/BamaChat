@@ -145,6 +145,31 @@ class SettingsUxScreenTest {
     }
 
     @Test
+    fun overviewAiRowUsesNewNavigationAction() {
+        val aiNavigationCount = AtomicInteger(0)
+        composeRule.setContent {
+            BamaChatTheme(darkTheme = true, dynamicColor = false) {
+                SettingsOverviewContent(
+                    tier = "Free",
+                    provider = "OpenRouter",
+                    workspace = "Standard",
+                    syncStatus = "Nur lokal",
+                    voiceModeSummary = "Smart Voice",
+                    onBack = {}, onOpenAccount = {}, onOpenWorkspaces = {}, onOpenGeneral = {},
+                    onOpenAiModels = { aiNavigationCount.incrementAndGet() },
+                    onOpenVoiceAudio = {}, onOpenPrivacyData = {}, onOpenAdvanced = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("settings_overview_list")
+            .performScrollToNode(hasTestTag("settings_category_ai"))
+        composeRule.onNodeWithTag("settings_category_ai").performClick()
+
+        assertEquals(1, aiNavigationCount.get())
+    }
+
+    @Test
     fun voiceModeCardsFitAt320DpWithLargeFont() = assertVoiceCardsAtWidth(320, 2f)
 
     @Test

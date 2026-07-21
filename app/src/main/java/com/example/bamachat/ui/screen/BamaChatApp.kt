@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +52,10 @@ private object Routes {
     const val PROFILE = "profile"
     const val SETTINGS = SettingsNavigationRoutes.OVERVIEW
     const val SETTINGS_VOICE_AUDIO = SettingsNavigationRoutes.VOICE_AUDIO
+    const val SETTINGS_AI_MODELS = SettingsNavigationRoutes.AI_MODELS
+    const val SETTINGS_PROVIDERS = SettingsNavigationRoutes.PROVIDERS
+    const val SETTINGS_PROVIDER_ADD = SettingsNavigationRoutes.PROVIDER_ADD
+    const val SETTINGS_PROVIDER_EDIT = SettingsNavigationRoutes.PROVIDER_EDIT_PATTERN
     const val SETTINGS_WITH_SECTION = SettingsNavigationRoutes.LEGACY_SECTION_PATTERN
     const val HELP = "help"
     const val HERMES_CODING_ASSISTANT = "hermes_coding_assistant"
@@ -129,6 +135,7 @@ fun BamaChatApp() {
         previousState = previousBottomNavigationState,
         destinationHierarchyRoutes = destinationHierarchyRoutes
     )
+    val fullscreenSettingsSubpage = destinationHierarchyRoutes.any(SettingsNavigationPolicy::isFullscreenSubpage)
     SideEffect {
         if (previousBottomNavigationState != bottomNavigationState) {
             previousBottomNavigationState = bottomNavigationState
@@ -253,6 +260,11 @@ fun BamaChatApp() {
                     onNavigate = { route -> navigateTopLevel(route) }
                 )
             }
+        },
+        contentWindowInsets = if (fullscreenSettingsSubpage) {
+            WindowInsets(0, 0, 0, 0)
+        } else {
+            ScaffoldDefaults.contentWindowInsets
         },
         containerColor = Color.Transparent
     ) { innerPadding ->
@@ -477,6 +489,38 @@ fun BamaChatApp() {
                     mcpWorkflowManager = chatViewModel.mcpWorkflowManager
                 )
             }
+            composable(Routes.SETTINGS_AI_MODELS) {
+                AiModelSettingsScreen(
+                    settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenProviderManagement = {
+                        navController.navigate(Routes.SETTINGS_PROVIDERS) { launchSingleTop = true }
+                    },
+                    onOpenLegacySettings = { navController.navigate(Routes.settingsRoute("ai")) }
+                )
+            }
+            composable(Routes.SETTINGS_PROVIDERS) {
+                ProviderManagementScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddProvider = {
+                        navController.navigate(Routes.SETTINGS_PROVIDER_ADD) { launchSingleTop = true }
+                    },
+                    onOpenProvider = { providerId ->
+                        navController.navigate(SettingsNavigationRoutes.providerEditor(providerId.value)) {
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
+            composable(Routes.SETTINGS_PROVIDER_ADD) {
+                ProviderEditorScreen(onBack = { navController.popBackStack() })
+            }
+            composable(
+                route = Routes.SETTINGS_PROVIDER_EDIT,
+                arguments = listOf(navArgument("providerId") { type = NavType.StringType })
+            ) {
+                ProviderEditorScreen(onBack = { navController.popBackStack() })
+            }
             composable(
                 route = Routes.SETTINGS_WITH_SECTION,
                 arguments = listOf(
@@ -496,6 +540,9 @@ fun BamaChatApp() {
                     cloudChatSyncUid = firebaseUser?.uid,
                     onBack = { navController.popBackStack() },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
+                    onOpenAiModels = {
+                        navController.navigate(Routes.SETTINGS_AI_MODELS) { launchSingleTop = true }
+                    },
                     onOpenVoiceAudio = {
                         navController.navigate(Routes.SETTINGS_VOICE_AUDIO) {
                             launchSingleTop = true
