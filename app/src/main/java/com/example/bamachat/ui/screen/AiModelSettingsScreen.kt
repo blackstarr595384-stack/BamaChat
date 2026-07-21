@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -24,17 +25,21 @@ import com.example.bamachat.ui.component.settings.SettingsSectionTitle
 import com.example.bamachat.ui.component.settings.SettingsTopBar
 import com.example.bamachat.ui.component.settings.settingsScreenContentPadding
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.ui.viewmodel.ChatProviderSelectionViewModel
 
 @Composable
 fun AiModelSettingsScreen(
     settingsViewModel: SettingsViewModel,
     onBack: () -> Unit,
+    onOpenChatProviderSelection: () -> Unit,
     onOpenProviderManagement: () -> Unit,
-    onOpenLegacySettings: () -> Unit
+    onOpenLegacySettings: () -> Unit,
+    chatProviderViewModel: ChatProviderSelectionViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val provider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
     val openRouterModel by settingsViewModel.selectedOpenRouterModel.collectAsStateWithLifecycle()
     val openCodeModel by settingsViewModel.openCodeModel.collectAsStateWithLifecycle()
+    val chatProviderState by chatProviderViewModel.uiState.collectAsStateWithLifecycle()
     val model = when (provider) {
         "OpenRouter" -> openRouterModel
         "OpenCode" -> openCodeModel
@@ -52,7 +57,19 @@ fun AiModelSettingsScreen(
             contentPadding = settingsScreenContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item { SettingsSectionTitle("AKTUELLE CHAT-KONFIGURATION") }
+            item { SettingsSectionTitle("IM CHAT VERWENDETER ANBIETER") }
+            item {
+                SettingsNavigationRow(
+                    modifier = Modifier.testTag("open_chat_provider_selection"),
+                    title = "Anbieter für Chat auswählen",
+                    description = chatProviderState.summary,
+                    icon = Icons.Default.Chat,
+                    onClick = onOpenChatProviderSelection
+                )
+            }
+            chatProviderState.warning?.let { warning ->
+                item { SettingsInfoCard(warning, accent = MaterialTheme.colorScheme.error) }
+            }
             item {
                 SettingsInfoCard(
                     text = "Aktiver Anbieter: $provider\nAktuelles Modell: $model"
@@ -60,7 +77,7 @@ fun AiModelSettingsScreen(
             }
             item {
                 SettingsInfoCard(
-                    text = "Eigene Anbieter können hier bereits verwaltet werden. Die Verwendung im Chat wird in einem folgenden Schritt aktiviert.",
+                    text = "Eigene Anbieter können für neue Textanfragen ausgewählt werden. Legacy-Anbieter und ihre Fallbacks bleiben unverändert.",
                     accent = MaterialTheme.colorScheme.tertiary
                 )
             }

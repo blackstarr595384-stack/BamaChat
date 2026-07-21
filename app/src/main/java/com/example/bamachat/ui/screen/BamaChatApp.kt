@@ -53,6 +53,7 @@ private object Routes {
     const val SETTINGS = SettingsNavigationRoutes.OVERVIEW
     const val SETTINGS_VOICE_AUDIO = SettingsNavigationRoutes.VOICE_AUDIO
     const val SETTINGS_AI_MODELS = SettingsNavigationRoutes.AI_MODELS
+    const val SETTINGS_CHAT_PROVIDER = SettingsNavigationRoutes.CHAT_PROVIDER
     const val SETTINGS_PROVIDERS = SettingsNavigationRoutes.PROVIDERS
     const val SETTINGS_PROVIDER_ADD = SettingsNavigationRoutes.PROVIDER_ADD
     const val SETTINGS_PROVIDER_EDIT = SettingsNavigationRoutes.PROVIDER_EDIT_PATTERN
@@ -476,7 +477,10 @@ fun BamaChatApp() {
                     onOpenComposeLab = { navController.navigate(Routes.COMPOSE_LAB) },
                     onOpenWorkspace = { navController.navigate(Routes.WORKSPACES) },
                     onSearchClick = { navController.navigate(Routes.CHAT_SEARCH) },
-                    onOpenSettings = { navigateSettingsOverview() }
+                    onOpenSettings = { navigateSettingsOverview() },
+                    onOpenAiModels = {
+                        navController.navigate(Routes.SETTINGS_AI_MODELS) { launchSingleTop = true }
+                    }
                 )
             }
             composable(Routes.SETTINGS_VOICE_AUDIO) {
@@ -493,11 +497,17 @@ fun BamaChatApp() {
                 AiModelSettingsScreen(
                     settingsViewModel = settingsViewModel,
                     onBack = { navController.popBackStack() },
+                    onOpenChatProviderSelection = {
+                        navController.navigate(Routes.SETTINGS_CHAT_PROVIDER) { launchSingleTop = true }
+                    },
                     onOpenProviderManagement = {
                         navController.navigate(Routes.SETTINGS_PROVIDERS) { launchSingleTop = true }
                     },
                     onOpenLegacySettings = { navController.navigate(Routes.settingsRoute("ai")) }
                 )
+            }
+            composable(Routes.SETTINGS_CHAT_PROVIDER) {
+                ChatProviderSelectionScreen(onBack = { navController.popBackStack() })
             }
             composable(Routes.SETTINGS_PROVIDERS) {
                 ProviderManagementScreen(

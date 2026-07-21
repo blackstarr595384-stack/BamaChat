@@ -7,6 +7,11 @@ import org.junit.Test
 
 class SettingsNavigationPolicyTest {
     @Test
+    fun chatProviderSelectionIsFullscreenSettingsSubpage() {
+        assertTrue(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.CHAT_PROVIDER))
+        assertTrue(SettingsNavigationPolicy.isSettingsFlowRoute(SettingsNavigationRoutes.CHAT_PROVIDER))
+    }
+    @Test
     fun onlyProviderManagementSubpagesUseFullscreenSettingsPresentation() {
         assertFalse(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.OVERVIEW))
         assertFalse(SettingsNavigationPolicy.isFullscreenSubpage(SettingsNavigationRoutes.LEGACY_SECTION_PATTERN))

@@ -108,6 +108,7 @@ class BottomNavigationRoutePolicyTest {
     fun providerManagementRoutesHideBottomNavigation() {
         listOf(
             "settings/ai-models",
+            "settings/ai-models/chat-provider",
             "settings/ai-models/providers",
             "settings/ai-models/providers/add",
             "settings/ai-models/providers/{providerId}"

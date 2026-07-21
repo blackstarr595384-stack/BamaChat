@@ -141,7 +141,8 @@ fun ChatScreen(
     onOpenComposeLab: () -> Unit = {},
     onOpenWorkspace: () -> Unit = {},
     onSearchClick: () -> Unit = {},
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    onOpenAiModels: () -> Unit = {}
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
@@ -151,6 +152,7 @@ fun ChatScreen(
     val isStreaming by viewModel.isStreaming.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val providerFallbackMessage by viewModel.providerFallbackMessage.collectAsStateWithLifecycle()
+    val chatProviderStatus by viewModel.chatProviderStatus.collectAsStateWithLifecycle()
     val errorActionLabel by viewModel.errorActionLabel.collectAsStateWithLifecycle()
     val isErrorRetryable by viewModel.isErrorRetryable.collectAsStateWithLifecycle()
     val hasOlderMessages by viewModel.hasOlderMessages.collectAsStateWithLifecycle()
@@ -703,6 +705,7 @@ fun ChatScreen(
             fontSize = fontSize,
             selectedPersona = selectedPersona,
             aiProvider = aiProvider,
+            chatProviderStatus = chatProviderStatus,
             selectableProviders = selectableProviders,
             multiProviderEnabled = multiProviderEnabled,
             onSelectProvider = { selected ->
@@ -733,6 +736,7 @@ fun ChatScreen(
                 voiceViewModel.stopAll()
                 viewModel.cancelStream()
             },
+            onOpenAiModels = onOpenAiModels,
             onSpeak = onSpeak,
             activeSpeechMessageId = activeSpeechMessageId,
             isSpeechPlaybackActive = isSpeechPlaybackActive,
@@ -1112,9 +1116,11 @@ private fun ChatContent(
     fontSize: Float,
     selectedPersona: ChatViewModel.Persona,
     aiProvider: String,
+    chatProviderStatus: com.example.bamachat.ui.viewmodel.ChatProviderRuntimeStatus,
     selectableProviders: List<String>,
     multiProviderEnabled: Boolean,
     onSelectProvider: (String) -> Unit,
+    onOpenAiModels: () -> Unit,
     onPersonaClick: () -> Unit,
     onBottomNavRoute: (String) -> Unit,
     onSearchClick: () -> Unit,
@@ -1515,16 +1521,21 @@ private fun ChatContent(
                                         modifier = Modifier
                                             .semantics {
                                                 role = Role.Button
-                                                contentDescription = "Provider wechseln"
+                                                contentDescription = if (chatProviderStatus.customSelection) {
+                                                    "Chat-Anbieter: ${chatProviderStatus.summary}. KI und Modelle öffnen"
+                                                } else "${chatProviderStatus.summary}. Anbieter wechseln"
                                             }
-                                            .clickable { providerMenuExpanded = true }
+                                            .clickable {
+                                                if (chatProviderStatus.customSelection) onOpenAiModels()
+                                                else providerMenuExpanded = true
+                                            }
                                     ) {
                                         Row(
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = "Provider: $aiProvider",
+                                                text = chatProviderStatus.summary,
                                                 color = Color.White,
                                                 style = MaterialTheme.typography.labelMedium,
                                                 maxLines = 1,
@@ -1533,7 +1544,7 @@ private fun ChatContent(
                                             Spacer(Modifier.width(4.dp))
                                             Icon(
                                                 Icons.Default.ArrowDropDown,
-                                                contentDescription = "Provider wählen",
+                                                contentDescription = null,
                                                 tint = Color.White,
                                                 modifier = Modifier.size(16.dp)
                                             )

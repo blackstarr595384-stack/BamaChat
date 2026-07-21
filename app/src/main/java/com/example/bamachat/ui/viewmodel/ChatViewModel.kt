@@ -21,6 +21,15 @@ import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
 import com.example.bamachat.service.UserFacingAiErrorMapper
+import com.example.bamachat.data.provider.chat.ActiveChatProviderResolution
+import com.example.bamachat.data.provider.chat.ActiveChatProviderResolver
+import com.example.bamachat.data.provider.chat.ActiveChatProviderSelection
+import com.example.bamachat.data.provider.chat.ActiveChatProviderSelectionStore
+import com.example.bamachat.data.provider.chat.ProviderChatErrorMessages
+import com.example.bamachat.data.provider.chat.ProviderChatException
+import com.example.bamachat.data.provider.chat.ProviderChatExecutionEngine
+import com.example.bamachat.data.provider.chat.ProviderChatMessage
+import com.example.bamachat.data.provider.chat.ProviderChatRequest
 import com.example.bamachat.service.ImageUrlResolver
 import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.shared.core.ChatSendDeduplicator
@@ -83,12 +92,22 @@ data class ToolCallProgress(
     val result: String? = null
 )
 
+data class ChatProviderRuntimeStatus(
+    val summary: String = "Bisherige KI-Konfiguration",
+    val customSelection: Boolean = false,
+    val valid: Boolean = true,
+    val warning: String? = null
+)
+
 enum class ToolCallStatus { RUNNING, DONE, ERROR }
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     application: Application,
     private val chatSyncCoordinator: AndroidChatSyncCoordinator,
+    private val chatProviderSelectionStore: ActiveChatProviderSelectionStore,
+    private val chatProviderResolver: ActiveChatProviderResolver,
+    private val providerChatExecutionEngine: ProviderChatExecutionEngine,
     val mcpServerManager: McpServerManager,
     val mcpWorkflowManager: McpWorkflowManager
 ) : AndroidViewModel(application) {
@@ -394,6 +413,8 @@ class ChatViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage
     private val _providerFallbackMessage = MutableStateFlow<String?>(null)
     val providerFallbackMessage: StateFlow<String?> = _providerFallbackMessage.asStateFlow()
+    private val _chatProviderStatus = MutableStateFlow(ChatProviderRuntimeStatus())
+    val chatProviderStatus: StateFlow<ChatProviderRuntimeStatus> = _chatProviderStatus.asStateFlow()
     private val _errorActionLabel = MutableStateFlow<String?>(null)
     val errorActionLabel: StateFlow<String?> = _errorActionLabel
     private val _isErrorRetryable = MutableStateFlow(false)
@@ -491,6 +512,24 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             repo.getAllConversations().collectLatest {
                 _conversations.value = it
+            }
+        }
+        viewModelScope.launch {
+            chatProviderResolver.observeResolution().collectLatest { resolution ->
+                _chatProviderStatus.value = when (resolution) {
+                    ActiveChatProviderResolution.Legacy -> ChatProviderRuntimeStatus()
+                    is ActiveChatProviderResolution.ResolvedCustomProvider -> ChatProviderRuntimeStatus(
+                        summary = "${resolution.definition.displayName} · ${resolution.model.displayName}",
+                        customSelection = true,
+                        valid = true
+                    )
+                    is ActiveChatProviderResolution.Invalid -> ChatProviderRuntimeStatus(
+                        summary = "Eigene Anbieterwahl prüfen",
+                        customSelection = true,
+                        valid = false,
+                        warning = resolution.userMessage
+                    )
+                }
             }
         }
 
@@ -680,6 +719,16 @@ class ChatViewModel @Inject constructor(
         val trimmedText = text.trim()
         if (trimmedText.isBlank()) return false
         if (_isLoading.value || _isStreaming.value) return false
+        if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom &&
+            (!_chatProviderStatus.value.customSelection || !_chatProviderStatus.value.valid)
+        ) {
+            publishError(
+                _chatProviderStatus.value.warning ?: "Die eigene Anbieterwahl ist noch nicht einsatzbereit.",
+                retryable = false,
+                actionLabel = null
+            )
+            return false
+        }
 
         val convId = _currentConversationId.value
         val now = System.currentTimeMillis()
@@ -692,6 +741,14 @@ class ChatViewModel @Inject constructor(
         _chatSentiment.value = emotion.sentiment
 
         if (mediaService.isImageQuery(trimmedText)) {
+            if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom) {
+                publishError(
+                    ProviderChatErrorMessages.message(com.example.bamachat.data.provider.chat.ProviderChatError.UNSUPPORTED_FEATURE),
+                    retryable = false,
+                    actionLabel = null
+                )
+                return false
+            }
             generateImage(trimmedText, skipUserMessage = true)
             return true
         }
@@ -742,6 +799,8 @@ class ChatViewModel @Inject constructor(
                 )
                 _lastAppliedExtensionNames.value = extensionRuntime?.appliedExtensionNames.orEmpty()
                 sendChatViaApi(convId, trimmedText, runtimeContext = mergedContext, extensionRuntime)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 handleError(e)
             } finally {
@@ -754,6 +813,14 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessageWithImage(text: String, imageUri: Uri): Boolean {
         if (_isLoading.value || _isStreaming.value) return false
+        if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom) {
+            publishError(
+                "Bilder werden mit eigenen Anbietern in dieser Phase noch nicht unterstützt. Es wurde kein anderer Anbieter verwendet.",
+                retryable = false,
+                actionLabel = null
+            )
+            return false
+        }
         if (text.isBlank() && imageUri == Uri.EMPTY) return false
         if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_ANALYSIS)) return false
 
@@ -890,6 +957,22 @@ class ChatViewModel @Inject constructor(
         val systemPrompt = getSystemPromptWithCache(personaViewModel.selectedPersona.value)
         val mergedRuntimeContext = listOfNotNull(runtimeContext, extensionRuntime?.promptContext)
             .filter { it.isNotBlank() }.joinToString("\n\n").takeIf { it.isNotBlank() }
+        val selection = chatProviderSelectionStore.selection.value
+        if (selection is ActiveChatProviderSelection.Custom) {
+            val toolsRequested = extensionRuntime?.forceWebResearch == true ||
+                (prefs.getBoolean(KEY_AGENT_TOOLS_ENABLED, false) &&
+                    (mcpServerManager.getToolDefinitionsOpenAI().isNotEmpty() || mcpWorkflowManager.getOpenAIToolDefinitions().isNotEmpty()))
+            if (toolsRequested) {
+                publishError(
+                    ProviderChatErrorMessages.message(com.example.bamachat.data.provider.chat.ProviderChatError.UNSUPPORTED_FEATURE),
+                    retryable = false,
+                    actionLabel = null
+                )
+                return
+            }
+            runCustomProviderChat(convId, text, systemPrompt, mergedRuntimeContext, selection)
+            return
+        }
         val forceWebResearch = extensionRuntime?.forceWebResearch == true
         val appliedExtensions = extensionRuntime?.appliedExtensionNames.orEmpty()
 
@@ -1455,6 +1538,72 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _errorMessage.value = null
         _errorActionLabel.value = null
         _isErrorRetryable.value = false
+    }
+
+    private suspend fun runCustomProviderChat(
+        convId: String,
+        latestUserText: String,
+        systemPrompt: String,
+        runtimeContext: String?,
+        selection: ActiveChatProviderSelection.Custom
+    ) {
+        val resolution = chatProviderResolver.resolve(selection)
+        if (resolution is ActiveChatProviderResolution.Invalid) {
+            publishError(resolution.userMessage, retryable = false, actionLabel = null)
+            return
+        }
+        if (resolution !is ActiveChatProviderResolution.ResolvedCustomProvider) return
+        val messages = buildList {
+            add(ProviderChatMessage("system", listOfNotNull(systemPrompt, runtimeContext).joinToString("\n\n")))
+            _messages.value.takeLast(DEFAULT_HISTORY_LIMIT).forEach { message ->
+                val clean = message.text.trim()
+                if (clean.isNotEmpty()) add(ProviderChatMessage(if (message.isUser) "user" else "assistant", clean))
+            }
+            if (lastOrNull()?.role != "user" || lastOrNull()?.content != latestUserText) {
+                add(ProviderChatMessage("user", latestUserText))
+            }
+        }
+        val assistantId = UUID.randomUUID().toString()
+        var assistantCreated = false
+        val buffer = StringBuilder()
+        var lastFlushAt = 0L
+        _isStreaming.value = true
+        try {
+            val result = providerChatExecutionEngine.execute(
+                ProviderChatRequest(selection, messages)
+            ) { chunk ->
+                if (chunk.text.isEmpty()) return@execute
+                buffer.append(chunk.text)
+                val now = System.currentTimeMillis()
+                if (!assistantCreated || now - lastFlushAt >= 250L) {
+                    saveMessageLocally(
+                        convId,
+                        ChatMessage(assistantId, buffer.toString(), false, System.currentTimeMillis()),
+                        touchConversation = false
+                    )
+                    assistantCreated = true
+                    lastFlushAt = now
+                }
+            }
+            val finalText = result.text.trim()
+            if (finalText.isEmpty()) throw ProviderChatException(
+                com.example.bamachat.data.provider.chat.ProviderChatError.EMPTY_RESPONSE,
+                message = "Custom provider returned empty response"
+            )
+            val finalMessage = ChatMessage(assistantId, finalText, false, System.currentTimeMillis())
+            saveMessageLocally(convId, finalMessage, touchConversation = true)
+            scheduleMessageSync(convId, finalMessage)
+            clearRetryContext()
+            notificationService.show("BamaChat", finalText, prefs.getBoolean("notifications_enabled", true))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            if (assistantCreated) repo.deleteMessage(assistantId)
+            throw cancelled
+        } catch (error: ProviderChatException) {
+            if (assistantCreated) repo.deleteMessage(assistantId)
+            publishError(ProviderChatErrorMessages.message(error.error), retryable = true, actionLabel = "Erneut versuchen")
+        } finally {
+            _isStreaming.value = false
+        }
     }
 
     fun dismissProviderFallbackStatus() {
