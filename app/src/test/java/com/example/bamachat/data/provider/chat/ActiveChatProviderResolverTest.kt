@@ -205,6 +205,13 @@ private class ResolverProviderStore : ProviderStore {
     override suspend fun getModel(providerId: String, modelId: String) = models[providerId].orEmpty().firstOrNull { it.modelId == modelId }
     override suspend fun replaceModels(providerId: String, models: List<ProviderModelEntity>) { this.models[providerId] = models.toMutableList() }
     override suspend fun insertModel(model: ProviderModelEntity) { models.getOrPut(model.providerId) { mutableListOf() }.add(model) }
+    override suspend fun insertModelsIfAbsent(models: List<ProviderModelEntity>): List<Long> = models.map { model ->
+        val providerModels = this.models.getOrPut(model.providerId) { mutableListOf() }
+        if (providerModels.any { it.modelId == model.modelId }) -1L else {
+            providerModels += model
+            providerModels.size.toLong()
+        }
+    }
     override suspend fun deleteModel(providerId: String, modelId: String): Int = if (models[providerId]?.removeIf { it.modelId == modelId } == true) 1 else 0
     override suspend fun seedBuiltIns(providers: List<ProviderEntity>, models: List<ProviderModelEntity>) {
         providers.forEach { this.providers.putIfAbsent(it.providerId, it) }

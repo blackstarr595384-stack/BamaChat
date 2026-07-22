@@ -130,6 +130,48 @@ class ProviderRepositoryTest {
     }
 
     @Test
+    fun discoveredModelImportIsIdempotentAndPreservesExistingStateAndDefault() = runBlocking {
+        val fixture = fixture()
+        val provider = customDefinition()
+        fixture.repository.createCustomProvider(provider)
+        fixture.repository.replaceModels(
+            provider.id,
+            listOf(manualModel(provider.id, "existing", enabled = false), manualModel(provider.id, "default"))
+        )
+        fixture.repository.setDefaultModel(provider.id, "default")
+        val discovered = listOf(
+            ProviderModelDefinition.create(provider.id, "existing", source = ProviderModelSource.DISCOVERED),
+            ProviderModelDefinition.create(provider.id, "new-model", source = ProviderModelSource.DISCOVERED)
+        )
+
+        val first = fixture.repository.importDiscoveredModels(provider.id, discovered)
+        val second = fixture.repository.importDiscoveredModels(provider.id, discovered)
+
+        assertEquals(1, first.importedCount)
+        assertEquals(1, first.skippedExistingCount)
+        assertEquals(0, second.importedCount)
+        assertEquals(2, second.skippedExistingCount)
+        val models = fixture.repository.getModels(provider.id)
+        assertFalse(models.single { it.modelId == "existing" }.enabled)
+        assertEquals(ProviderModelSource.MANUAL, models.single { it.modelId == "existing" }.source)
+        assertTrue(models.single { it.modelId == "new-model" }.enabled)
+        assertEquals("default", fixture.repository.getProvider(provider.id)?.defaultModelId)
+    }
+
+    @Test
+    fun emptyDiscoveredImportDoesNotChangeModels() = runBlocking {
+        val fixture = fixture()
+        val provider = customDefinition()
+        fixture.repository.createCustomProvider(provider)
+        fixture.repository.addManualModel(provider.id, manualModel(provider.id, "manual"))
+
+        val result = fixture.repository.importDiscoveredModels(provider.id, emptyList())
+
+        assertEquals(0, result.importedCount)
+        assertEquals(listOf("manual"), fixture.repository.getModels(provider.id).map { it.modelId })
+    }
+
+    @Test
     fun defaultModelCanBeClearedExplicitly() = runBlocking {
         val fixture = fixture()
         val provider = customDefinition()
@@ -262,6 +304,13 @@ private class FakeProviderStore : ProviderStore {
         val providerModels = models.getOrPut(model.providerId) { mutableListOf() }
         check(providerModels.none { it.modelId == model.modelId })
         providerModels += model
+    }
+    override suspend fun insertModelsIfAbsent(models: List<ProviderModelEntity>): List<Long> = models.map { model ->
+        val providerModels = this.models.getOrPut(model.providerId) { mutableListOf() }
+        if (providerModels.any { it.modelId == model.modelId }) -1L else {
+            providerModels += model
+            providerModels.size.toLong()
+        }
     }
     override suspend fun deleteModel(providerId: String, modelId: String): Int {
         val removed = models[providerId]?.removeIf { it.modelId == modelId } == true

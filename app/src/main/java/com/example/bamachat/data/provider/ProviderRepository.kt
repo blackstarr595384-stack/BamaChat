@@ -34,6 +34,11 @@ class ProviderRepositoryException(
     message: String
 ) : IllegalStateException(message)
 
+data class ProviderModelImportResult(
+    val importedCount: Int,
+    val skippedExistingCount: Int
+)
+
 @Singleton
 class ProviderRepository @Inject constructor(
     private val store: ProviderStore,
@@ -161,6 +166,28 @@ class ProviderRepository @Inject constructor(
         }
         val manualModel = model.copy(source = ProviderModelSource.MANUAL)
         store.insertModel(manualModel.toEntity())
+    }
+
+    suspend fun importDiscoveredModels(
+        providerId: ProviderId,
+        models: List<ProviderModelDefinition>
+    ): ProviderModelImportResult = storageCall {
+        ensureBuiltInsSeeded()
+        val provider = ensureProviderExists(providerId)
+        if (provider.builtIn || !providerId.isCustom) {
+            throw ProviderRepositoryException(
+                ProviderRepositoryError.CUSTOM_REQUIRED,
+                "Nur benutzerdefinierte Anbieter unterstützen den Modellimport."
+            )
+        }
+        validateModels(providerId, models)
+        if (models.isEmpty()) return@storageCall ProviderModelImportResult(0, 0)
+        val normalized = models.distinctBy { it.modelId }.map { model ->
+            model.copy(source = ProviderModelSource.DISCOVERED, enabled = true).toEntity()
+        }
+        val inserted = store.insertModelsIfAbsent(normalized)
+        val importedCount = inserted.count { it != -1L }
+        ProviderModelImportResult(importedCount, normalized.size - importedCount)
     }
 
     suspend fun deleteModel(providerId: ProviderId, modelId: String) = storageCall {

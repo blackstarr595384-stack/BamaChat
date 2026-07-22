@@ -10,6 +10,12 @@ object ProviderEndpointBuilder {
     fun ollamaChat(normalizedBaseUrl: String): HttpUrl =
         build(normalizedBaseUrl, listOf("api", "chat"), listOf("api", "chat"))
 
+    fun openAiModels(normalizedBaseUrl: String): HttpUrl =
+        build(normalizedBaseUrl, listOf("models"), listOf("models"))
+
+    fun ollamaTags(normalizedBaseUrl: String): HttpUrl =
+        build(normalizedBaseUrl, listOf("api", "tags"), listOf("api", "tags"))
+
     private fun build(baseUrl: String, suffix: List<String>, existingSuffix: List<String>): HttpUrl {
         val base = baseUrl.toHttpUrlOrNull()
             ?: throw ProviderChatException(ProviderChatError.UNSAFE_URL, message = "Ungültige Anbieteradresse.")

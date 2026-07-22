@@ -17,6 +17,7 @@ interface ProviderStore {
     suspend fun getModel(providerId: String, modelId: String): ProviderModelEntity?
     suspend fun replaceModels(providerId: String, models: List<ProviderModelEntity>)
     suspend fun insertModel(model: ProviderModelEntity)
+    suspend fun insertModelsIfAbsent(models: List<ProviderModelEntity>): List<Long>
     suspend fun deleteModel(providerId: String, modelId: String): Int
     suspend fun seedBuiltIns(providers: List<ProviderEntity>, models: List<ProviderModelEntity>)
 }
@@ -42,6 +43,8 @@ class RoomProviderStore @Inject constructor(
     override suspend fun replaceModels(providerId: String, models: List<ProviderModelEntity>) =
         dao.replaceModels(providerId, models)
     override suspend fun insertModel(model: ProviderModelEntity) = dao.insertModel(model)
+    override suspend fun insertModelsIfAbsent(models: List<ProviderModelEntity>): List<Long> =
+        dao.insertModelsIfAbsent(models)
     override suspend fun deleteModel(providerId: String, modelId: String): Int = dao.deleteModel(providerId, modelId)
     override suspend fun seedBuiltIns(providers: List<ProviderEntity>, models: List<ProviderModelEntity>) =
         dao.seedBuiltIns(providers, models)

@@ -13,6 +13,10 @@ import com.example.bamachat.data.provider.ProviderModelSource
 import com.example.bamachat.data.provider.ProviderRepository
 import com.example.bamachat.data.provider.ProviderUrlPolicy
 import com.example.bamachat.data.provider.ProviderUrlValidationResult
+import com.example.bamachat.data.provider.discovery.DiscoveredProviderModel
+import com.example.bamachat.data.provider.discovery.ProviderDiscoveryException
+import com.example.bamachat.data.provider.discovery.ProviderDiscoveryMessages
+import com.example.bamachat.data.provider.discovery.ProviderDiscoveryService
 import com.example.bamachat.ui.provider.toProviderUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -22,7 +26,19 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+
+enum class ProviderDiscoveryUiStatus {
+    NOT_TESTED,
+    CHECKING,
+    SUCCESS,
+    MODELS_FOUND,
+    NO_MODELS,
+    CANCELLED,
+    ERROR
+}
 
 data class ProviderEditorUiState(
     val loading: Boolean = true,
@@ -45,7 +61,13 @@ data class ProviderEditorUiState(
     val models: List<ProviderModelDefinition> = emptyList(),
     val defaultModelId: String? = null,
     val errorMessage: String? = null,
-    val saving: Boolean = false
+    val saving: Boolean = false,
+    val discoveryStatus: ProviderDiscoveryUiStatus = ProviderDiscoveryUiStatus.NOT_TESTED,
+    val discoveryMessage: String? = null,
+    val discoveryModels: List<DiscoveredProviderModel> = emptyList(),
+    val selectedDiscoveredModelIds: Set<String> = emptySet(),
+    val discoveryTruncated: Boolean = false,
+    val importingModels: Boolean = false
 )
 
 sealed interface ProviderEditorEffect {
@@ -57,6 +79,7 @@ sealed interface ProviderEditorEffect {
 @HiltViewModel
 class ProviderEditorViewModel @Inject constructor(
     private val repository: ProviderRepository,
+    private val discoveryService: ProviderDiscoveryService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val requestedProviderId = savedStateHandle.get<String>("providerId")
@@ -66,6 +89,7 @@ class ProviderEditorViewModel @Inject constructor(
     private val _effects = MutableSharedFlow<ProviderEditorEffect>(extraBufferCapacity = 4)
     val effects: SharedFlow<ProviderEditorEffect> = _effects.asSharedFlow()
     private var pendingSecret: String? = null
+    private var discoveryJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -154,6 +178,148 @@ class ProviderEditorViewModel @Inject constructor(
         pendingSecret = null
     }
 
+    fun testConnection() = startDiscovery(showModels = false)
+
+    fun fetchModels() = startDiscovery(showModels = true)
+
+    fun cancelDiscovery() {
+        val job = discoveryJob ?: return
+        if (job.isActive) {
+            _uiState.value = _uiState.value.copy(
+                discoveryStatus = ProviderDiscoveryUiStatus.CANCELLED,
+                discoveryMessage = ProviderDiscoveryMessages.forError(com.example.bamachat.data.provider.discovery.ProviderDiscoveryError.CANCELLED)
+            )
+            job.cancel()
+        }
+        discoveryJob = null
+    }
+
+    fun toggleDiscoveredModel(modelId: String) {
+        update { state ->
+            val selected = state.selectedDiscoveredModelIds.toMutableSet()
+            if (!selected.add(modelId)) selected.remove(modelId)
+            state.copy(selectedDiscoveredModelIds = selected)
+        }
+    }
+
+    fun selectAllDiscoveredModels() {
+        update { state ->
+            val existingIds = state.models.map { it.modelId }.toSet()
+            state.copy(selectedDiscoveredModelIds = state.discoveryModels.map { it.modelId }.filterNot(existingIds::contains).toSet())
+        }
+    }
+
+    fun clearDiscoveredModelSelection() {
+        update { it.copy(selectedDiscoveredModelIds = emptySet()) }
+    }
+
+    fun dismissDiscoveredModels() {
+        update {
+            it.copy(
+                discoveryModels = emptyList(),
+                selectedDiscoveredModelIds = emptySet(),
+                discoveryTruncated = false
+            )
+        }
+    }
+
+    fun importSelectedModels() {
+        val state = _uiState.value
+        if (!state.existing || state.builtIn || state.importingModels || state.selectedDiscoveredModelIds.isEmpty()) return
+        _uiState.value = state.copy(importingModels = true)
+        viewModelScope.launch {
+            runCatching {
+                val selectedModels = state.discoveryModels
+                    .filter { it.modelId in state.selectedDiscoveredModelIds }
+                    .map { discovered ->
+                        ProviderModelDefinition.create(
+                            providerId = state.id,
+                            modelId = discovered.modelId,
+                            displayName = discovered.modelId,
+                            source = ProviderModelSource.DISCOVERED
+                        )
+                    }
+                val result = repository.importDiscoveredModels(state.id, selectedModels)
+                result to repository.getModels(state.id)
+            }.onSuccess { (result, models) ->
+                _uiState.value = _uiState.value.copy(
+                    models = models,
+                    discoveryModels = emptyList(),
+                    selectedDiscoveredModelIds = emptySet(),
+                    importingModels = false,
+                    discoveryMessage = if (result.importedCount > 0) {
+                        "${result.importedCount} Modelle wurden importiert."
+                    } else {
+                        "Alle ausgewählten Modelle waren bereits vorhanden."
+                    }
+                )
+            }.onFailure { error ->
+                _uiState.value = _uiState.value.copy(importingModels = false)
+                _effects.emit(ProviderEditorEffect.Message(error.toProviderUserMessage()))
+            }
+        }
+    }
+
+    private fun startDiscovery(showModels: Boolean) {
+        val state = _uiState.value
+        if (discoveryJob?.isActive == true) return
+        if (!state.existing) {
+            _uiState.value = state.copy(discoveryMessage = "Speichere den Anbieter zuerst.")
+            return
+        }
+        if (state.builtIn) return
+        _uiState.value = state.copy(
+            discoveryStatus = ProviderDiscoveryUiStatus.CHECKING,
+            discoveryMessage = "Verbindung wird geprüft …",
+            discoveryModels = emptyList(),
+            selectedDiscoveredModelIds = emptySet(),
+            discoveryTruncated = false
+        )
+        val launchedJob = viewModelScope.launch {
+            try {
+                val result = discoveryService.discover(state.id)
+                _uiState.value = if (showModels) {
+                    if (result.models.isEmpty()) {
+                        _uiState.value.copy(
+                            discoveryStatus = ProviderDiscoveryUiStatus.NO_MODELS,
+                            discoveryMessage = "Der Anbieter hat keine importierbaren Modelle zurückgegeben."
+                        )
+                    } else {
+                        _uiState.value.copy(
+                            discoveryStatus = ProviderDiscoveryUiStatus.MODELS_FOUND,
+                            discoveryMessage = "${result.models.size} Modelle gefunden.",
+                            discoveryModels = result.models,
+                            selectedDiscoveredModelIds = emptySet(),
+                            discoveryTruncated = result.truncated
+                        )
+                    }
+                } else {
+                    _uiState.value.copy(
+                        discoveryStatus = ProviderDiscoveryUiStatus.SUCCESS,
+                        discoveryMessage = "Verbindung erfolgreich. Das Antwortformat wurde erkannt."
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: ProviderDiscoveryException) {
+                _uiState.value = _uiState.value.copy(
+                    discoveryStatus = ProviderDiscoveryUiStatus.ERROR,
+                    discoveryMessage = ProviderDiscoveryMessages.forError(error.error)
+                )
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    discoveryStatus = ProviderDiscoveryUiStatus.ERROR,
+                    discoveryMessage = "Die Verbindung konnte nicht geprüft werden."
+                )
+            } finally {
+                if (discoveryJob === coroutineContext[Job]) {
+                    discoveryJob = null
+                }
+            }
+        }
+        discoveryJob = launchedJob
+    }
+
     private fun persist(secretInput: String, normalizedUrl: String) {
         val state = _uiState.value
         if (state.builtIn) {
@@ -222,4 +388,10 @@ class ProviderEditorViewModel @Inject constructor(
     }
 
     private fun repositoryDefaultPlaceholder(state: ProviderEditorUiState): String? = state.defaultModelId
+
+    override fun onCleared() {
+        discoveryJob?.cancel()
+        discoveryJob = null
+        super.onCleared()
+    }
 }
