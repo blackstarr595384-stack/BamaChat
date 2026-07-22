@@ -15,8 +15,8 @@ import com.example.bamachat.data.provider.ProviderUrlPolicy
 import com.example.bamachat.data.provider.ProviderUrlValidationResult
 import com.example.bamachat.data.provider.discovery.DiscoveredProviderModel
 import com.example.bamachat.data.provider.discovery.ProviderDiscoveryException
-import com.example.bamachat.data.provider.discovery.ProviderDiscoveryMessages
 import com.example.bamachat.data.provider.discovery.ProviderDiscoveryService
+import com.example.bamachat.ui.provider.ProviderDiscoveryPresentation
 import com.example.bamachat.ui.provider.toProviderUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -32,7 +32,8 @@ import kotlinx.coroutines.launch
 
 enum class ProviderDiscoveryUiStatus {
     NOT_TESTED,
-    CHECKING,
+    TESTING,
+    FETCHING_MODELS,
     SUCCESS,
     MODELS_FOUND,
     NO_MODELS,
@@ -187,7 +188,9 @@ class ProviderEditorViewModel @Inject constructor(
         if (job.isActive) {
             _uiState.value = _uiState.value.copy(
                 discoveryStatus = ProviderDiscoveryUiStatus.CANCELLED,
-                discoveryMessage = ProviderDiscoveryMessages.forError(com.example.bamachat.data.provider.discovery.ProviderDiscoveryError.CANCELLED)
+                discoveryMessage = ProviderDiscoveryPresentation.errorMessage(
+                    com.example.bamachat.data.provider.discovery.ProviderDiscoveryError.CANCELLED
+                )
             )
             job.cancel()
         }
@@ -248,9 +251,9 @@ class ProviderEditorViewModel @Inject constructor(
                     selectedDiscoveredModelIds = emptySet(),
                     importingModels = false,
                     discoveryMessage = if (result.importedCount > 0) {
-                        "${result.importedCount} Modelle wurden importiert."
+                        if (result.importedCount == 1) "1 Modell importiert." else "${result.importedCount} Modelle importiert."
                     } else {
-                        "Alle ausgewählten Modelle waren bereits vorhanden."
+                        "Keine neuen Modelle importiert."
                     }
                 )
             }.onFailure { error ->
@@ -269,8 +272,12 @@ class ProviderEditorViewModel @Inject constructor(
         }
         if (state.builtIn) return
         _uiState.value = state.copy(
-            discoveryStatus = ProviderDiscoveryUiStatus.CHECKING,
-            discoveryMessage = "Verbindung wird geprüft …",
+            discoveryStatus = if (showModels) {
+                ProviderDiscoveryUiStatus.FETCHING_MODELS
+            } else {
+                ProviderDiscoveryUiStatus.TESTING
+            },
+            discoveryMessage = if (showModels) "Modelle werden abgerufen …" else "Verbindung wird geprüft …",
             discoveryModels = emptyList(),
             selectedDiscoveredModelIds = emptySet(),
             discoveryTruncated = false
@@ -296,7 +303,7 @@ class ProviderEditorViewModel @Inject constructor(
                 } else {
                     _uiState.value.copy(
                         discoveryStatus = ProviderDiscoveryUiStatus.SUCCESS,
-                        discoveryMessage = "Verbindung erfolgreich. Das Antwortformat wurde erkannt."
+                        discoveryMessage = "Verbindung erfolgreich."
                     )
                 }
             } catch (cancelled: CancellationException) {
@@ -304,7 +311,7 @@ class ProviderEditorViewModel @Inject constructor(
             } catch (error: ProviderDiscoveryException) {
                 _uiState.value = _uiState.value.copy(
                     discoveryStatus = ProviderDiscoveryUiStatus.ERROR,
-                    discoveryMessage = ProviderDiscoveryMessages.forError(error.error)
+                    discoveryMessage = ProviderDiscoveryPresentation.errorMessage(error.error)
                 )
             } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(

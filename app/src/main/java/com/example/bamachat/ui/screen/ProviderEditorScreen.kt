@@ -1,5 +1,6 @@
 package com.example.bamachat.ui.screen
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -113,59 +115,13 @@ fun ProviderEditorScreen(
 
 
     if (state.discoveryModels.isNotEmpty()) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissDiscoveredModels,
-            title = { Text("Gefundene Modelle") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${state.discoveryModels.size} importierbare Modelle gefunden.")
-                    if (state.discoveryTruncated) {
-                        Text(
-                            "Die Liste wurde aus Sicherheitsgründen auf 500 Modelle begrenzt.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(onClick = viewModel::selectAllDiscoveredModels) { Text("Alle auswählen") }
-                        TextButton(onClick = viewModel::clearDiscoveredModelSelection) { Text("Auswahl aufheben") }
-                    }
-                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-                        items(state.discoveryModels, key = { it.modelId }) { discovered ->
-                            val existing = state.models.any { it.modelId == discovered.modelId }
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = discovered.modelId in state.selectedDiscoveredModelIds,
-                                    onCheckedChange = { viewModel.toggleDiscoveredModel(discovered.modelId) },
-                                    enabled = !existing
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(discovered.modelId, style = MaterialTheme.typography.bodyMedium)
-                                    if (existing) {
-                                        Text(
-                                            "Bereits vorhanden",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = viewModel::importSelectedModels,
-                    enabled = state.selectedDiscoveredModelIds.isNotEmpty() && !state.importingModels
-                ) { Text(if (state.importingModels) "Wird importiert …" else "Ausgewählte importieren") }
-            },
-            dismissButton = {
-                TextButton(onClick = viewModel::dismissDiscoveredModels) { Text("Abbrechen") }
-            }
+        ProviderModelImportDialog(
+            state = state,
+            onDismiss = viewModel::dismissDiscoveredModels,
+            onSelectAll = viewModel::selectAllDiscoveredModels,
+            onClearSelection = viewModel::clearDiscoveredModelSelection,
+            onToggleModel = viewModel::toggleDiscoveredModel,
+            onImport = viewModel::importSelectedModels
         )
     }
 
@@ -296,7 +252,6 @@ fun ProviderEditorScreen(
                     )
                 }
                 if (!state.builtIn) {
-                    item { SettingsSectionTitle("VERBINDUNG UND MODELLE") }
                     item {
                         ProviderDiscoverySection(
                             state = state,
@@ -335,57 +290,171 @@ fun ProviderEditorScreen(
 }
 
 @Composable
+internal fun ProviderModelImportDialog(
+    state: ProviderEditorUiState,
+    onDismiss: () -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onToggleModel: (String) -> Unit,
+    onImport: () -> Unit
+) {
+    AlertDialog(
+        modifier = Modifier.testTag("provider_model_import_dialog"),
+        onDismissRequest = onDismiss,
+        title = { Text("Gefundene Modelle") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${state.discoveryModels.size} Modelle gefunden.")
+                Text(
+                    "${state.selectedDiscoveredModelIds.size} von ${state.discoveryModels.size} ausgewählt",
+                    modifier = Modifier.testTag("provider_model_selected_count"),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                if (state.discoveryTruncated) {
+                    Text(
+                        "Die Liste wurde aus Sicherheitsgründen auf 500 Modelle begrenzt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(
+                        onClick = onSelectAll,
+                        modifier = Modifier.testTag("provider_models_select_all")
+                    ) { Text("Alle auswählen") }
+                    TextButton(
+                        onClick = onClearSelection,
+                        modifier = Modifier.testTag("provider_models_clear_selection")
+                    ) { Text("Auswahl aufheben") }
+                }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .testTag("provider_model_import_list")
+                ) {
+                    items(state.discoveryModels, key = { it.modelId }) { discovered ->
+                        val existing = state.models.any { it.modelId == discovered.modelId }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = discovered.modelId in state.selectedDiscoveredModelIds,
+                                onCheckedChange = { onToggleModel(discovered.modelId) },
+                                enabled = !existing
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(discovered.modelId, style = MaterialTheme.typography.bodyMedium)
+                                if (existing) {
+                                    Text(
+                                        "Bereits vorhanden",
+                                        modifier = Modifier.testTag("provider_model_already_exists"),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onImport,
+                enabled = state.selectedDiscoveredModelIds.isNotEmpty() && !state.importingModels,
+                modifier = Modifier.testTag("provider_models_import")
+            ) { Text(if (state.importingModels) "Wird importiert …" else "Ausgewählte importieren") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("provider_models_cancel_import")
+            ) { Text("Abbrechen") }
+        }
+    )
+}
+
+@Composable
 internal fun ProviderDiscoverySection(
     state: ProviderEditorUiState,
     onTestConnection: () -> Unit,
     onFetchModels: () -> Unit,
     onCancel: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth().testTag("provider_discovery_section"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    val running = state.discoveryStatus == ProviderDiscoveryUiStatus.TESTING ||
+        state.discoveryStatus == ProviderDiscoveryUiStatus.FETCHING_MODELS
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("provider_discovery_section"),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        if (!state.existing) {
-            SettingsInfoCard("Speichere den Anbieter zuerst.", accent = MaterialTheme.colorScheme.secondary)
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            Text("Verbindung und Modelle", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Prüfe die Verbindung oder lade verfügbare Modelle manuell vom Anbieter.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (!state.existing) {
+                SettingsInfoCard("Speichere den Anbieter zuerst.", accent = MaterialTheme.colorScheme.secondary)
+            }
             Button(
                 onClick = onTestConnection,
-                enabled = state.existing && state.enabled && state.discoveryStatus != ProviderDiscoveryUiStatus.CHECKING,
-                modifier = Modifier.weight(1f).testTag("provider_test_connection")
+                enabled = state.existing && state.enabled && !running,
+                modifier = Modifier.fillMaxWidth().testTag("provider_test_connection")
             ) { Text("Verbindung testen") }
             Button(
                 onClick = onFetchModels,
-                enabled = state.existing && state.enabled && state.discoveryStatus != ProviderDiscoveryUiStatus.CHECKING,
-                modifier = Modifier.weight(1f).testTag("provider_fetch_models")
+                enabled = state.existing && state.enabled && !running,
+                modifier = Modifier.fillMaxWidth().testTag("provider_fetch_models")
             ) { Text("Modelle abrufen") }
-        }
-        if (state.discoveryStatus == ProviderDiscoveryUiStatus.CHECKING) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator()
-                Text("Verbindung wird geprüft …", modifier = Modifier.weight(1f))
-                TextButton(onClick = onCancel, modifier = Modifier.testTag("provider_cancel_discovery")) { Text("Abbrechen") }
+            if (running) {
+                Row(
+                    modifier = Modifier.testTag("provider_discovery_progress"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text(
+                        if (state.discoveryStatus == ProviderDiscoveryUiStatus.FETCHING_MODELS) {
+                            "Modelle werden abgerufen …"
+                        } else {
+                            "Verbindung wird geprüft …"
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier.testTag("provider_cancel_discovery")
+                    ) { Text("Abbrechen") }
+                }
+            } else {
+                state.discoveryMessage?.let { message ->
+                    SettingsInfoCard(
+                        message,
+                        modifier = Modifier.testTag("provider_discovery_status"),
+                        accent = if (state.discoveryStatus == ProviderDiscoveryUiStatus.ERROR) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.secondary
+                        }
+                    )
+                }
             }
-        } else {
-            state.discoveryMessage?.let { message ->
-                SettingsInfoCard(
-                    message,
-                    accent = if (state.discoveryStatus == ProviderDiscoveryUiStatus.ERROR) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.secondary
-                    }
-                )
-            }
+            Text(
+                "Geprüft wird die zuletzt gespeicherte Konfiguration am Modell-Endpunkt. Es wird keine Chatnachricht gesendet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Text(
-            "Geprüft wird die zuletzt gespeicherte Konfiguration am Modell-Endpunkt. Es wird keine Chatnachricht gesendet.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 

@@ -89,6 +89,7 @@ class ProviderEditorDiscoveryViewModelTest {
 
         assertEquals(1, server.requestCount)
         assertEquals(listOf("model-a"), runBlocking { repository.getModels(provider.id) }.map { it.modelId })
+        assertEquals("1 Modell importiert.", viewModel.uiState.value.discoveryMessage)
     }
 
     @Test
@@ -100,6 +101,19 @@ class ProviderEditorDiscoveryViewModelTest {
 
         assertEquals(0, server.requestCount)
         assertEquals("Speichere den Anbieter zuerst.", viewModel.uiState.value.discoveryMessage)
+    }
+
+    @Test
+    fun connectionSuccessUsesFocusedSessionMessage() {
+        server.enqueue(MockResponse().setBody("{\"data\":[]}"))
+        val viewModel = viewModel(provider.id)
+        waitUntil { !viewModel.uiState.value.loading }
+
+        viewModel.testConnection()
+        waitUntil { viewModel.uiState.value.discoveryStatus == ProviderDiscoveryUiStatus.SUCCESS }
+
+        assertEquals("Verbindung erfolgreich.", viewModel.uiState.value.discoveryMessage)
+        assertEquals(1, server.requestCount)
     }
 
     private fun viewModel(providerId: ProviderId) = ProviderEditorViewModel(
