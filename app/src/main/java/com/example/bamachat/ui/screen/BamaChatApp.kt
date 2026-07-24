@@ -478,8 +478,8 @@ fun BamaChatApp() {
                     onOpenWorkspace = { navController.navigate(Routes.WORKSPACES) },
                     onSearchClick = { navController.navigate(Routes.CHAT_SEARCH) },
                     onOpenSettings = { navigateSettingsOverview() },
-                    onOpenAiModels = {
-                        navController.navigate(Routes.SETTINGS_AI_MODELS) { launchSingleTop = true }
+                    onOpenChatProviderSelection = {
+                        navController.navigate(Routes.SETTINGS_CHAT_PROVIDER) { launchSingleTop = true }
                     }
                 )
             }
@@ -507,7 +507,12 @@ fun BamaChatApp() {
                 )
             }
             composable(Routes.SETTINGS_CHAT_PROVIDER) {
-                ChatProviderSelectionScreen(onBack = { navController.popBackStack() })
+                ChatProviderSelectionScreen(
+                    onBack = { navController.popBackStack() },
+                    onManageProviders = {
+                        navController.navigate(Routes.SETTINGS_PROVIDERS) { launchSingleTop = true }
+                    }
+                )
             }
             composable(Routes.SETTINGS_PROVIDERS) {
                 ProviderManagementScreen(

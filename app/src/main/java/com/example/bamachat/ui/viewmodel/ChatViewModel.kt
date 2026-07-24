@@ -30,6 +30,7 @@ import com.example.bamachat.data.provider.chat.ProviderChatException
 import com.example.bamachat.data.provider.chat.ProviderChatExecutionEngine
 import com.example.bamachat.data.provider.chat.ProviderChatMessage
 import com.example.bamachat.data.provider.chat.ProviderChatRequest
+import com.example.bamachat.data.provider.ProviderConnectionType
 import com.example.bamachat.service.ImageUrlResolver
 import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.shared.core.ChatSendDeduplicator
@@ -93,11 +94,16 @@ data class ToolCallProgress(
 )
 
 data class ChatProviderRuntimeStatus(
-    val summary: String = "Bisherige KI-Konfiguration",
+    val providerName: String = "BamaChat Standard",
+    val modelName: String? = null,
+    val badge: String = "Standard",
     val customSelection: Boolean = false,
     val valid: Boolean = true,
     val warning: String? = null
-)
+) {
+    val summary: String
+        get() = listOfNotNull(providerName, modelName).joinToString(" · ")
+}
 
 enum class ToolCallStatus { RUNNING, DONE, ERROR }
 
@@ -519,12 +525,18 @@ class ChatViewModel @Inject constructor(
                 _chatProviderStatus.value = when (resolution) {
                     ActiveChatProviderResolution.Legacy -> ChatProviderRuntimeStatus()
                     is ActiveChatProviderResolution.ResolvedCustomProvider -> ChatProviderRuntimeStatus(
-                        summary = "${resolution.definition.displayName} · ${resolution.model.displayName}",
+                        providerName = resolution.definition.displayName,
+                        modelName = resolution.model.displayName,
+                        badge = when (resolution.definition.connectionType) {
+                            ProviderConnectionType.OPENAI_COMPATIBLE -> "Eigener Anbieter"
+                            ProviderConnectionType.OLLAMA_LOCAL -> "Lokal"
+                        },
                         customSelection = true,
                         valid = true
                     )
                     is ActiveChatProviderResolution.Invalid -> ChatProviderRuntimeStatus(
-                        summary = "Eigene Anbieterwahl prüfen",
+                        providerName = "Auswahl nicht verfügbar",
+                        badge = "Prüfen",
                         customSelection = true,
                         valid = false,
                         warning = resolution.userMessage

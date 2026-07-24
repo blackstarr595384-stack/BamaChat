@@ -142,7 +142,7 @@ fun ChatScreen(
     onOpenWorkspace: () -> Unit = {},
     onSearchClick: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
-    onOpenAiModels: () -> Unit = {}
+    onOpenChatProviderSelection: () -> Unit = {}
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
@@ -167,14 +167,6 @@ fun ChatScreen(
     val isBiometricEnabled by settingsViewModel.isBiometricEnabled.collectAsStateWithLifecycle()
     val primaryColorInt by settingsViewModel.primaryColorInt.collectAsStateWithLifecycle()
     val fontSize by settingsViewModel.fontSize.collectAsStateWithLifecycle()
-    val aiProvider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
-    val multiProviderEnabled by settingsViewModel.multiProviderEnabled.collectAsStateWithLifecycle()
-    val openRouterApiKey by settingsViewModel.openRouterApiKey.collectAsStateWithLifecycle()
-    val groqApiKey by settingsViewModel.groqApiKey.collectAsStateWithLifecycle()
-    val cerebrasApiKey by settingsViewModel.cerebrasApiKey.collectAsStateWithLifecycle()
-    val togetherApiKey by settingsViewModel.togetherApiKey.collectAsStateWithLifecycle()
-    val openCodeApiKey by settingsViewModel.openCodeApiKey.collectAsStateWithLifecycle()
-    val openCodeEndpoint by settingsViewModel.openCodeEndpoint.collectAsStateWithLifecycle()
     val voicePushToTalkEnabled by settingsViewModel.voicePushToTalkEnabled.collectAsStateWithLifecycle()
     val automationQuickActionsEnabled by settingsViewModel.automationQuickActionsEnabled.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
@@ -579,26 +571,6 @@ fun ChatScreen(
             onlyActiveWorkspace = workspaceChatFilterEnabled
         )
     }
-    val selectableProviders = remember(
-        aiProvider,
-        openRouterApiKey,
-        groqApiKey,
-        cerebrasApiKey,
-        togetherApiKey,
-        openCodeApiKey,
-        openCodeEndpoint
-    ) {
-        buildList {
-            if (openRouterApiKey.isNotBlank()) add("OpenRouter")
-            if (openCodeApiKey.isNotBlank() && openCodeEndpoint.isNotBlank()) add("OpenCode")
-            if (groqApiKey.isNotBlank()) add("Groq")
-            if (cerebrasApiKey.isNotBlank()) add("Cerebras")
-            if (togetherApiKey.isNotBlank()) add("Together")
-            add("Ollama")
-            if (aiProvider.isNotBlank()) add(aiProvider)
-        }.distinct()
-    }
-
     ModalNavigationDrawer(
         modifier = Modifier.testTag("chat_screen"),
         drawerState = drawerState,
@@ -704,17 +676,7 @@ fun ChatScreen(
             personaMood = personaMood,
             fontSize = fontSize,
             selectedPersona = selectedPersona,
-            aiProvider = aiProvider,
             chatProviderStatus = chatProviderStatus,
-            selectableProviders = selectableProviders,
-            multiProviderEnabled = multiProviderEnabled,
-            onSelectProvider = { selected ->
-                settingsViewModel.setAiProvider(selected)
-                if (multiProviderEnabled) {
-                    settingsViewModel.setMultiProviderEnabled(false)
-                    Toast.makeText(context, "Auto-Fallback deaktiviert: Provider manuell gesetzt.", Toast.LENGTH_SHORT).show()
-                }
-            },
             onPersonaClick = { showPersonaDialog = true },
             onBottomNavRoute = onBottomNavRoute,
             onSearchClick = onSearchClick,
@@ -736,7 +698,7 @@ fun ChatScreen(
                 voiceViewModel.stopAll()
                 viewModel.cancelStream()
             },
-            onOpenAiModels = onOpenAiModels,
+            onOpenChatProviderSelection = onOpenChatProviderSelection,
             onSpeak = onSpeak,
             activeSpeechMessageId = activeSpeechMessageId,
             isSpeechPlaybackActive = isSpeechPlaybackActive,
@@ -1048,6 +1010,80 @@ private fun VoiceProviderBadge(
 }
 
 @Composable
+internal fun ChatProviderStatusChip(
+    status: com.example.bamachat.ui.viewmodel.ChatProviderRuntimeStatus,
+    cornerRadius: Dp,
+    chipAlpha: Float,
+    onClick: () -> Unit
+) {
+    val foreground = if (status.valid) Color.White else MaterialTheme.colorScheme.onErrorContainer
+    Surface(
+        shape = RoundedCornerShape(cornerRadius),
+        color = if (status.valid) {
+            Color.White.copy(alpha = chipAlpha)
+        } else {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+        },
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (status.valid) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.error
+        ),
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .widthIn(max = 240.dp)
+            .testTag("chat_provider_status")
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = buildString {
+                    append("Chat-Anbieter: ${status.providerName}. ")
+                    status.modelName?.let { append("Modell: $it. ") }
+                    append("${status.badge}. ")
+                    if (!status.valid) append("Auswahl nicht verfügbar. ")
+                    append("Anbieter und Modell auswählen")
+                }
+            }
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Column(Modifier.weight(1f, fill = false)) {
+                Text(
+                    text = status.providerName,
+                    color = foreground,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                status.modelName?.let { model ->
+                    Text(
+                        text = model,
+                        color = foreground.copy(alpha = if (status.valid) 0.78f else 1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Text(
+                text = status.badge,
+                color = foreground.copy(alpha = if (status.valid) 0.82f else 1f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                tint = foreground,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun VoiceTranscriptCard(
     title: String,
     text: String,
@@ -1115,12 +1151,8 @@ private fun ChatContent(
     personaMood: PersonaMood,
     fontSize: Float,
     selectedPersona: ChatViewModel.Persona,
-    aiProvider: String,
     chatProviderStatus: com.example.bamachat.ui.viewmodel.ChatProviderRuntimeStatus,
-    selectableProviders: List<String>,
-    multiProviderEnabled: Boolean,
-    onSelectProvider: (String) -> Unit,
-    onOpenAiModels: () -> Unit,
+    onOpenChatProviderSelection: () -> Unit,
     onPersonaClick: () -> Unit,
     onBottomNavRoute: (String) -> Unit,
     onSearchClick: () -> Unit,
@@ -1340,7 +1372,6 @@ private fun ChatContent(
     )
     val chatListBottomPadding = 18.dp
     var topMenuExpanded by remember { mutableStateOf(false) }
-    var providerMenuExpanded by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize().background(backgroundGradient)) {
         Scaffold(
@@ -1513,87 +1544,12 @@ private fun ChatContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Box {
-                                    Surface(
-                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                                        modifier = Modifier
-                                            .semantics {
-                                                role = Role.Button
-                                                contentDescription = if (chatProviderStatus.customSelection) {
-                                                    "Chat-Anbieter: ${chatProviderStatus.summary}. KI und Modelle öffnen"
-                                                } else "${chatProviderStatus.summary}. Anbieter wechseln"
-                                            }
-                                            .clickable {
-                                                if (chatProviderStatus.customSelection) onOpenAiModels()
-                                                else providerMenuExpanded = true
-                                            }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = chatProviderStatus.summary,
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                            )
-                                            Spacer(Modifier.width(4.dp))
-                                            Icon(
-                                                Icons.Default.ArrowDropDown,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                    DropdownMenu(
-                                        expanded = providerMenuExpanded,
-                                        onDismissRequest = { providerMenuExpanded = false }
-                                    ) {
-                                        selectableProviders.forEach { providerOption ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = if (providerOption == aiProvider) "✓ $providerOption" else providerOption
-                                                    )
-                                                },
-                                                onClick = {
-                                                    providerMenuExpanded = false
-                                                    onSelectProvider(providerOption)
-                                                }
-                                            )
-                                        }
-                                        if (multiProviderEnabled) {
-                                            HorizontalDivider()
-                                            // P2-4: render the auto-fallback note as a non-clickable
-                                            // info row instead of a DropdownMenuItem so it isn't
-                                            // mistaken for a selectable provider.
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Info,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(18.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-                                                )
-                                                Text(
-                                                    text = "Auto-Fallback ist aktiv",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                ChatProviderStatusChip(
+                                    status = chatProviderStatus,
+                                    cornerRadius = designTokens.chipCornerRadius,
+                                    chipAlpha = designTokens.chipAlpha,
+                                    onClick = onOpenChatProviderSelection
+                                )
                                 Surface(
                                     shape = RoundedCornerShape(designTokens.chipCornerRadius),
                                     color = personaMood.cardSurface.copy(alpha = designTokens.bubbleSurfaceAlpha),
