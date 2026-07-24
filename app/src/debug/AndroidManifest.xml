@@ -6,14 +6,9 @@
         tools:replace="android:usesCleartextTraffic">
         <activity
             android:name=".voice.debug.DebugVoiceLabActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="BamaVoice Testlabor"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:windowSoftInputMode="adjustResize" />
         <receiver
             android:name=".debug.SharedAiPilotDebugToggleReceiver"
             android:exported="true">
