@@ -1,6 +1,8 @@
 package com.example.bamachat.ui.viewmodel
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.provider.ProviderAuthenticationType
 import com.example.bamachat.data.provider.ProviderCapabilities
 import com.example.bamachat.data.provider.ProviderConnectionType
@@ -17,6 +19,9 @@ import com.example.bamachat.data.provider.local.ProviderEntity
 import com.example.bamachat.data.provider.local.ProviderModelEntity
 import com.example.bamachat.data.provider.local.ProviderStore
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -127,7 +132,259 @@ class ChatProviderSelectionViewModelTest {
         waitUntil { selectionStore.selection.value == ActiveChatProviderSelection.Legacy }
     }
 
+    @Test
+    fun resolverExceptionResetsConfirmingAndDoesNotSave() = runBlocking {
+        addProvider("Fehleranbieter", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+        store.getProviderFailure = IllegalStateException("technical detail")
+
+        viewModel.confirm()
+        waitUntil { !viewModel.uiState.value.confirming }
+
+        assertEquals(0, preferences.applyCalls)
+        assertEquals("Auswahl konnte nicht übernommen werden.", viewModel.uiState.value.warning)
+    }
+
+    @Test
+    fun storeExceptionResetsConfirmingAndAttemptsOnlyOneSave() = runBlocking {
+        addProvider("Speicheranbieter", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences(failOnApply = true)
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+
+        viewModel.confirm()
+        waitUntil { !viewModel.uiState.value.confirming }
+
+        assertEquals(1, preferences.applyCalls)
+        assertEquals(ActiveChatProviderSelection.Legacy, selectionStore.selection.value)
+        assertEquals("Auswahl konnte nicht übernommen werden.", viewModel.uiState.value.warning)
+    }
+
+    @Test
+    fun cancellationExceptionResetsConfirmingAndIsNotConvertedToTechnicalText() = runBlocking {
+        addProvider("Abbruchanbieter", ProviderConnectionType.OLLAMA_LOCAL)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+        store.getProviderFailure = CancellationException("technical cancellation")
+
+        viewModel.confirm()
+        waitUntil { !viewModel.uiState.value.confirming }
+
+        assertEquals("Auswahl konnte nicht übernommen werden.", viewModel.uiState.value.warning)
+        assertFalse(viewModel.uiState.value.warning.orEmpty().contains("technical"))
+        assertEquals(ActiveChatProviderSelection.Legacy, selectionStore.selection.value)
+    }
+
+    @Test
+    fun cancellationExceptionResetsStateAndIsRethrown() = runBlocking {
+        addProvider("Weitergereichter Abbruch", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+        val releaseFailure = CompletableDeferred<Unit>()
+        store.getProviderGate = releaseFailure
+        store.getProviderFailure = CancellationException("technical cancellation")
+        val parentJob = requireNotNull(viewModel.viewModelScope.coroutineContext[Job])
+        val existingChildren = parentJob.children.toSet()
+
+        viewModel.confirm()
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+        val confirmationJob = parentJob.children.single { it !in existingChildren }
+        val completionCause = CompletableDeferred<Throwable?>()
+        confirmationJob.invokeOnCompletion { cause ->
+            completionCause.complete(cause)
+        }
+        releaseFailure.complete(Unit)
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        assertTrue(completionCause.await() is CancellationException)
+        assertFalse(viewModel.uiState.value.confirming)
+        assertEquals(0, preferences.applyCalls)
+        assertEquals("Auswahl konnte nicht übernommen werden.", viewModel.uiState.value.warning)
+        assertFalse(viewModel.uiState.value.warning.orEmpty().contains("technical"))
+    }
+
+    @Test
+    fun externalSelectionWithoutLocalChangeUpdatesSavedAndPending() = runBlocking {
+        val providerId = addProvider("Extern gewählt", ProviderConnectionType.OLLAMA_LOCAL)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        val selection = ActiveChatProviderSelection.Custom(
+            providerId,
+            modelIdFor("Extern gewählt")
+        )
+
+        selectionStore.save(selection)
+        waitUntil { viewModel.uiState.value.choices.single().models.single().selected }
+
+        assertFalse(viewModel.uiState.value.canConfirm)
+        assertEquals(selection, selectionStore.selection.value)
+    }
+
+    @Test
+    fun externalSelectionWithLocalChangePreservesPendingUntilCancel() = runBlocking {
+        val first = addProvider("Erste Auswahl", ProviderConnectionType.OLLAMA_LOCAL)
+        val second = addProvider("Zweite Auswahl", ProviderConnectionType.OLLAMA_LOCAL)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 2 }
+        val firstOption = optionFor(viewModel, "Erste Auswahl")
+        viewModel.selectOption(firstOption)
+        val external = ActiveChatProviderSelection.Custom(
+            second,
+            modelIdFor("Zweite Auswahl")
+        )
+
+        selectionStore.save(external)
+        waitUntil {
+            viewModel.uiState.value.choices
+                .first { it.displayName == "Erste Auswahl" }
+                .models.single().selected
+        }
+
+        assertTrue(viewModel.uiState.value.canConfirm)
+        viewModel.cancel()
+        assertTrue(
+            viewModel.uiState.value.choices
+                .first { it.displayName == "Zweite Auswahl" }
+                .models.single().selected
+        )
+        assertEquals(external, selectionStore.selection.value)
+    }
+
+    @Test
+    fun cancelRestoresSavedSelectionWithoutSaveOrResolverCall() = runBlocking {
+        addProvider("Lokaler Wechsel", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+        val resolverCalls = store.getProviderCalls
+
+        viewModel.cancel()
+
+        assertTrue(viewModel.uiState.value.legacySelected)
+        assertEquals(0, preferences.applyCalls)
+        assertEquals(resolverCalls, store.getProviderCalls)
+    }
+
+    @Test
+    fun fastDoubleTapSavesExactlyOnce() = runBlocking {
+        addProvider("Doppeltipp", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+
+        viewModel.confirm()
+        viewModel.confirm()
+        waitUntil { selectionStore.selection.value is ActiveChatProviderSelection.Custom }
+
+        assertEquals(1, preferences.applyCalls)
+    }
+
+    @Test
+    fun selectingAlreadySavedOptionDoesNotSaveOrLoseState() = runBlocking {
+        val providerId = addProvider("Gespeichert", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        val saved = ActiveChatProviderSelection.Custom(providerId, modelIdFor("Gespeichert"))
+        selectionStore.save(saved)
+        preferences.applyCalls = 0
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+
+        viewModel.selectOption(singleOption(viewModel))
+        viewModel.confirm()
+
+        assertEquals(0, preferences.applyCalls)
+        assertFalse(viewModel.uiState.value.canConfirm)
+        assertTrue(viewModel.uiState.value.choices.single().models.single().selected)
+    }
+
+    @Test
+    fun modelDeletedImmediatelyBeforeSavePreventsPersistence() = runBlocking {
+        val providerId = addProvider("Gelöschtes Modell", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+        store.deleteModel(providerId.value, modelIdFor("Gelöschtes Modell"))
+
+        viewModel.confirm()
+        waitUntil { !viewModel.uiState.value.confirming }
+
+        assertEquals(0, preferences.applyCalls)
+        assertEquals(
+            "Diese Anbieter- und Modellauswahl ist nicht verfügbar.",
+            viewModel.uiState.value.warning
+        )
+    }
+
+    @Test
+    fun providerDeletedImmediatelyBeforeSaveDoesNotPersist() = runBlocking {
+        addProvider("Gelöschter Anbieter", ProviderConnectionType.OLLAMA_LOCAL)
+        val preferences = trackingPreferences()
+        selectionStore = ActiveChatProviderSelectionStore(preferences)
+        resolver = ActiveChatProviderResolver(selectionStore, repository, secrets)
+        val viewModel = viewModel()
+        waitUntil { viewModel.uiState.value.choices.size == 1 }
+        viewModel.selectOption(singleOption(viewModel))
+        store.deleteProviderOnGet = true
+
+        viewModel.confirm()
+        waitUntil { !viewModel.uiState.value.confirming }
+
+        assertEquals(0, preferences.applyCalls)
+        assertEquals(ActiveChatProviderSelection.Legacy, selectionStore.selection.value)
+        assertEquals(
+            "Diese Anbieter- und Modellauswahl ist nicht verfügbar.",
+            viewModel.uiState.value.warning
+        )
+        assertFalse(viewModel.uiState.value.warning.orEmpty().contains("technical"))
+    }
+
     private fun viewModel() = ChatProviderSelectionViewModel(repository, selectionStore, resolver)
+
+    private fun singleOption(viewModel: ChatProviderSelectionViewModel): String =
+        viewModel.uiState.value.choices.single().models.single().optionKey
+
+    private fun optionFor(
+        viewModel: ChatProviderSelectionViewModel,
+        providerName: String
+    ): String = viewModel.uiState.value.choices
+        .first { it.displayName == providerName }
+        .models
+        .single()
+        .optionKey
+
+    private fun modelIdFor(name: String): String = "model-${name.length}"
+
+    private fun trackingPreferences(
+        failOnApply: Boolean = false
+    ): TrackingSharedPreferences {
+        val delegate = RuntimeEnvironment.getApplication()
+            .getSharedPreferences("chat_provider_tracking_${UUID.randomUUID()}", Context.MODE_PRIVATE)
+        return TrackingSharedPreferences(delegate, failOnApply)
+    }
 
     private suspend fun addProvider(
         name: String,
@@ -158,7 +415,7 @@ class ChatProviderSelectionViewModelTest {
                 id,
                 ProviderModelDefinition.create(
                     providerId = id,
-                    modelId = "model-${name.length}",
+                    modelId = modelIdFor(name),
                     displayName = "$name Modell",
                     source = ProviderModelSource.MANUAL
                 )
@@ -170,12 +427,12 @@ class ChatProviderSelectionViewModelTest {
     private fun generatedSecret(): String = CharArray(24) { 'q' }.concatToString()
 
     private fun waitUntil(condition: () -> Boolean) {
-        repeat(150) {
-            shadowOf(android.os.Looper.getMainLooper()).idle()
-            if (condition()) return
-            Thread.sleep(20)
+        val mainLooper = shadowOf(android.os.Looper.getMainLooper())
+        mainLooper.idle()
+        if (!condition()) {
+            mainLooper.runToEndOfTasks()
         }
-        throw AssertionError("Bedingung wurde nicht rechtzeitig erfüllt.")
+        assertTrue("Bedingung wurde nicht erfüllt.", condition())
     }
 }
 
@@ -198,11 +455,27 @@ private class SwitcherProviderStore : ProviderStore {
     private val providers = linkedMapOf<String, ProviderEntity>()
     private val models = linkedMapOf<String, MutableList<ProviderModelEntity>>()
     private val providerFlow = MutableStateFlow<List<ProviderEntity>>(emptyList())
+    var getProviderFailure: Throwable? = null
+    var getProviderGate: CompletableDeferred<Unit>? = null
+    var deleteProviderOnGet: Boolean = false
+    var getProviderCalls: Int = 0
 
     override fun observeProviders(): Flow<List<ProviderEntity>> = providerFlow
     override fun observeEnabledProviders(): Flow<List<ProviderEntity>> =
         MutableStateFlow(providers.values.filter { it.enabled })
-    override suspend fun getProvider(providerId: String): ProviderEntity? = providers[providerId]
+    override suspend fun getProvider(providerId: String): ProviderEntity? {
+        getProviderCalls += 1
+        getProviderGate?.await()
+        getProviderFailure?.let { throw it }
+        if (deleteProviderOnGet) {
+            deleteProviderOnGet = false
+            providers.remove(providerId)
+            models.remove(providerId)
+            publish()
+            return null
+        }
+        return providers[providerId]
+    }
     override suspend fun insertProvider(provider: ProviderEntity) {
         providers[provider.providerId] = provider
         publish()
@@ -273,5 +546,68 @@ private class SwitcherProviderStore : ProviderStore {
 
     private fun publish() {
         providerFlow.value = providers.values.toList()
+    }
+}
+
+private class TrackingSharedPreferences(
+    private val delegate: SharedPreferences,
+    private val failOnApply: Boolean
+) : SharedPreferences by delegate {
+    var applyCalls: Int = 0
+
+    override fun edit(): SharedPreferences.Editor {
+        val editor = delegate.edit()
+        return object : SharedPreferences.Editor {
+            override fun putString(key: String?, value: String?): SharedPreferences.Editor {
+                editor.putString(key, value)
+                return this
+            }
+
+            override fun putStringSet(
+                key: String?,
+                values: MutableSet<String>?
+            ): SharedPreferences.Editor {
+                editor.putStringSet(key, values)
+                return this
+            }
+
+            override fun putInt(key: String?, value: Int): SharedPreferences.Editor {
+                editor.putInt(key, value)
+                return this
+            }
+
+            override fun putLong(key: String?, value: Long): SharedPreferences.Editor {
+                editor.putLong(key, value)
+                return this
+            }
+
+            override fun putFloat(key: String?, value: Float): SharedPreferences.Editor {
+                editor.putFloat(key, value)
+                return this
+            }
+
+            override fun putBoolean(key: String?, value: Boolean): SharedPreferences.Editor {
+                editor.putBoolean(key, value)
+                return this
+            }
+
+            override fun remove(key: String?): SharedPreferences.Editor {
+                editor.remove(key)
+                return this
+            }
+
+            override fun clear(): SharedPreferences.Editor {
+                editor.clear()
+                return this
+            }
+
+            override fun commit(): Boolean = editor.commit()
+
+            override fun apply() {
+                applyCalls += 1
+                if (failOnApply) throw IllegalStateException("simulated write failure")
+                editor.apply()
+            }
+        }
     }
 }

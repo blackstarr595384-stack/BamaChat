@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.google.gson)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
+    testImplementation(kotlin("test"))
 }
 
 compose.desktop {

@@ -1,5 +1,6 @@
 package com.example.bamachat.ui.screen
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -49,6 +51,30 @@ import com.example.bamachat.ui.viewmodel.ChatProviderSelectionEffect
 import com.example.bamachat.ui.viewmodel.ChatProviderSelectionUiState
 import com.example.bamachat.ui.viewmodel.ChatProviderSelectionViewModel
 
+internal class ChatProviderSelectionBackCoordinator {
+    private var navigationCompleted = false
+
+    fun requestBack(
+        confirmationInProgress: Boolean,
+        cancel: () -> Unit,
+        navigate: () -> Unit
+    ) {
+        if (confirmationInProgress || navigationCompleted) return
+        cancel()
+        navigateOnce(navigate)
+    }
+
+    fun navigateAfterSuccess(navigate: () -> Unit) {
+        navigateOnce(navigate)
+    }
+
+    private fun navigateOnce(navigate: () -> Unit) {
+        if (navigationCompleted) return
+        navigationCompleted = true
+        navigate()
+    }
+}
+
 @Composable
 fun ChatProviderSelectionScreen(
     onBack: () -> Unit,
@@ -57,10 +83,21 @@ fun ChatProviderSelectionScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val currentOnBack by rememberUpdatedState(onBack)
+    val backCoordinator = remember { ChatProviderSelectionBackCoordinator() }
+    val cancelAndBack = {
+        backCoordinator.requestBack(
+            confirmationInProgress = viewModel.uiState.value.confirming,
+            cancel = viewModel::cancel,
+            navigate = currentOnBack
+        )
+    }
+    BackHandler(enabled = true, onBack = cancelAndBack)
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
-                ChatProviderSelectionEffect.Saved -> onBack()
+                ChatProviderSelectionEffect.Saved ->
+                    backCoordinator.navigateAfterSuccess(currentOnBack)
                 is ChatProviderSelectionEffect.Message -> snackbar.showSnackbar(effect.text)
             }
         }
@@ -69,7 +106,7 @@ fun ChatProviderSelectionScreen(
     ChatProviderSelectionContent(
         state = state,
         snackbar = snackbar,
-        onBack = onBack,
+        onBack = cancelAndBack,
         onSelectLegacy = viewModel::selectLegacy,
         onSelectOption = viewModel::selectOption,
         onConfirm = viewModel::confirm,
