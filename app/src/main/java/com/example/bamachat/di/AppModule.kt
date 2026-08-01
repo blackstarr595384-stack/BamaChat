@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.bamachat.data.cloud.ChatCloudSyncGateway
 import com.example.bamachat.data.cloud.ChatSyncPolicy
+import com.example.bamachat.data.github.AndroidGitHubReadOnlyRepositoryGateway
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatDao
 import com.example.bamachat.data.repository.ChatRepository
@@ -15,9 +16,13 @@ import com.example.bamachat.data.provider.local.ProviderStore
 import com.example.bamachat.data.provider.local.RoomProviderStore
 import com.example.bamachat.service.ChatEngine
 import com.example.bamachat.service.ConversationService
+import com.example.bamachat.service.AndroidGitHubProposalAnalyzer
+import com.example.bamachat.service.GitHubProposalAnalyzer
 import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
+import com.example.bamachat.shared.core.github.GitHubReadOnlyRepositoryGateway
+import com.example.bamachat.shared.core.github.RepositoryContextBuilder
 import com.example.bamachat.ui.viewmodel.ApiManager
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
@@ -84,6 +89,23 @@ object AppModule {
     @Singleton
     fun provideApiManager(app: Application): ApiManager {
         return ApiManager(app)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGitHubReadOnlyRepositoryGateway(): GitHubReadOnlyRepositoryGateway {
+        return AndroidGitHubReadOnlyRepositoryGateway()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRepositoryContextBuilder(): RepositoryContextBuilder {
+        return RepositoryContextBuilder()
+    }
+
+    @Provides
+    fun provideGitHubProposalAnalyzer(apiManager: ApiManager): GitHubProposalAnalyzer {
+        return AndroidGitHubProposalAnalyzer(apiManager)
     }
 
     @Provides

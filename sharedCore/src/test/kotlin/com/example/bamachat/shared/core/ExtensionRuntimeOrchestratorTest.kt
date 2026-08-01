@@ -1,7 +1,6 @@
 package com.example.bamachat.shared.core
 
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -33,9 +32,9 @@ class ExtensionRuntimeOrchestratorTest {
             templateTitles = listOf("Release-Check")
         )
 
-        assertNotNull(result)
-        assertTrue(result!!.forceWebResearch)
-        assertTrue(result.appliedExtensionNames.contains("Research Radar"))
+        val decision = requireNotNull(result)
+        assertTrue(decision.forceWebResearch)
+        assertTrue(decision.appliedExtensionNames.contains("Research Radar"))
     }
 
     @Test
@@ -47,8 +46,34 @@ class ExtensionRuntimeOrchestratorTest {
             templateTitles = emptyList()
         )
 
-        assertNotNull(result)
-        assertFalse(result!!.appliedExtensionNames.isEmpty())
-        assertTrue(result.appliedExtensionNames.first().startsWith("Quick:"))
+        val decision = requireNotNull(result)
+        assertFalse(decision.appliedExtensionNames.isEmpty())
+        assertTrue(decision.appliedExtensionNames.first().startsWith("Quick:"))
+    }
+
+    @Test
+    fun repoAutopilotRuntimeHintRemainsReadOnly() {
+        val result = ExtensionRuntimeOrchestrator.buildRuntimeContext(
+            userText = "Prüfe den Code auf Verbesserungen",
+            quickAction = QuickActionSuggestion.CODE_REVIEW,
+            activeExtensions = listOf(
+                RuntimeExtension(
+                    id = ExtensionRuntimeOrchestrator.EXT_REPO_AUTOPILOT,
+                    name = "Repo Autopilot",
+                    capabilityKeys = setOf(
+                        "chat_read",
+                        ExtensionRuntimeOrchestrator.CAP_GITHUB_READ
+                    )
+                )
+            ),
+            templateTitles = emptyList()
+        )
+
+        val decision = requireNotNull(result)
+        assertTrue(decision.appliedExtensionNames.contains("Repo Autopilot"))
+        assertTrue(decision.promptContext.contains("lesend erfasste Repository-Evidenz"))
+        assertTrue(decision.promptContext.contains("keine Änderung automatisch"))
+        assertFalse(decision.promptContext.contains("project_inventory"))
+        assertFalse(decision.promptContext.contains("run_terminal"))
     }
 }

@@ -58,6 +58,7 @@ Aktuelle Shared-Core-Bausteine:
 - `WorkspaceNaming` (Workspace-Tagging/Normalisierung)
 - `ChatSendDeduplicator` (Send-Dedup-Fenster)
 - `ExtensionRuntimeOrchestrator` (Quick-Action + Extension-Hinweise fuer Runtime-Prompts)
+- `shared/core/github/*` (plattformneutrale Allowlist, Pfad-/Groessenlimits, Snapshot-Modelle und Untrusted-Context-Grenzen fuer GitHub Intelligence)
 
 Desktop-Client relevante Klassen:
 - `desktop/DesktopMain.kt` (Shell + Chat/Workspace/Settings Screens)
@@ -298,6 +299,7 @@ Androids `SpeechRecognizer` besitzt den Aufnahmefokus selbst. BamaVoice fordert 
     - Orchestrierung: `ExtensionManagerViewModel.kt`
     - Katalog + Capability-Persistenz: `WorkspaceExtensions.kt`
     - Guardrail: Aktivierung nur, wenn alle Pflicht-Capabilities freigegeben sind
+    - Repo Autopilot 1.1.0: `CHAT_READ` + `GITHUB_READ`, dedizierter unauthentifizierter GET-only-Gateway für das öffentliche Allowlist-Repository, nur reguläre Git-Blobs mit Tree-SHA-Prüfung, Credential-Redaction vor dem AI-Kontext und keine GitHub-Schreiboperationen
     - Runtime-Hook im Chat: `ChatViewModel` lädt aktive Extensions und injiziert turn-basierten Extension-Kontext in `buildOpenRouterHistory` (inkl. optionaler Web-Recherche-Erzwingung)
     - Quick-Action-Steuerung im Eingabefeld (`Auto`, `Research`, `Code Review`, `Plan`) mit Persistenz über SharedPreferences
   - Mini-Apps V2 in `MiniAppsScreen.kt`:

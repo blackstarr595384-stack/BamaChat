@@ -91,6 +91,7 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
   - Neue Chats übernehmen den aktiven Workspace im Titel
   - Optionaler Chatlisten-Filter auf den aktiven Workspace
   - AI-Extensions Manager: installierbare Workspace-Plugins mit Capability-Freigaben (Pflichtrechte-Guardrail vor Aktivierung)
+  - GitHub Intelligence: Repo Autopilot liest ausschließlich freigegebene öffentliche Daten von `blackstarr595384-stack/BamaChat`, blockiert Symlinks/Submodule, redaktiert Credential-Muster vor der KI-Analyse und erzeugt strukturierte Vorschläge ohne GitHub-Schreibrechte
   - Chat-Integration: aktive Extensions werden pro Turn in den Runtime-Kontext eingebunden (inkl. optionalem Live-Web-Trigger für Research-Radar)
   - Quick-Action-Leiste im Composer: `Auto`, `Research`, `Code Review`, `Plan` für schnellere manuelle Steuerung pro Nachricht
   - Automation-Templates (Tagesbriefing, Meeting->ToDos, Release-Check, Risiko-Scan)

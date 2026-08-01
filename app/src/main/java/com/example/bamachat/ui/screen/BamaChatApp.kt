@@ -64,6 +64,7 @@ private object Routes {
     const val MINI_APPS = "mini_apps"
     const val AGENT_HUB = "agent_hub"
     const val EXTENSIONS = "extensions"
+    const val GITHUB_INTELLIGENCE = "github_intelligence"
     const val COMPOSE_LAB = "compose_lab"
     const val COMPOSE_PLAYGROUND = "compose_playground"
     const val KNOWLEDGE_GRAPH = "knowledge_graph"
@@ -607,6 +608,14 @@ fun BamaChatApp() {
                 ExtensionManagerScreen(
                     extensionManagerViewModel = extensionManagerViewModel,
                     designPreset = designPreset,
+                    onOpenGitHubIntelligence = {
+                        navController.navigate(Routes.GITHUB_INTELLIGENCE) { launchSingleTop = true }
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Routes.GITHUB_INTELLIGENCE) {
+                GitHubIntelligenceScreen(
                     onBack = { navController.popBackStack() }
                 )
             }

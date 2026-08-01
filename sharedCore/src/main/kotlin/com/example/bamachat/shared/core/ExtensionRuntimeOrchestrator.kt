@@ -24,6 +24,7 @@ object ExtensionRuntimeOrchestrator {
     const val EXT_REPO_AUTOPILOT = "ext-repo-autopilot"
     const val EXT_SYSTEMS_TUNER = "ext-systems-tuner"
     const val CAP_LIVE_WEB = "live_web"
+    const val CAP_GITHUB_READ = "github_read"
 
     fun buildRuntimeContext(
         userText: String,
@@ -113,7 +114,7 @@ object ExtensionRuntimeOrchestrator {
                         QuickActionInterpreter.looksLikeCodeRequest(normalized)
                     if (shouldApply) {
                         appliedExtensions += extension.name
-                        hints += "Repo Autopilot: Starte mit `project_inventory`, dann `ui_action_audit` und `config_audit`, bevor du einen schlanken Umsetzungsplan erstellst. Bevorzuge kleine, reversible Schritte und klare Rollout-Checks."
+                        hints += "Repo Autopilot: Nutze nur bereits ausdrücklich bereitgestellte, lesend erfasste Repository-Evidenz. Schlage kleine, prüfbare Änderungen und klare Tests vor; führe keine Änderung automatisch aus."
                     }
                 }
                 EXT_SYSTEMS_TUNER -> {
