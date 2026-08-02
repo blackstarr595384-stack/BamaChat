@@ -9,6 +9,8 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -30,9 +32,27 @@ class AppScreenshotCaptureTest {
     fun setup() {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val context = ApplicationProvider.getApplicationContext<Context>()
+        ensureFirebaseInitialized(context)
         screenshotDir = File(context.getExternalFilesDir(null), "bamachat-screenshots").apply {
             deleteRecursively()
             mkdirs()
+        }
+    }
+
+    private fun ensureFirebaseInitialized(context: Context) {
+        val defaultAppExists = FirebaseApp.getApps(context)
+            .any { it.name == FirebaseApp.DEFAULT_APP_NAME }
+
+        if (!defaultAppExists) {
+            val options = FirebaseOptions.Builder()
+                .setApplicationId("1:000000000000:android:0000000000000000")
+                .setProjectId("bamachat-screenshot-test")
+                .setApiKey("bamachat-screenshot-test-api-key")
+                .build()
+
+            checkNotNull(FirebaseApp.initializeApp(context, options)) {
+                "Firebase-Testinitialisierung fehlgeschlagen"
+            }
         }
     }
 
