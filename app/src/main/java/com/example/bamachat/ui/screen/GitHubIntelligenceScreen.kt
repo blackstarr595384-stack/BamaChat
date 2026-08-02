@@ -1,5 +1,6 @@
 package com.example.bamachat.ui.screen
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GppGood
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -31,16 +33,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bamachat.shared.core.github.AgentDraftPrProposalEligibilityPolicy
+import com.example.bamachat.shared.core.github.AgentDraftPrStatus
+import com.example.bamachat.shared.core.github.AgentDraftPrUrlPolicy
+import com.example.bamachat.shared.core.github.AgentImplementationPlan
+import com.example.bamachat.shared.core.github.AgentValidationId
 import com.example.bamachat.shared.core.github.GitHubAnalysisArea
 import com.example.bamachat.shared.core.github.GitHubImprovementProposal
 import com.example.bamachat.shared.core.github.GitHubProposalBenefit
@@ -52,6 +61,7 @@ import com.example.bamachat.shared.core.github.GitHubRepositoryPolicy
 import com.example.bamachat.ui.viewmodel.GitHubIntelligencePhase
 import com.example.bamachat.ui.viewmodel.GitHubIntelligenceUiState
 import com.example.bamachat.ui.viewmodel.GitHubIntelligenceViewModel
+import com.example.bamachat.ui.viewmodel.AgentDraftPrUiPhase
 
 @Composable
 fun GitHubIntelligenceScreen(
@@ -59,13 +69,27 @@ fun GitHubIntelligenceScreen(
     viewModel: GitHubIntelligenceViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val uriHandler = LocalUriHandler.current
     GitHubIntelligenceContent(
         state = state,
         onBack = onBack,
         onSelectArea = viewModel::selectArea,
         onSelectRef = viewModel::selectRef,
         onStart = viewModel::startAnalysis,
-        onCancel = viewModel::cancelAnalysis
+        onCancel = viewModel::cancelAnalysis,
+        onPreparePlan = viewModel::prepareImplementationPlan,
+        onToggleDraftApproval = viewModel::setDraftPrApproval,
+        onSubmitDraftPr = viewModel::submitDraftPrRequest,
+        onCancelDraftPr = viewModel::cancelDraftPrRequest,
+        onOpenDraftPullRequest = { url ->
+            if (AgentDraftPrUrlPolicy.isAllowed(
+                    url,
+                    state.draftPr.draftPullRequestNumber
+                )
+            ) {
+                uriHandler.openUri(url)
+            }
+        }
     )
 }
 
@@ -76,8 +100,14 @@ internal fun GitHubIntelligenceContent(
     onSelectArea: (GitHubAnalysisArea) -> Unit,
     onSelectRef: (String) -> Unit,
     onStart: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onPreparePlan: (String) -> Unit = {},
+    onToggleDraftApproval: (Boolean) -> Unit = {},
+    onSubmitDraftPr: () -> Unit = {},
+    onCancelDraftPr: () -> Unit = {},
+    onOpenDraftPullRequest: (String) -> Unit = {}
 ) {
+    BackHandler(enabled = state.draftPr.operationInProgress) {}
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -95,7 +125,10 @@ internal fun GitHubIntelligenceContent(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Header(onBack)
+                Header(
+                    onBack = onBack,
+                    enabled = !state.draftPr.operationInProgress
+                )
             }
             item {
                 ReadOnlyNotice(state)
@@ -176,8 +209,44 @@ internal fun GitHubIntelligenceContent(
                         fontWeight = FontWeight.Bold
                     )
                 }
+                val allowedPlanPaths = state.snapshotSummary?.selectedPaths?.toSet().orEmpty()
                 items(state.proposals, key = { it.id }) { proposal ->
-                    ProposalCard(proposal)
+                    ProposalCard(
+                        proposal = proposal,
+                        canCreatePlan = !state.draftPr.operationInProgress &&
+                            AgentDraftPrProposalEligibilityPolicy.validate(
+                                proposal,
+                                allowedPlanPaths
+                            ) == null,
+                        onPreparePlan = { onPreparePlan(proposal.id) }
+                    )
+                }
+            }
+            state.draftPr.plan?.let { plan ->
+                item(key = "draft-pr-plan-${plan.planId}") {
+                    AgentDraftPrPlanCard(
+                        state = state,
+                        plan = plan,
+                        onToggleApproval = onToggleDraftApproval,
+                        onSubmit = onSubmitDraftPr,
+                        onCancel = onCancelDraftPr,
+                        onOpenDraftPullRequest = onOpenDraftPullRequest
+                    )
+                }
+            }
+            state.draftPr.safeMessage?.let { message ->
+                if (state.draftPr.plan == null) {
+                    item {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("github_intelligence_draft_message"),
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFF23445F)
+                        ) {
+                            Text(message, modifier = Modifier.padding(12.dp), color = Color.White)
+                        }
+                    }
                 }
             }
             item {
@@ -193,14 +262,14 @@ internal fun GitHubIntelligenceContent(
 }
 
 @Composable
-private fun Header(onBack: () -> Unit) {
+private fun Header(onBack: () -> Unit, enabled: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconButton(onClick = onBack) {
+        IconButton(onClick = onBack, enabled = enabled) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "Zurück",
@@ -277,14 +346,14 @@ private fun AnalysisControls(
             label = "Analysebereich",
             value = state.selectedArea?.label() ?: "Bitte auswählen",
             options = GitHubAnalysisArea.entries.map { it.label() to { onSelectArea(it) } },
-            enabled = !state.analysisInProgress,
+            enabled = !state.analysisInProgress && !state.draftPr.operationInProgress,
             testTag = "github_intelligence_area"
         )
         SelectionMenu(
             label = "Freigegebener Ref",
             value = state.selectedRef,
             options = GitHubRepositoryPolicy.allowedRefs.sorted().map { ref -> ref to { onSelectRef(ref) } },
-            enabled = !state.analysisInProgress,
+            enabled = !state.analysisInProgress && !state.draftPr.operationInProgress,
             testTag = "github_intelligence_ref"
         )
         if (state.analysisInProgress) {
@@ -368,7 +437,16 @@ private fun SelectionMenu(
 }
 
 @Composable
-private fun ProposalCard(proposal: GitHubImprovementProposal) {
+private fun ProposalCard(
+    proposal: GitHubImprovementProposal,
+    canCreatePlan: Boolean,
+    onPreparePlan: () -> Unit
+) {
+    var evidenceExpanded by rememberSaveable(proposal.id) { mutableStateOf(false) }
+    var pathsExpanded by rememberSaveable(proposal.id) { mutableStateOf(false) }
+    var changesExpanded by rememberSaveable(proposal.id) { mutableStateOf(false) }
+    var testsExpanded by rememberSaveable(proposal.id) { mutableStateOf(false) }
+    var limitationsExpanded by rememberSaveable(proposal.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -391,21 +469,273 @@ private fun ProposalCard(proposal: GitHubImprovementProposal) {
                 style = MaterialTheme.typography.bodySmall
             )
             Text(proposal.summary)
-            ProposalList("Evidenz", proposal.evidence.map { "${it.path}: ${it.observation}" })
-            ProposalList("Betroffene Dateien", proposal.affectedPaths)
-            ProposalList("Empfohlene Änderung", proposal.suggestedChanges)
-            ProposalList("Testplan", proposal.testPlan)
-            ProposalList("Einschränkungen", proposal.limitations)
+            ExpandableProposalList(
+                title = "Evidenz",
+                entries = proposal.evidence.map { "${it.path}: ${it.observation}" },
+                expanded = evidenceExpanded,
+                onToggle = { evidenceExpanded = !evidenceExpanded }
+            )
+            ExpandableProposalList(
+                title = "Betroffene Dateien",
+                entries = proposal.affectedPaths,
+                expanded = pathsExpanded,
+                onToggle = { pathsExpanded = !pathsExpanded }
+            )
+            ExpandableProposalList(
+                title = "Empfohlene Änderung",
+                entries = proposal.suggestedChanges,
+                expanded = changesExpanded,
+                onToggle = { changesExpanded = !changesExpanded }
+            )
+            ExpandableProposalList(
+                title = "Testplan",
+                entries = proposal.testPlan,
+                expanded = testsExpanded,
+                onToggle = { testsExpanded = !testsExpanded }
+            )
+            ExpandableProposalList(
+                title = "Einschränkungen",
+                entries = proposal.limitations,
+                expanded = limitationsExpanded,
+                onToggle = { limitationsExpanded = !limitationsExpanded }
+            )
+            if (canCreatePlan) {
+                Button(
+                    onClick = onPreparePlan,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("github_intelligence_prepare_plan_${proposal.id}")
+                ) {
+                    Text("Umsetzungsplan vorbereiten", maxLines = 1)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ProposalList(title: String, entries: List<String>) {
+private fun ExpandableProposalList(
+    title: String,
+    entries: List<String>,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-        entries.forEach { entry ->
-            Text("• $entry", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(
+            onClick = onToggle,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = if (expanded) "$title ausblenden" else "$title anzeigen",
+                maxLines = 1
+            )
+        }
+        if (expanded) {
+            entries.forEach { entry ->
+                Text("• $entry", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentDraftPrPlanCard(
+    state: GitHubIntelligenceUiState,
+    plan: AgentImplementationPlan,
+    onToggleApproval: (Boolean) -> Unit,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit,
+    onOpenDraftPullRequest: (String) -> Unit
+) {
+    var submissionInvoked by remember(plan.planId) { mutableStateOf(false) }
+    InfoCard(title = "Geprüfter Umsetzungsplan") {
+        Column(
+            modifier = Modifier.testTag("github_intelligence_draft_plan"),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(plan.title, color = Color.White, fontWeight = FontWeight.Bold)
+            Text(
+                "Repository: ${plan.repository.owner}/${plan.repository.name}",
+                color = Color.White
+            )
+            Text("Basis-Ref: ${plan.baseRef}", color = Color.White)
+            Text("Basis-Commit: ${plan.baseCommitSha}", color = Color.White)
+            Text("Agenten-Branch: ${plan.branchName}", color = Color.White)
+            Text("Risiko: ${plan.risk.label()}", color = Color.White)
+            PlanList(
+                title = "Belegpfade",
+                entries = plan.evidencePaths,
+                entryTestTagPrefix = "github_intelligence_draft_evidence_path"
+            )
+            PlanList(
+                title = "Betroffene Dateien",
+                entries = plan.affectedPaths,
+                entryTestTagPrefix = "github_intelligence_draft_affected_path"
+            )
+            PlanList("Änderungsschritte", plan.changeSteps)
+            PlanList(
+                "Validierungen",
+                plan.validationSteps.map(AgentValidationId::label)
+            )
+            PlanList("Einschränkungen", plan.limitations)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF2E4A61)
+            ) {
+                Text(
+                    text = "BamaChat führt keine Änderungen lokal aus. Ein freigegebener Auftrag " +
+                        "verwendet ausschließlich einen isolierten Agenten-Branch. Es wird " +
+                        "ausschließlich ein Draft Pull Request erstellt. Kein Merge und kein " +
+                        "direkter Push auf main.",
+                    modifier = Modifier.padding(12.dp),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = state.draftPr.explicitApprovalChecked,
+                    onCheckedChange = onToggleApproval,
+                    enabled = state.draftPr.canChangeApproval,
+                    modifier = Modifier.testTag("github_intelligence_draft_approval")
+                )
+                Text(
+                    text = "Ich habe Repository, Basis-Commit, Pfade und Prüfplan kontrolliert.",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (!state.draftPr.serverAvailable) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("github_intelligence_server_unavailable"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF23445F)
+                ) {
+                    Text(
+                        text = "Sicherer Agent-Service noch nicht verbunden",
+                        modifier = Modifier.padding(12.dp),
+                        color = Color.White
+                    )
+                }
+            }
+            state.draftPr.safeMessage?.let { message ->
+                Text(
+                    text = message,
+                    modifier = Modifier.testTag("github_intelligence_draft_message"),
+                    color = Color.White
+                )
+            }
+            if (state.draftPr.submissionInProgress) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF8ED9FF))
+                    Text(
+                        text = "Draft-PR-Auftrag wird sicher geprüft …",
+                        color = Color.White
+                    )
+                }
+            }
+            if (state.draftPr.cancellationInProgress) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("github_intelligence_draft_cancelling"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF8ED9FF))
+                    Text(
+                        text = "Draft-PR-Auftrag wird sicher abgebrochen …",
+                        color = Color.White
+                    )
+                }
+            }
+            Button(
+                onClick = {
+                    if (!submissionInvoked) {
+                        submissionInvoked = true
+                        onSubmit()
+                    }
+                },
+                enabled = state.draftPr.canSubmit && !submissionInvoked,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag("github_intelligence_draft_submit")
+            ) {
+                Text("Draft-PR-Auftrag freigeben", maxLines = 1)
+            }
+            if (state.draftPr.phase == AgentDraftPrUiPhase.PLAN_READY ||
+                state.draftPr.phase == AgentDraftPrUiPhase.SUBMITTING ||
+                state.draftPr.phase == AgentDraftPrUiPhase.CANCELLING
+            ) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    enabled = !state.draftPr.cancellationInProgress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("github_intelligence_draft_cancel")
+                ) {
+                    Text("Auftrag abbrechen", maxLines = 1)
+                }
+            }
+            state.draftPr.serverStatus?.let { status ->
+                Text(
+                    text = status.label(),
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            val draftPullRequestUrl = state.draftPr.draftPullRequestUrl
+            val draftPullRequestNumber = state.draftPr.draftPullRequestNumber
+            if (state.draftPr.phase == AgentDraftPrUiPhase.DRAFT_PR_CREATED &&
+                draftPullRequestUrl != null &&
+                AgentDraftPrUrlPolicy.isAllowed(draftPullRequestUrl, draftPullRequestNumber)
+            ) {
+                OutlinedButton(
+                    onClick = { onOpenDraftPullRequest(draftPullRequestUrl) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("github_intelligence_draft_pr_link")
+                ) {
+                    Text("Draft Pull Request #$draftPullRequestNumber öffnen", maxLines = 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanList(
+    title: String,
+    entries: List<String>,
+    entryTestTagPrefix: String? = null
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(title, color = Color.White, fontWeight = FontWeight.SemiBold)
+        entries.forEachIndexed { index, entry ->
+            Text(
+                text = "• $entry",
+                modifier = if (entryTestTagPrefix == null) {
+                    Modifier
+                } else {
+                    Modifier.testTag("${entryTestTagPrefix}_$index")
+                },
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -493,4 +823,31 @@ private fun GitHubProposalConfidence.label(): String = when (this) {
     GitHubProposalConfidence.LOW -> "niedrig"
     GitHubProposalConfidence.MEDIUM -> "mittel"
     GitHubProposalConfidence.HIGH -> "hoch"
+}
+
+private fun AgentValidationId.label(): String = when (this) {
+    AgentValidationId.SHARED_CORE_TEST -> "SharedCore-Tests"
+    AgentValidationId.ANDROID_UNIT_TEST -> "Android-Unit-Tests"
+    AgentValidationId.ANDROID_COMPILE -> "Android-Kompilierung"
+    AgentValidationId.ANDROID_ASSEMBLE -> "Android-Debug-Build"
+    AgentValidationId.DESKTOP_COMPILE -> "Desktop-Kompilierung"
+    AgentValidationId.DESKTOP_TEST -> "Desktop-Tests"
+    AgentValidationId.DIFF_CHECK -> "Git-Diff-Prüfung"
+}
+
+private fun AgentDraftPrStatus.label(): String = when (this) {
+    AgentDraftPrStatus.NOT_STARTED -> "Noch nicht gestartet"
+    AgentDraftPrStatus.PLAN_READY -> "Plan bereit"
+    AgentDraftPrStatus.AWAITING_APPROVAL -> "Freigabe ausstehend"
+    AgentDraftPrStatus.DRY_RUN_VALIDATING -> "Sicherheitsprüfung läuft"
+    AgentDraftPrStatus.READY_FOR_SERVER_SUBMISSION -> "Bereit zur Übermittlung"
+    AgentDraftPrStatus.SERVER_ACCEPTED -> "Auftrag sicher angenommen"
+    AgentDraftPrStatus.BRANCH_CREATED -> "Isolierter Agenten-Branch erstellt"
+    AgentDraftPrStatus.CHANGES_APPLIED -> "Änderungen im Agenten-Branch vorbereitet"
+    AgentDraftPrStatus.TESTS_RUNNING -> "Prüfungen laufen"
+    AgentDraftPrStatus.TESTS_PASSED -> "Prüfungen bestanden"
+    AgentDraftPrStatus.DRAFT_PR_CREATED -> "Draft Pull Request erstellt"
+    AgentDraftPrStatus.TESTS_FAILED -> "Prüfungen fehlgeschlagen"
+    AgentDraftPrStatus.CANCELLED -> "Auftrag abgebrochen"
+    AgentDraftPrStatus.FAILED -> "Auftrag fehlgeschlagen"
 }
