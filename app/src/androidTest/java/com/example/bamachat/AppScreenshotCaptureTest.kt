@@ -32,15 +32,12 @@ class AppScreenshotCaptureTest {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val context = ApplicationProvider.getApplicationContext<Context>()
         ensureFirebaseInitialized(context)
-        val directoryOutput = device.executeShellCommand(
-            "rm -rf $SCREENSHOT_DEVICE_DIR && " +
-                "mkdir -p $SCREENSHOT_DEVICE_DIR && " +
-                "test -d $SCREENSHOT_DEVICE_DIR && " +
-                "echo SCREENSHOT_DIR_READY"
-        )
+        device.executeShellCommand("rm -rf $SCREENSHOT_DEVICE_DIR")
+        device.executeShellCommand("mkdir -p $SCREENSHOT_DEVICE_DIR")
+        val directoryOutput = device.executeShellCommand("ls -d $SCREENSHOT_DEVICE_DIR")
         assertTrue(
-            "Screenshot-Verzeichnis konnte nicht vorbereitet werden",
-            directoryOutput.lineSequence().any { it.trim() == "SCREENSHOT_DIR_READY" }
+            "Screenshot-Verzeichnis konnte nicht vorbereitet werden: $directoryOutput",
+            directoryOutput.lineSequence().any { it.trim() == SCREENSHOT_DEVICE_DIR }
         )
     }
 
@@ -120,14 +117,15 @@ class AppScreenshotCaptureTest {
             fileName.matches(Regex("^[a-z0-9_]+$"))
         )
         val outputPath = "$SCREENSHOT_DEVICE_DIR/$fileName.png"
-        val screenshotOutput = device.executeShellCommand(
-            "screencap -p $outputPath && " +
-                "test -s $outputPath && " +
-                "echo SCREENSHOT_OK"
-        )
+        device.executeShellCommand("screencap -p $outputPath")
+        val sizeOutput = device.executeShellCommand("stat -c %s $outputPath")
+        val screenshotSize = sizeOutput.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { line -> line.isNotEmpty() && line.all { character -> character.isDigit() } }
+            ?.toLongOrNull()
         assertTrue(
-            "Screenshot fehlgeschlagen: $outputPath",
-            screenshotOutput.lineSequence().any { it.trim() == "SCREENSHOT_OK" }
+            "Screenshot fehlgeschlagen: $outputPath; stat=$sizeOutput",
+            screenshotSize != null && screenshotSize > 0L
         )
     }
 
