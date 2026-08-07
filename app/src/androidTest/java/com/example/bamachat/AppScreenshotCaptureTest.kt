@@ -16,27 +16,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class AppScreenshotCaptureTest {
 
     companion object {
         private const val TIMEOUT = 25_000L
+        private const val SCREENSHOT_DEVICE_DIR = "/sdcard/Download/bamachat-screenshots"
     }
 
     private lateinit var device: UiDevice
-    private lateinit var screenshotDir: File
 
     @Before
     fun setup() {
         device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val context = ApplicationProvider.getApplicationContext<Context>()
         ensureFirebaseInitialized(context)
-        screenshotDir = File(context.getExternalFilesDir(null), "bamachat-screenshots").apply {
-            deleteRecursively()
-            mkdirs()
-        }
+        val directoryOutput = device.executeShellCommand(
+            "rm -rf $SCREENSHOT_DEVICE_DIR && " +
+                "mkdir -p $SCREENSHOT_DEVICE_DIR && " +
+                "test -d $SCREENSHOT_DEVICE_DIR && " +
+                "echo SCREENSHOT_DIR_READY"
+        )
+        assertTrue(
+            "Screenshot-Verzeichnis konnte nicht vorbereitet werden",
+            directoryOutput.lineSequence().any { it.trim() == "SCREENSHOT_DIR_READY" }
+        )
     }
 
     private fun ensureFirebaseInitialized(context: Context) {
@@ -110,9 +115,20 @@ class AppScreenshotCaptureTest {
     }
 
     private fun captureScreenshot(fileName: String) {
-        val output = File(screenshotDir, "$fileName.png")
-        val success = device.takeScreenshot(output)
-        assertTrue("Screenshot fehlgeschlagen: ${output.absolutePath}", success)
+        assertTrue(
+            "Ungültiger Screenshot-Dateiname: $fileName",
+            fileName.matches(Regex("^[a-z0-9_]+$"))
+        )
+        val outputPath = "$SCREENSHOT_DEVICE_DIR/$fileName.png"
+        val screenshotOutput = device.executeShellCommand(
+            "screencap -p $outputPath && " +
+                "test -s $outputPath && " +
+                "echo SCREENSHOT_OK"
+        )
+        assertTrue(
+            "Screenshot fehlgeschlagen: $outputPath",
+            screenshotOutput.lineSequence().any { it.trim() == "SCREENSHOT_OK" }
+        )
     }
 
     private fun settle() {
