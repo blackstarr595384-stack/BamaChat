@@ -780,14 +780,16 @@ private fun BamaVoicePanel(
     } else {
         uiState.connectionLabel
     }
-    val sessionElapsedSeconds by produceState(
-        initialValue = 0L,
-        key1 = uiState.sessionStartedAtEpochMillis,
-        key2 = uiState.liveSessionActive
+    var sessionElapsedSeconds by remember { mutableStateOf(0L) }
+    LaunchedEffect(
+        uiState.sessionStartedAtEpochMillis,
+        uiState.liveSessionActive
     ) {
+        sessionElapsedSeconds = 0L
         while (uiState.liveSessionActive && uiState.sessionStartedAtEpochMillis != null) {
-            value = ((System.currentTimeMillis() - uiState.sessionStartedAtEpochMillis) / 1_000L)
-                .coerceAtLeast(0L)
+            sessionElapsedSeconds =
+                ((System.currentTimeMillis() - uiState.sessionStartedAtEpochMillis) / 1_000L)
+                    .coerceAtLeast(0L)
             delay(1_000L)
         }
     }
