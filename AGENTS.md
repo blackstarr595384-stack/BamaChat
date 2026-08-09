@@ -1,5 +1,7 @@
 # BamaChat AGENTS Leitfaden
 
+- GitHub Intelligence Phase 7.6b darf lokal nur deterministische Umsetzungspläne für unveränderte `proposal-<64 hex>`-Parser-IDs vorbereiten. Die `plan-<20 hex>`-ID bindet den vollständigen freigegebenen Planinhalt über eine versionierte, UTF-8-längengebundene Kodierung, Validierungen werden exakt aus den Modulpfaden abgeleitet, und direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle sind in Änderungsschritten verboten; Cancellation endet vor `SERVER_ACCEPTED`. Ein echter Draft-PR-Auftrag benötigt einen separat geprüften BamaWorker mit serverseitiger GitHub App; der aktuelle Android-Gateway bleibt ohne Server deaktiviert und enthält weder GitHub-Token noch direkten Schreibzugriff.
+
 ## Große Architekturübersicht
 - Dreimodulige App-Basis: Android-Hauptapp (`:app`) mit Kotlin + Compose + MVVM, Desktop-Client (`:desktopApp`) auf Compose Multiplatform (Windows Stage 6) und Shared-Core (`:sharedCore`) fuer plattformneutrale Logik; Android-Einstieg ist `MainActivity` + `BamaChatApplication` (Android 13+, minSdk 33).
 - Navigation ist zentralisiert in `ui/screen/BamaChatApp.kt`; Auth-Status steuert Routen (`WELCOME`/`AUTH`/`HOME_HUB`/`CHAT` etc.).

@@ -556,3 +556,6 @@ Vor Store-Upload:
 - Credit Produkt-ID: `credits_100`
 - Credit Produkt-ID: `credits_300`
 - Credit Produkt-ID: `credits_1000`
+## Phase 7.6b Agent Draft PR
+
+GitHub Intelligence kann aus validierten Vorschlägen mit stabiler `proposal-<64 hex>`-Parser-ID einen lokalen, deklarativen Umsetzungsplan vorbereiten. Die Plan-ID bindet den vollständigen fachlichen Inhalt kollisionsfrei über versionierte UTF-8-Längenfelder, die Testliste wird exakt aus den betroffenen Modulpfaden abgeleitet, direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle bleiben blockiert und ein Abbruch ist nur vor `SERVER_ACCEPTED` zulässig. Die finale Übermittlung bleibt deaktiviert, solange kein sicherer BamaWorker mit serverseitiger GitHub App vorhanden ist; der Android-Client besitzt keine GitHub-Schreibrechte oder Tokens. Details: `docs/phase-7.6b-agent-draft-pr.md`.

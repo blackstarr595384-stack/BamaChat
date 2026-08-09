@@ -3,6 +3,7 @@ package com.example.bamachat.service
 import com.example.bamachat.data.github.GitHubImprovementProposalParser
 import com.example.bamachat.data.github.GitHubProposalParseIssue
 import com.example.bamachat.data.github.GitHubProposalParseResult
+import com.example.bamachat.shared.core.github.AgentDraftPrChangeStepPromptContract
 import com.example.bamachat.shared.core.github.GitHubAnalysisArea
 import com.example.bamachat.shared.core.github.GitHubImprovementProposal
 import com.example.bamachat.shared.core.github.GitHubPathPolicy
@@ -126,6 +127,9 @@ class AndroidGitHubProposalAnalyzer(
             appendLine("Gib bei belastbaren Vorschlägen mindestens einen und höchstens ${GitHubReadLimits.MAX_PROPOSALS} aus.")
             appendLine("Wenn keine ausreichend belegten Vorschläge vorliegen, gib {\"proposals\":[]} aus.")
             appendLine("Das Feld id ist nicht erforderlich und soll nicht ausgegeben werden.")
+            appendLine("Schreibe alle menschenlesbaren Felder auf Deutsch: title, summary, evidence.observation, suggestedChanges, testPlan und limitations.")
+            appendLine("Dateipfade sowie Klassen-, Methoden-, Enum-, API- und Codebezeichner bleiben unverändert und werden nicht übersetzt.")
+            appendLine("Die nachfolgend definierten JSON-Enum-Werte bleiben exakt in englischer Schreibweise.")
             appendLine("Jeder Vorschlag benötigt diese Pflichtfelder:")
             appendLine("title, summary, category, benefit, risk, effort, confidence,")
             appendLine("evidence, affectedPaths, suggestedChanges, testPlan, limitations.")
@@ -136,6 +140,8 @@ class AndroidGitHubProposalAnalyzer(
             appendLine("benefit und risk: LOW, MEDIUM oder HIGH.")
             appendLine("effort: SMALL, MEDIUM oder LARGE.")
             appendLine("confidence: LOW, MEDIUM oder HIGH.")
+            appendLine()
+            appendLine(AgentDraftPrChangeStepPromptContract.promptText)
             append("Stelle keine Änderung als bereits umgesetzt dar und behaupte keine ausgeführten Tests.")
         }
     }
@@ -161,6 +167,9 @@ class AndroidGitHubProposalAnalyzer(
             appendLine("Gib ausschließlich ein einziges gültiges JSON-Objekt mit dem Feld \"proposals\" aus.")
             appendLine("proposals ist ein Array mit höchstens ${GitHubReadLimits.MAX_PROPOSALS} Vorschlägen; ein leeres Array ist zulässig.")
             appendLine("Das optionale Feld id soll nicht erzeugt werden.")
+            appendLine("Schreibe alle menschenlesbaren Felder auf Deutsch: title, summary, evidence.observation, suggestedChanges, testPlan und limitations.")
+            appendLine("Dateipfade sowie Klassen-, Methoden-, Enum-, API- und Codebezeichner bleiben unverändert und werden nicht übersetzt.")
+            appendLine("Die nachfolgend definierten JSON-Enum-Werte bleiben exakt in englischer Schreibweise.")
             appendLine("Jeder ausgegebene Vorschlag benötigt sämtliche Pflichtfelder:")
             appendLine("title, summary, category, benefit, risk, effort, confidence,")
             appendLine("evidence, affectedPaths, suggestedChanges, testPlan, limitations.")
@@ -170,6 +179,8 @@ class AndroidGitHubProposalAnalyzer(
             appendLine("PERFORMANCE, ACCESSIBILITY, DOCUMENTATION, PROVIDER_SYSTEM oder AGENTS_EXTENSIONS.")
             appendLine("benefit, risk und confidence: LOW, MEDIUM oder HIGH.")
             appendLine("effort: SMALL, MEDIUM oder LARGE.")
+            appendLine()
+            appendLine(AgentDraftPrChangeStepPromptContract.promptText)
             appendLine("Gib keine Markdown-Fence und keinen Begleittext aus.")
             append("Behaupte keine ausgeführten Tests und stelle keine Änderung als bereits umgesetzt dar.")
         }

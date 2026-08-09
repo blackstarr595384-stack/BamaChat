@@ -441,3 +441,6 @@ Zusatz für Mini-Apps und Photo-AI:
 3. Proguard/Minify mit Testflight intern validieren.
 4. Datenschutztexte + Consent-Flows finalisieren.
 5. Erst danach Play-Store-Publishing.
+## Phase 7.6b: sichere Draft-PR-Vorbereitung
+
+Die Draft-PR-Erweiterung von GitHub Intelligence liegt in `sharedCore/src/main/kotlin/com/example/bamachat/shared/core/github/AgentDraftPrModels.kt`, `app/src/main/java/com/example/bamachat/data/github/DisabledAgentDraftPrGateway.kt`, `GitHubIntelligenceViewModel` und `GitHubIntelligenceScreen`. Reale `proposal-<64 hex>`-Parser-IDs werden unverändert gebunden; die `plan-<20 hex>`-ID wird zentral über eine versionierte, UTF-8-längengebundene Kodierung aus dem vollständigen fachlichen Planinhalt berechnet und erneut geprüft. Validierungen müssen exakt der zentral aus den betroffenen Modulpfaden abgeleiteten Reihenfolge entsprechen, direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle werden abgelehnt und Cancellation ist nur vor `SERVER_ACCEPTED` erlaubt. Ohne nachweisbaren BamaWorker bleibt der Gateway strikt deaktiviert. Niemals GitHub-Tokens, direkte GitHub-Schreibrequests oder Client-seitige Git-Kommandos ergänzen. Der vollständige zukünftige Serververtrag steht in `docs/phase-7.6b-agent-draft-pr.md`.
