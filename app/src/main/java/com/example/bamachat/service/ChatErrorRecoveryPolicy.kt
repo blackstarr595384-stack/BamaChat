@@ -15,4 +15,3 @@ object ChatErrorRecoveryPolicy {
         return !message.isNullOrBlank()
     }
 }
-
