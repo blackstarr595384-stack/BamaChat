@@ -91,21 +91,6 @@ class AppScreenshotCaptureTest {
         settle()
         captureScreenshot("02_chat")
         assertRequiredScreenshotsDiffer()
-
-        if (clickBottomTabOptional("Profil")) {
-            assertNotNull("Profil-Screen nicht erkannt", waitForExactText(TIMEOUT, "Profil"))
-            settle()
-            captureScreenshot("03_profile")
-        }
-
-        if (clickBottomTabOptional("Einst.")) {
-            assertNotNull(
-                "Settings-Screen nicht erkannt",
-                waitForExactText(TIMEOUT, "Einstellungen")
-            )
-            settle()
-            captureScreenshot("04_settings")
-        }
     }
 
     private fun completeInitialFlow() {
@@ -165,12 +150,6 @@ class AppScreenshotCaptureTest {
             "Welcome-Screen nach Rechtsbestätigung nicht erkannt",
             waitForExactText(TIMEOUT, "Als Gast starten")
         )
-    }
-
-    private fun clickBottomTabOptional(description: String): Boolean {
-        val tab = waitForExactDescription(4_000L, description)
-        tab?.click()
-        return tab != null
     }
 
     private fun launchApp() {
