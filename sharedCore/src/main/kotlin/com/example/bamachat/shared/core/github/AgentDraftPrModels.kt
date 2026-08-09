@@ -288,7 +288,25 @@ object AgentDraftPrEvidencePolicy {
 }
 
 object AgentDraftPrValidationPolicy {
+    private val globalBuildConfigurationPaths = setOf(
+        "build.gradle.kts",
+        "settings.gradle.kts",
+        "gradle/libs.versions.toml"
+    )
+    private val allModuleValidationSteps = listOf(
+        AgentValidationId.DIFF_CHECK,
+        AgentValidationId.SHARED_CORE_TEST,
+        AgentValidationId.ANDROID_UNIT_TEST,
+        AgentValidationId.ANDROID_COMPILE,
+        AgentValidationId.ANDROID_ASSEMBLE,
+        AgentValidationId.DESKTOP_COMPILE,
+        AgentValidationId.DESKTOP_TEST
+    )
+
     fun requiredFor(affectedPaths: List<String>): List<AgentValidationId> {
+        if (affectedPaths.any { it in globalBuildConfigurationPaths }) {
+            return allModuleValidationSteps
+        }
         val validationSteps = mutableListOf(AgentValidationId.DIFF_CHECK)
         if (affectedPaths.any { it.startsWith("sharedCore/") }) {
             validationSteps += AgentValidationId.SHARED_CORE_TEST
@@ -309,6 +327,7 @@ object AgentDraftPrValidationPolicy {
 internal object AgentDraftPrCanonicalEncoder {
     private const val STRING_FIELD = 1
     private const val STRING_LIST_FIELD = 2
+    private const val LONG_FIELD = 3
 
     fun encode(schema: String, block: Builder.() -> Unit): ByteArray {
         val builder = Builder()
@@ -332,6 +351,12 @@ internal object AgentDraftPrCanonicalEncoder {
             writeUtf8(field)
             output.writeInt(values.size)
             values.forEach(::writeUtf8)
+        }
+
+        fun long(field: String, value: Long) {
+            output.writeByte(LONG_FIELD)
+            writeUtf8(field)
+            output.writeLong(value)
         }
 
         internal fun toByteArray(): ByteArray = buffer.toByteArray()
@@ -362,6 +387,8 @@ object AgentDraftPrPlanIdentity {
             stringList("validationSteps", plan.validationSteps.map { it.name })
             string("risk", plan.risk.name)
             stringList("limitations", plan.limitations)
+            long("createdAt", plan.createdAt)
+            long("expiresAt", plan.expiresAt)
         }
         return "plan-${AgentDraftPrHash.sha256(canonicalContent).take(20)}"
     }
@@ -630,6 +657,14 @@ object AgentDraftPrChangeStepPolicy {
     private val shellOperators = listOf(
         "&&", "||", ";", "|", "`", "${'$'}(", ">", "<", "&"
     )
+    private val declarativeConnectors = setOf(
+        "als", "an", "auf", "durch", "für", "in", "mit", "ohne", "um", "von", "zur", "zum"
+    )
+    private val commandArgumentTokens = setOf(
+        "build", "compile", "deploy", "echo", "eval", "exec", "install", "publish", "run",
+        "script", "status", "test"
+    )
+    private val argvToken = Regex("^[A-Za-z][A-Za-z0-9._-]*$")
 
     fun isAllowed(step: String): Boolean {
         if (!AgentDraftPrTextPolicy.isAllowedSingleLine(step)) return false
@@ -664,8 +699,29 @@ object AgentDraftPrChangeStepPolicy {
             subjectIndex++
         }
         if (subjectIndex >= tokens.lastIndex) return false
-        return isDeclarativeSubject(tokens[subjectIndex])
+        if (!isDeclarativeSubject(tokens[subjectIndex])) return false
+        return !containsEmbeddedArgvSequence(tokens, subjectIndex)
     }
+
+    private fun containsEmbeddedArgvSequence(tokens: List<String>, subjectIndex: Int): Boolean {
+        val body = tokens.subList(subjectIndex + 1, tokens.lastIndex)
+        if (body.size < 2) return false
+        val normalizedBody = body.map { token -> token.lowercase(Locale.ROOT) }
+        if (normalizedBody.first() !in declarativeConnectors &&
+            normalizedBody.take(2).all(::isArgvToken)
+        ) {
+            return true
+        }
+        return normalizedBody.zipWithNext().any { (executable, argument) ->
+            isArgvToken(executable) && argument in commandArgumentTokens
+        }
+    }
+
+    private fun isArgvToken(token: String): Boolean =
+        token !in declarativeDeterminers &&
+            token !in declarativeLeadingAdjectives &&
+            token !in declarativeConnectors &&
+            argvToken.matches(token)
 
     private fun containsLexicalLetter(token: String): Boolean {
         return token.codePoints().anyMatch(Character::isLetter)

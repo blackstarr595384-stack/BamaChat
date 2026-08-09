@@ -374,6 +374,55 @@ class AgentDraftPrModelsTest {
     }
 
     @Test
+    fun embeddedArgvCommandsAreRejectedAcrossEveryPlanBoundary() {
+        val unsafeSteps = listOf(
+            "Die Dokumentation make test ergänzen",
+            "Die Dokumentation git status ergänzen",
+            "Die Tests ./gradlew test ergänzen",
+            "Die Dokumentation npm test ergänzen",
+            "Die Dokumentation MAKE TEST ergänzen",
+            "Die Dokumentation   make    test ergänzen"
+        )
+
+        unsafeSteps.forEach { unsafeStep ->
+            assertFalse(unsafeStep, AgentDraftPrChangeStepPolicy.isAllowed(unsafeStep))
+            val invalidProposal = proposal().copy(suggestedChanges = listOf(unsafeStep))
+            assertEquals(
+                unsafeStep,
+                AgentDraftPrPlanIssue.UNSAFE_CHANGE_STEP,
+                AgentDraftPrProposalEligibilityPolicy.validate(
+                    invalidProposal,
+                    setOf("README.md")
+                )
+            )
+            assertEquals(
+                unsafeStep,
+                AgentImplementationPlanResult.Failure(AgentDraftPrPlanIssue.UNSAFE_CHANGE_STEP),
+                AgentImplementationPlanFactory.create(
+                    proposal = invalidProposal,
+                    repository = GitHubRepositoryPolicy.repository,
+                    baseRef = GitHubRepositoryPolicy.DEFAULT_REF,
+                    baseCommitSha = SHA,
+                    availablePaths = setOf("README.md"),
+                    nowEpochSeconds = NOW
+                )
+            )
+            val reboundPlan = rebindPlan(createPlan().copy(changeSteps = listOf(unsafeStep)))
+            assertEquals(
+                unsafeStep,
+                AgentDraftPrPlanValidation.Invalid(AgentDraftPrPlanIssue.UNSAFE_CHANGE_STEP),
+                AgentDraftPrPlanPolicy.validate(reboundPlan, setOf("README.md"), NOW)
+            )
+        }
+
+        assertTrue(
+            AgentDraftPrChangeStepPolicy.isAllowed(
+                "Die Dokumentation um eine sichere Beschreibung ergänzen"
+            )
+        )
+    }
+
+    @Test
     fun safeDeclarativeDescriptionsRemainBoundUnchangedInValidPlans() {
         safeDeclarativeDescriptions().forEach { safeStep ->
             assertTrue(safeStep, AgentDraftPrChangeStepPolicy.isAllowed(safeStep))
@@ -723,6 +772,43 @@ class AgentDraftPrModelsTest {
     }
 
     @Test
+    fun planIdentityApprovalBindingAndRequestIdentityBindValidityWindow() {
+        val original = createPlan()
+        val sameContent = original.copy()
+        val changedCreatedAt = original.copy(createdAt = original.createdAt - 1)
+        val changedExpiresAt = original.copy(expiresAt = original.expiresAt - 1)
+        val renewedNow = NOW + 3_600
+        val renewed = createPlanFrom(proposal(), nowEpochSeconds = renewedNow)
+        val renewedWithStaleIdentity = original.copy(
+            createdAt = renewed.createdAt,
+            expiresAt = renewed.expiresAt
+        )
+
+        assertEquals(original.planId, AgentDraftPrPlanIdentity.compute(sameContent))
+        assertNotEquals(original.planId, AgentDraftPrPlanIdentity.compute(changedCreatedAt))
+        assertNotEquals(original.planId, AgentDraftPrPlanIdentity.compute(changedExpiresAt))
+        assertNotEquals(original.planId, renewed.planId)
+        assertEquals(
+            AgentDraftPrPlanValidation.Invalid(AgentDraftPrPlanIssue.PLAN_ID_CONTENT_MISMATCH),
+            AgentDraftPrPlanPolicy.validate(
+                renewedWithStaleIdentity,
+                setOf("README.md"),
+                renewedNow
+            )
+        )
+        assertEquals(
+            AgentDraftPrPlanValidation.Valid,
+            AgentDraftPrPlanPolicy.validate(renewed, setOf("README.md"), renewedNow)
+        )
+        assertNotEquals(approvalBinding(original), approvalBinding(renewed))
+
+        val originalRequest = approvedRequest(original)
+        val renewedRequest = approvedRequest(renewed, nowEpochSeconds = renewedNow)
+        assertNotEquals(originalRequest.requestId, renewedRequest.requestId)
+        assertNotEquals(originalRequest.idempotencyKey, renewedRequest.idempotencyKey)
+    }
+
+    @Test
     fun anyConsentRelevantPlanContentChangesThePlanId() {
         val original = createPlan()
         val changedPlans = listOf(
@@ -939,6 +1025,29 @@ class AgentDraftPrModelsTest {
     }
 
     @Test
+    fun globalBuildConfigurationRequiresEveryExistingModuleGate() {
+        val expected = listOf(
+            AgentValidationId.DIFF_CHECK,
+            AgentValidationId.SHARED_CORE_TEST,
+            AgentValidationId.ANDROID_UNIT_TEST,
+            AgentValidationId.ANDROID_COMPILE,
+            AgentValidationId.ANDROID_ASSEMBLE,
+            AgentValidationId.DESKTOP_COMPILE,
+            AgentValidationId.DESKTOP_TEST
+        )
+
+        listOf(
+            "build.gradle.kts",
+            "settings.gradle.kts",
+            "gradle/libs.versions.toml"
+        ).forEach { path ->
+            val actual = AgentDraftPrValidationPolicy.requiredFor(listOf(path))
+            assertEquals(path, expected, actual)
+            assertNotEquals(path, listOf(AgentValidationId.DIFF_CHECK), actual)
+        }
+    }
+
+    @Test
     fun validationPolicyRequiresExactCompleteOrderedSteps() {
         val readmePlan = createPlan()
         assertEquals(
@@ -1019,7 +1128,8 @@ class AgentDraftPrModelsTest {
         proposal: GitHubImprovementProposal,
         baseRef: String = GitHubRepositoryPolicy.DEFAULT_REF,
         baseCommitSha: String = SHA,
-        availablePaths: Set<String> = setOf("README.md")
+        availablePaths: Set<String> = setOf("README.md"),
+        nowEpochSeconds: Long = NOW
     ): AgentImplementationPlan {
         val result = AgentImplementationPlanFactory.create(
             proposal = proposal,
@@ -1027,7 +1137,7 @@ class AgentDraftPrModelsTest {
             baseRef = baseRef,
             baseCommitSha = baseCommitSha,
             availablePaths = availablePaths,
-            nowEpochSeconds = NOW
+            nowEpochSeconds = nowEpochSeconds
         )
         return (result as AgentImplementationPlanResult.Success).plan
     }
@@ -1057,17 +1167,21 @@ class AgentDraftPrModelsTest {
 
     private fun approvedRequest(
         plan: AgentImplementationPlan,
-        allowedPaths: Set<String> = setOf("README.md")
+        allowedPaths: Set<String> = setOf("README.md"),
+        nowEpochSeconds: Long = NOW
     ): AgentDraftPrRequest {
         val result = AgentDraftPrRequestFactory.create(
             plan = plan,
             allowedPaths = allowedPaths,
             explicitApproval = true,
             clientVersion = "1.0",
-            nowEpochSeconds = NOW
+            nowEpochSeconds = nowEpochSeconds
         )
         return (result as AgentDraftPrRequestResult.Success).request
     }
+
+    private fun approvalBinding(plan: AgentImplementationPlan): String =
+        listOf(plan.planId, plan.baseCommitSha, plan.branchName).joinToString("|")
 
     private fun quotedEscapedAndExpandedCommands(): List<String> = listOf(
         "\"git\" status",
