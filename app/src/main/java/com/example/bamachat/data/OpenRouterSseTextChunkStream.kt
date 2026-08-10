@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.flow
 /**
  * OpenRouter SSE Text-Chunk Stream.
  * Liest Server-Sent-Events aus dem Streaming-Response und extrahiert reinen Text-Content.
- * 
+ *
  * Diese Klasse kapselt die OpenRouter-spezifische SSE-Parsing-Logik, damit der
  * ChatViewModel keine Kenntnis über den konkreten Streaming-Transport benötigt.
  */
@@ -17,7 +17,7 @@ class OpenRouterSseTextChunkStream(
 ) {
     /**
      * Streamt Text-Chunks aus einem OpenRouter-Chat-Completion-Stream.
-     * 
+     *
      * @param request Die OpenRouter-Chat-Request
      * @return Flow von Text-Chunks
      * @throws IllegalStateException bei HTTP-Fehlern oder leeren Response-Body

@@ -1843,7 +1843,3 @@ private suspend fun LazyListState.scrollToNewestItem(
         scrollBy(remainingDistancePx.toFloat())
     }
 }
-
-
-
-

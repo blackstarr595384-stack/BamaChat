@@ -1631,7 +1631,7 @@ class CollabViewModel @Inject constructor(
         // 🔴 CRITICAL: Cleanup presence state before destroying listeners
         try {
             CoroutineScope(Dispatchers.IO + NonCancellable).launch {
-                runCatching { 
+                runCatching {
                     setOwnPresence(active = false)
                 }.onFailure { e ->
                     AppTelemetry.logError("collab_presence_cleanup_failed", e)
@@ -1640,22 +1640,22 @@ class CollabViewModel @Inject constructor(
         } catch (e: Exception) {
             AppTelemetry.logError("collab_presence_exception", e)
         }
-        
+
         // Cancel all retry jobs
         retryJob?.cancel()
         retryJob = null
-        
+
         // Stop Firebase listeners (prevents memory leak)
         try {
             stopListeners()
         } catch (e: Exception) {
             AppTelemetry.logError("collab_listener_cleanup_failed", e)
         }
-        
+
         // Clear all state flows to help GC
         _messages.value = emptyList()
         _presences.value = emptyList()
-        
+
         super.onCleared()
     }
 }

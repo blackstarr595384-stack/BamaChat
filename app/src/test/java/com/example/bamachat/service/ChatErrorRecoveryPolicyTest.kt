@@ -39,4 +39,3 @@ class ChatErrorRecoveryPolicyTest {
         assertTrue(ChatErrorRecoveryPolicy.isValidRetryCandidate("Neue Anfrage"))
     }
 }
-

@@ -47,4 +47,3 @@ class AgentLoopRequestFactoryTest {
         assertEquals("result payload", message.content)
     }
 }
-
