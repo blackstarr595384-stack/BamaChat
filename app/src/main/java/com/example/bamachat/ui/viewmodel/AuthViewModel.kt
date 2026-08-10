@@ -29,6 +29,24 @@ import kotlinx.coroutines.tasks.await
 import java.net.HttpURLConnection
 import java.net.URL
 
+internal data class AuthSessionResolution(
+    val guestModeActive: Boolean,
+    val sessionActive: Boolean,
+    val accountAuthenticated: Boolean
+)
+
+internal fun resolveAuthSession(
+    firebaseUserPresent: Boolean,
+    storedGuestMode: Boolean
+): AuthSessionResolution {
+    val guestModeActive = storedGuestMode && !firebaseUserPresent
+    return AuthSessionResolution(
+        guestModeActive = guestModeActive,
+        sessionActive = firebaseUserPresent || guestModeActive,
+        accountAuthenticated = firebaseUserPresent
+    )
+}
+
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     application: Application
@@ -63,7 +81,12 @@ class AuthViewModel @Inject constructor(
     private val _profile = MutableStateFlow<UserProfile?>(null)
     val profile: StateFlow<UserProfile?> = _profile.asStateFlow()
 
-    private val _isGuestMode = MutableStateFlow(prefs.getBoolean(KEY_GUEST_MODE, false))
+    private val _isGuestMode = MutableStateFlow(
+        resolveAuthSession(
+            firebaseUserPresent = auth?.currentUser != null,
+            storedGuestMode = prefs.getBoolean(KEY_GUEST_MODE, false)
+        ).guestModeActive
+    )
     val isGuestMode: StateFlow<Boolean> = _isGuestMode.asStateFlow()
 
     private val _isAuthenticated = MutableStateFlow(auth?.currentUser != null || _isGuestMode.value)
@@ -86,8 +109,7 @@ class AuthViewModel @Inject constructor(
         _firebaseUser.value = firebaseAuth.currentUser
         val hasUser = firebaseAuth.currentUser != null
         if (hasUser) {
-            _isGuestMode.value = false
-            prefs.edit().putBoolean(KEY_GUEST_MODE, false).apply()
+            setGuestMode(false)
             AppTelemetry.setUserId(firebaseAuth.currentUser?.uid)
             AppTelemetry.logEvent("auth_state_signed_in")
             refreshProviderData()
@@ -138,16 +160,13 @@ class AuthViewModel @Inject constructor(
             _errorMessage.value = "Bitte E-Mail und Passwort eingeben."
             return
         }
-        val wasGuestBeforeSignIn = _isGuestMode.value
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             val startMs = System.currentTimeMillis()
             try {
                 firebaseAuth.signInWithEmailAndPassword(cleanEmail, password).await()
-                if (wasGuestBeforeSignIn && prefs.getBoolean("guest_auto_clear_on_account_signin", true)) {
-                    dataSanitizer.clearGuestSessionData(clearApiKeys = false)
-                }
+                setGuestMode(false)
                 AppTelemetry.logEvent(
                     "login_success",
                     mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
@@ -180,16 +199,13 @@ class AuthViewModel @Inject constructor(
             _errorMessage.value = "Name, gültige E-Mail und Passwort (mind. 6 Zeichen) erforderlich."
             return
         }
-        val wasGuestBeforeRegister = _isGuestMode.value
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             val startMs = System.currentTimeMillis()
             try {
                 firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password).await()
-                if (wasGuestBeforeRegister && prefs.getBoolean("guest_auto_clear_on_account_signin", true)) {
-                    dataSanitizer.clearGuestSessionData(clearApiKeys = false)
-                }
+                setGuestMode(false)
                 firebaseAuth.currentUser?.updateProfile(
                     UserProfileChangeRequest.Builder()
                         .setDisplayName(cleanName)
@@ -228,8 +244,7 @@ class AuthViewModel @Inject constructor(
     }
 
     fun continueAsGuest() {
-        _isGuestMode.value = true
-        prefs.edit().putBoolean(KEY_GUEST_MODE, true).apply()
+        setGuestMode(true)
         AppTelemetry.setUserId("guest")
         AppTelemetry.logEvent("continue_as_guest")
         refreshAuthState()
@@ -248,7 +263,6 @@ class AuthViewModel @Inject constructor(
             return
         }
 
-        val wasGuestBeforeSignIn = _isGuestMode.value
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
@@ -256,9 +270,7 @@ class AuthViewModel @Inject constructor(
             try {
                 val credential = GoogleAuthProvider.getCredential(cleanToken, null)
                 firebaseAuth.signInWithCredential(credential).await()
-                if (wasGuestBeforeSignIn && prefs.getBoolean("guest_auto_clear_on_account_signin", true)) {
-                    dataSanitizer.clearGuestSessionData(clearApiKeys = false)
-                }
+                setGuestMode(false)
                 AppTelemetry.logEvent(
                     "login_google_success",
                     mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
@@ -519,8 +531,7 @@ class AuthViewModel @Inject constructor(
                 _errorMessage.value = e.message ?: "Abmeldung konnte nicht vollständig abgeschlossen werden."
             } finally {
                 withContext(NonCancellable) {
-                    _isGuestMode.value = false
-                    prefs.edit().putBoolean(KEY_GUEST_MODE, false).apply()
+                    setGuestMode(false)
                     _firebaseUser.value = auth?.currentUser
                     _profile.value = null
                     _connectedProviders.value = emptyList()
@@ -631,7 +642,19 @@ class AuthViewModel @Inject constructor(
     }
 
     private fun refreshAuthState() {
-        _isAuthenticated.value = _firebaseUser.value != null || _isGuestMode.value
+        val resolution = resolveAuthSession(
+            firebaseUserPresent = _firebaseUser.value != null,
+            storedGuestMode = _isGuestMode.value
+        )
+        if (_isGuestMode.value != resolution.guestModeActive) {
+            setGuestMode(resolution.guestModeActive)
+        }
+        _isAuthenticated.value = resolution.sessionActive
+    }
+
+    private fun setGuestMode(enabled: Boolean) {
+        _isGuestMode.value = enabled
+        prefs.edit().putBoolean(KEY_GUEST_MODE, enabled).apply()
     }
 
     private suspend fun deleteAccountRemotely(idToken: String) {
