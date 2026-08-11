@@ -26,6 +26,12 @@ data class ScopedChatCleanupResult(
     val deletedLinkedReferences: Int
 )
 
+data class LegacyScopeClaimResult(
+    val conversationIds: List<String>,
+    val claimedConversations: Int,
+    val claimedMessages: Int
+)
+
 @Dao
 interface ChatDao {
     // ===== Conversations =====
@@ -35,11 +41,46 @@ interface ChatDao {
     @Query("SELECT * FROM conversations WHERE id = :id AND ownerScope = :ownerScope LIMIT 1")
     suspend fun getConversationByIdAndScope(id: String, ownerScope: String): ConversationEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertConversation(conversation: ConversationEntity)
 
-    @Update
+    @Update(onConflict = OnConflictStrategy.ABORT)
     suspend fun updateConversation(conversation: ConversationEntity)
+
+    @Query("SELECT ownerScope FROM conversations WHERE id = :id LIMIT 1")
+    suspend fun getConversationOwnerScopeById(id: String): String?
+
+    @Query("UPDATE conversations SET title = :title, createdAt = :createdAt, updatedAt = :updatedAt, personaName = :personaName WHERE id = :id AND ownerScope = :ownerScope")
+    suspend fun updateConversationInScope(
+        id: String,
+        ownerScope: String,
+        title: String,
+        createdAt: Long,
+        updatedAt: Long,
+        personaName: String
+    ): Int
+
+    @Transaction
+    suspend fun upsertConversationInScope(conversation: ConversationEntity) {
+        val existingScope = getConversationOwnerScopeById(conversation.id)
+        if (existingScope == null) {
+            insertConversation(conversation)
+        } else {
+            check(existingScope == conversation.ownerScope) {
+                "Conversation ID collision across owner scopes"
+            }
+            check(
+                updateConversationInScope(
+                    conversation.id,
+                    conversation.ownerScope,
+                    conversation.title,
+                    conversation.createdAt,
+                    conversation.updatedAt,
+                    conversation.personaName
+                ) == 1
+            ) { "Conversation could not be updated in its owner scope" }
+        }
+    }
 
     @Query("UPDATE conversations SET title = :title, updatedAt = :updatedAt WHERE id = :id AND ownerScope = :ownerScope")
     suspend fun renameConversation(id: String, ownerScope: String, title: String, updatedAt: Long): Int
@@ -63,8 +104,50 @@ interface ChatDao {
     @Query("SELECT * FROM chat_messages WHERE id = :messageId AND ownerScope = :ownerScope LIMIT 1")
     suspend fun getMessageByIdAndScope(messageId: String, ownerScope: String): ChatMessageEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertMessage(message: ChatMessageEntity)
+
+    @Query("SELECT ownerScope FROM chat_messages WHERE id = :id LIMIT 1")
+    suspend fun getMessageOwnerScopeById(id: String): String?
+
+    @Query("UPDATE chat_messages SET conversationId = :conversationId, text = :text, isUser = :isUser, timestamp = :timestamp, imageUrl = :imageUrl, sourcesJson = :sourcesJson, webFetchedAtIso = :webFetchedAtIso WHERE id = :id AND ownerScope = :ownerScope")
+    suspend fun updateMessageInScope(
+        id: String,
+        ownerScope: String,
+        conversationId: String,
+        text: String,
+        isUser: Boolean,
+        timestamp: Long,
+        imageUrl: String?,
+        sourcesJson: String?,
+        webFetchedAtIso: String?
+    ): Int
+
+    @Transaction
+    suspend fun upsertMessageInScope(message: ChatMessageEntity) {
+        check(getConversationByIdAndScope(message.conversationId, message.ownerScope) != null) {
+            "Message conversation is not owned by the same scope"
+        }
+        val existingScope = getMessageOwnerScopeById(message.id)
+        if (existingScope == null) {
+            insertMessage(message)
+        } else {
+            check(existingScope == message.ownerScope) { "Message ID collision across owner scopes" }
+            check(
+                updateMessageInScope(
+                    message.id,
+                    message.ownerScope,
+                    message.conversationId,
+                    message.text,
+                    message.isUser,
+                    message.timestamp,
+                    message.imageUrl,
+                    message.sourcesJson,
+                    message.webFetchedAtIso
+                ) == 1
+            ) { "Message could not be updated in its owner scope" }
+        }
+    }
 
     @Query("DELETE FROM chat_messages WHERE id = :messageId AND ownerScope = :ownerScope")
     suspend fun deleteMessage(messageId: String, ownerScope: String): Int
@@ -93,6 +176,49 @@ interface ChatDao {
 
     @Query("SELECT id FROM conversations WHERE ownerScope = :ownerScope")
     suspend fun getConversationIdsForScope(ownerScope: String): List<String>
+
+    @Query("SELECT * FROM conversations ORDER BY id")
+    suspend fun getAllConversationsSnapshot(): List<ConversationEntity>
+
+    @Query("SELECT * FROM chat_messages WHERE conversationId = :conversationId AND ownerScope = :ownerScope ORDER BY timestamp ASC")
+    suspend fun getMessagesSnapshot(conversationId: String, ownerScope: String): List<ChatMessageEntity>
+
+    @Query("SELECT COUNT(*) FROM conversations WHERE ownerScope = :ownerScope")
+    suspend fun countConversationsForScope(ownerScope: String): Int
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE ownerScope = :ownerScope")
+    suspend fun countMessagesForScope(ownerScope: String): Int
+
+    @Query("UPDATE chat_messages SET ownerScope = :accountScope WHERE ownerScope = :legacyScope")
+    suspend fun claimLegacyMessages(accountScope: String, legacyScope: String): Int
+
+    @Query("UPDATE conversations SET ownerScope = :accountScope WHERE ownerScope = :legacyScope")
+    suspend fun claimLegacyConversations(accountScope: String, legacyScope: String): Int
+
+    @Transaction
+    suspend fun restoreScopedConversation(
+        conversation: ConversationEntity,
+        messages: List<ChatMessageEntity>
+    ) {
+        require(ChatOwnerScope.isAccount(conversation.ownerScope)) { "Restore requires an account scope" }
+        require(messages.all { it.ownerScope == conversation.ownerScope && it.conversationId == conversation.id }) {
+            "Restored messages must match the conversation owner scope"
+        }
+        upsertConversationInScope(conversation)
+        messages.forEach { message ->
+            upsertMessageInScope(message)
+            deleteMessageFts(message.id)
+            insertMessageFts(
+                ChatMessageFtsEntity(
+                    messageId = message.id,
+                    conversationId = message.conversationId,
+                    text = message.text,
+                    isUser = message.isUser,
+                    timestamp = message.timestamp
+                )
+            )
+        }
+    }
 
     @Query("DELETE FROM chat_messages_fts WHERE conversation_id IN (SELECT id FROM conversations WHERE ownerScope = :ownerScope)")
     suspend fun deleteMessageFtsForScope(ownerScope: String): Int

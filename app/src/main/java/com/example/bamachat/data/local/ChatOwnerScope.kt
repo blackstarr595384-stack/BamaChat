@@ -38,6 +38,16 @@ object ChatOwnerScope {
     fun isWritable(scope: String): Boolean = isAccount(scope) || isGuest(scope)
 }
 
+enum class AccountTransitionPhase {
+    NONE,
+    PREPARED,
+    AUTHENTICATED,
+    GUEST_CLEANUP_COMPLETE,
+    LEGACY_CLAIM_COMPLETE,
+    WORKSPACE_MIGRATION_COMPLETE,
+    ACCOUNT_ACTIVATED
+}
+
 @Singleton
 class ChatSessionScopeStore @Inject constructor(
     private val prefs: SharedPreferences
@@ -63,6 +73,7 @@ class ChatSessionScopeStore @Inject constructor(
         val pendingGuestScope = pendingGuestScope()
         val resolved = when {
             pendingGuestScope != null -> pendingGuestScope
+            isAccountTransitionPending() -> ChatOwnerScope.NO_ACTIVE_SESSION
             !firebaseUid.isNullOrBlank() -> ChatOwnerScope.account(firebaseUid)
             guestModeEnabled -> storedGuestScope() ?: ChatOwnerScope.guest(UUID.randomUUID().toString())
             else -> ChatOwnerScope.NO_ACTIVE_SESSION
@@ -78,6 +89,8 @@ class ChatSessionScopeStore @Inject constructor(
             .putString(KEY_GUEST_SCOPE, scope)
             .putString(KEY_ACTIVE_SCOPE, scope)
             .remove(KEY_PENDING_GUEST_SCOPE)
+            .remove(KEY_PENDING_ACCOUNT_UID)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.NONE.name)
             .putBoolean(KEY_AUTH_TRANSITION_PENDING, false)
             .commit()
         check(committed) { "Gast-Sitzung konnte nicht sicher gespeichert werden." }
@@ -89,19 +102,37 @@ class ChatSessionScopeStore @Inject constructor(
     fun beginAccountTransitionIfGuest(): String? {
         val current = currentScope()
         if (!ChatOwnerScope.isGuest(current)) return null
-        val committed = prefs.edit()
-            .putString(KEY_PENDING_GUEST_SCOPE, current)
-            .putBoolean(KEY_AUTH_TRANSITION_PENDING, true)
-            .commit()
-        check(committed) { "Anmeldeübergang konnte nicht sicher vorbereitet werden." }
+        prepareAccountTransition()
         return current
     }
 
     @Synchronized
+    fun prepareAccountTransition() {
+        val current = currentScope()
+        val phase = transitionPhase()
+        if (phase != AccountTransitionPhase.NONE) return
+        val committed = prefs.edit()
+            .apply {
+                if (ChatOwnerScope.isGuest(current)) putString(KEY_PENDING_GUEST_SCOPE, current)
+                else remove(KEY_PENDING_GUEST_SCOPE)
+            }
+            .remove(KEY_PENDING_ACCOUNT_UID)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.PREPARED.name)
+            .putBoolean(KEY_AUTH_TRANSITION_PENDING, true)
+            .commit()
+        check(committed) { "Anmeldeübergang konnte nicht sicher vorbereitet werden." }
+    }
+
+    @Synchronized
     fun cancelAccountTransition() {
+        check(transitionPhase() == AccountTransitionPhase.PREPARED) {
+            "Ein bestätigter Kontoübergang darf nicht als Auth-Abbruch zurückgesetzt werden."
+        }
         val pending = pendingGuestScope()
         val editor = prefs.edit()
             .remove(KEY_PENDING_GUEST_SCOPE)
+            .remove(KEY_PENDING_ACCOUNT_UID)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.NONE.name)
             .putBoolean(KEY_AUTH_TRANSITION_PENDING, false)
         if (pending != null) editor.putString(KEY_ACTIVE_SCOPE, pending)
         val committed = editor.commit()
@@ -110,16 +141,60 @@ class ChatSessionScopeStore @Inject constructor(
     }
 
     @Synchronized
-    fun completeAccountTransition(uid: String, removedConversationIds: Collection<String>) {
+    fun beginAuthenticatedTransition(uid: String): AccountTransitionPhase {
+        val cleanUid = uid.trim()
+        require(cleanUid.isNotBlank()) { "Firebase UID must not be blank" }
+        val currentPhase = transitionPhase()
+        val existingUid = pendingAccountUid()
+        if (existingUid != null) {
+            check(existingUid == cleanUid) { "Ein Kontoübergang ist bereits für ein anderes Konto aktiv." }
+        }
+        if (currentPhase.ordinal >= AccountTransitionPhase.AUTHENTICATED.ordinal) return currentPhase
+
+        val editor = prefs.edit()
+            .putString(KEY_PENDING_ACCOUNT_UID, cleanUid)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.AUTHENTICATED.name)
+            .putBoolean(KEY_AUTH_TRANSITION_PENDING, true)
+        if (currentPhase == AccountTransitionPhase.NONE && ChatOwnerScope.isGuest(currentScope())) {
+            editor.putString(KEY_PENDING_GUEST_SCOPE, currentScope())
+        }
+        check(editor.commit()) { "Bestätigter Kontoübergang konnte nicht sicher gespeichert werden." }
+        _activeScope.value = resolveStoredScope()
+        return AccountTransitionPhase.AUTHENTICATED
+    }
+
+    @Synchronized
+    fun markTransitionPhase(uid: String, phase: AccountTransitionPhase) {
+        require(phase.ordinal in AccountTransitionPhase.GUEST_CLEANUP_COMPLETE.ordinal..
+            AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE.ordinal) {
+            "Ungültige persistente Übergangsphase."
+        }
+        val cleanUid = uid.trim()
+        check(pendingAccountUid() == cleanUid) { "Der Übergang gehört nicht zum aktuellen Konto." }
+        check(phase.ordinal >= transitionPhase().ordinal) { "Übergangsphasen dürfen nicht zurückgesetzt werden." }
+        check(
+            prefs.edit()
+                .putString(KEY_TRANSITION_PHASE, phase.name)
+                .putBoolean(KEY_AUTH_TRANSITION_PENDING, true)
+                .commit()
+        ) { "Übergangsphase konnte nicht sicher gespeichert werden." }
+    }
+
+    @Synchronized
+    fun completeAccountTransition(uid: String) {
         val accountScope = ChatOwnerScope.account(uid)
+        check(pendingAccountUid() == uid.trim()) { "Der Übergang gehört nicht zum aktuellen Konto." }
+        check(transitionPhase() == AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE) {
+            "Kontositzung darf erst nach Gastbereinigung, Legacy-Zuordnung und Workspace-Migration aktiviert werden."
+        }
         val editor = prefs.edit()
             .putString(KEY_ACTIVE_SCOPE, accountScope)
             .remove(KEY_GUEST_SCOPE)
             .remove(KEY_PENDING_GUEST_SCOPE)
+            .remove(KEY_PENDING_ACCOUNT_UID)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.NONE.name)
+            .putString(KEY_LAST_COMPLETED_TRANSITION_PHASE, AccountTransitionPhase.ACCOUNT_ACTIVATED.name)
             .putBoolean(KEY_AUTH_TRANSITION_PENDING, false)
-        removedConversationIds.forEach { conversationId ->
-            editor.remove(workspaceBindingKey(conversationId))
-        }
         pendingGuestScope()?.let { editor.remove(currentConversationKey(it)) }
         val committed = editor.commit()
         check(committed) { "Kontositzung konnte nach Gastbereinigung nicht sicher aktiviert werden." }
@@ -138,9 +213,12 @@ class ChatSessionScopeStore @Inject constructor(
 
     @Synchronized
     fun deactivateSession() {
+        check(!isAccountTransitionPending()) { "Ein laufender Kontoübergang darf nicht deaktiviert werden." }
         val committed = prefs.edit()
             .putString(KEY_ACTIVE_SCOPE, ChatOwnerScope.NO_ACTIVE_SESSION)
             .remove(KEY_PENDING_GUEST_SCOPE)
+            .remove(KEY_PENDING_ACCOUNT_UID)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.NONE.name)
             .putBoolean(KEY_AUTH_TRANSITION_PENDING, false)
             .commit()
         check(committed) { "Sitzungsstatus konnte nicht sicher zurückgesetzt werden." }
@@ -160,8 +238,21 @@ class ChatSessionScopeStore @Inject constructor(
         prefs.getString(KEY_PENDING_GUEST_SCOPE, null)
             ?.takeIf(ChatOwnerScope::isGuest)
 
-    fun isAccountTransitionPending(): Boolean =
-        prefs.getBoolean(KEY_AUTH_TRANSITION_PENDING, false) && pendingGuestScope() != null
+    fun pendingAccountUid(): String? =
+        prefs.getString(KEY_PENDING_ACCOUNT_UID, null)?.trim()?.takeIf { it.isNotBlank() }
+
+    fun transitionPhase(): AccountTransitionPhase =
+        prefs.getString(KEY_TRANSITION_PHASE, null)
+            ?.let { stored -> runCatching { AccountTransitionPhase.valueOf(stored) }.getOrNull() }
+            ?: if (prefs.getBoolean(KEY_AUTH_TRANSITION_PENDING, false)) {
+                AccountTransitionPhase.PREPARED
+            } else {
+                AccountTransitionPhase.NONE
+            }
+
+    fun isAccountTransitionPending(): Boolean = transitionPhase() != AccountTransitionPhase.NONE
+
+    fun canCancelAccountTransition(): Boolean = transitionPhase() == AccountTransitionPhase.PREPARED
 
     fun isCloudSyncAllowed(uid: String): Boolean =
         !isAccountTransitionPending() && ChatOwnerScope.isAccountForUid(currentScope(), uid)
@@ -192,12 +283,13 @@ class ChatSessionScopeStore @Inject constructor(
         private const val KEY_ACTIVE_SCOPE = "chat_active_owner_scope"
         private const val KEY_GUEST_SCOPE = "chat_guest_owner_scope"
         private const val KEY_PENDING_GUEST_SCOPE = "chat_pending_guest_owner_scope"
+        private const val KEY_PENDING_ACCOUNT_UID = "chat_pending_account_uid"
         private const val KEY_AUTH_TRANSITION_PENDING = "chat_account_transition_pending"
+        private const val KEY_TRANSITION_PHASE = "chat_account_transition_phase"
+        private const val KEY_LAST_COMPLETED_TRANSITION_PHASE = "chat_last_completed_transition_phase"
 
         fun currentConversationKey(ownerScope: String): String =
             "current_conversation_id_${ownerScope.replace(':', '_')}"
 
-        fun workspaceBindingKey(conversationId: String): String =
-            "conversation_workspace_name_$conversationId"
     }
 }

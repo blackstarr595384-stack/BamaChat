@@ -32,7 +32,6 @@ import com.example.bamachat.data.provider.chat.ProviderChatMessage
 import com.example.bamachat.data.provider.chat.ProviderChatRequest
 import com.example.bamachat.data.provider.ProviderConnectionType
 import com.example.bamachat.service.ImageUrlResolver
-import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.shared.core.ChatSendDeduplicator
 import com.example.bamachat.shared.core.QuickActionSuggestion
 import com.example.bamachat.shared.core.WorkspaceNaming
@@ -111,6 +110,7 @@ enum class ToolCallStatus { RUNNING, DONE, ERROR }
 class ChatViewModel @Inject constructor(
     application: Application,
     private val repo: ChatRepository,
+    private val conversationService: ConversationService,
     private val chatSyncCoordinator: AndroidChatSyncCoordinator,
     private val chatProviderSelectionStore: ActiveChatProviderSelectionStore,
     private val chatProviderResolver: ActiveChatProviderResolver,
@@ -361,19 +361,18 @@ class ChatViewModel @Inject constructor(
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val appContext = getApplication<Application>().applicationContext
 
-    // Services from ServiceLocator
-    private val conversationService: ConversationService
-        get() = ServiceLocator.conversationService
+    // Legacy services pending full DI migration
+    private val serviceLocator = com.example.bamachat.service.ServiceLocator
     private val knowledgeService: KnowledgeService
-        get() = ServiceLocator.knowledgeService
+        get() = serviceLocator.knowledgeService
     private val mediaService: MediaService
-        get() = ServiceLocator.mediaService
+        get() = serviceLocator.mediaService
     private val chatEngine: ChatEngine
-        get() = ServiceLocator.chatEngine
+        get() = serviceLocator.chatEngine
     private val apiManager: ApiManager
-        get() = ServiceLocator.apiManager
+        get() = serviceLocator.apiManager
     private val notificationService: NotificationService
-        get() = ServiceLocator.notificationService
+        get() = serviceLocator.notificationService
 
     private val imageUrlResolver = ImageUrlResolver()
 

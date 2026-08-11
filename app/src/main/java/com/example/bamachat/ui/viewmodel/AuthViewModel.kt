@@ -7,7 +7,9 @@ import androidx.credentials.CredentialManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.local.ChatSessionScopeStore
-import com.example.bamachat.data.local.GuestChatTransitionCoordinator
+import com.example.bamachat.data.auth.AccountAuthenticationCoordinator
+import com.example.bamachat.data.local.AccountAuthTransitionRunner
+import com.example.bamachat.data.local.AccountTransitionResult
 import com.example.bamachat.data.model.UserProfile
 import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.LocalDataSanitizer
@@ -25,8 +27,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
@@ -55,7 +55,8 @@ internal fun resolveAuthSession(
 class AuthViewModel @Inject constructor(
     application: Application,
     private val chatSessionScopeStore: ChatSessionScopeStore,
-    private val guestChatTransitionCoordinator: GuestChatTransitionCoordinator
+    private val accountAuthTransitionRunner: AccountAuthTransitionRunner,
+    private val accountAuthenticationCoordinator: AccountAuthenticationCoordinator
 ) : AndroidViewModel(application) {
     companion object {
         private const val KEY_GUEST_MODE = "guest_mode_enabled"
@@ -80,10 +81,9 @@ class AuthViewModel @Inject constructor(
     private val storage: FirebaseStorage? = runCatching { FirebaseStorage.getInstance() }
         .onFailure { AppTelemetry.logError("storage_init", it) }
         .getOrNull()
-    private val accountTransitionMutex = Mutex()
-
     private val _firebaseUser = MutableStateFlow<FirebaseUser?>(
         run {
+            auth?.currentUser?.uid?.let(accountAuthTransitionRunner::prepareAuthenticatedProcessResume)
             chatSessionScopeStore.reconcile(
                 firebaseUid = auth?.currentUser?.uid,
                 guestModeEnabled = prefs.getBoolean(KEY_GUEST_MODE, false)
@@ -98,7 +98,7 @@ class AuthViewModel @Inject constructor(
 
     private val _isGuestMode = MutableStateFlow(
         if (chatSessionScopeStore.isAccountTransitionPending()) {
-            true
+            chatSessionScopeStore.pendingGuestScope() != null
         } else {
             resolveAuthSession(
                 firebaseUserPresent = _firebaseUser.value != null,
@@ -108,7 +108,7 @@ class AuthViewModel @Inject constructor(
     )
     val isGuestMode: StateFlow<Boolean> = _isGuestMode.asStateFlow()
 
-    private val _isAuthenticated = MutableStateFlow(auth?.currentUser != null || _isGuestMode.value)
+    private val _isAuthenticated = MutableStateFlow(_firebaseUser.value != null || _isGuestMode.value)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -154,14 +154,13 @@ class AuthViewModel @Inject constructor(
             _errorMessage.value = "Bitte E-Mail und Passwort eingeben."
             return
         }
-        if (!prepareAccountTransition()) return
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             val startMs = System.currentTimeMillis()
             try {
-                firebaseAuth.signInWithEmailAndPassword(cleanEmail, password).await()
-                if (!completeAuthenticatedSession(firebaseAuth.currentUser, "email")) return@launch
+                val transition = accountAuthenticationCoordinator.signInWithEmail(cleanEmail, password)
+                if (!applyAuthenticatedSession(firebaseAuth.currentUser, "email", transition)) return@launch
                 AppTelemetry.logEvent(
                     "login_success",
                     mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
@@ -195,14 +194,13 @@ class AuthViewModel @Inject constructor(
             _errorMessage.value = "Name, gültige E-Mail und Passwort (mind. 6 Zeichen) erforderlich."
             return
         }
-        if (!prepareAccountTransition()) return
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             val startMs = System.currentTimeMillis()
             try {
-                firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password).await()
-                if (!completeAuthenticatedSession(firebaseAuth.currentUser, "registration")) return@launch
+                val transition = accountAuthenticationCoordinator.registerWithEmail(cleanEmail, password)
+                if (!applyAuthenticatedSession(firebaseAuth.currentUser, "registration", transition)) return@launch
                 firebaseAuth.currentUser?.updateProfile(
                     UserProfileChangeRequest.Builder()
                         .setDisplayName(cleanName)
@@ -266,16 +264,13 @@ class AuthViewModel @Inject constructor(
             _errorMessage.value = "Google-Login fehlgeschlagen: Ungültiges Token."
             return
         }
-        if (!prepareAccountTransition()) return
-
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
             val startMs = System.currentTimeMillis()
             try {
-                val credential = GoogleAuthProvider.getCredential(cleanToken, null)
-                firebaseAuth.signInWithCredential(credential).await()
-                if (!completeAuthenticatedSession(firebaseAuth.currentUser, "google")) return@launch
+                val transition = accountAuthenticationCoordinator.signInWithGoogle(cleanToken)
+                if (!applyAuthenticatedSession(firebaseAuth.currentUser, "google", transition)) return@launch
                 AppTelemetry.logEvent(
                     "login_google_success",
                     mapOf("duration_ms" to (System.currentTimeMillis() - startMs).toString())
@@ -604,25 +599,20 @@ class AuthViewModel @Inject constructor(
         _statusMessage.value = null
     }
 
-    private fun prepareAccountTransition(): Boolean = runCatching {
-        chatSessionScopeStore.beginAccountTransitionIfGuest()
-    }.onFailure {
-        AppTelemetry.logError("guest_account_transition_prepare", it)
-        _errorMessage.value = "Anmeldung konnte nicht sicher vorbereitet werden."
-    }.isSuccess
-
     private fun handleAccountTransitionFailure(currentUser: FirebaseUser?, error: Throwable) {
         if (currentUser != null || !chatSessionScopeStore.isAccountTransitionPending()) return
-        runCatching { chatSessionScopeStore.cancelAccountTransition() }
-            .onFailure { AppTelemetry.logError("guest_account_transition_cancel", it) }
-        setGuestMode(true)
+        if (chatSessionScopeStore.canCancelAccountTransition()) {
+            runCatching { chatSessionScopeStore.cancelAccountTransition() }
+                .onFailure { AppTelemetry.logError("guest_account_transition_cancel", it) }
+        }
+        setGuestMode(chatSessionScopeStore.pendingGuestScope() != null)
         AppTelemetry.logError("guest_account_transition_auth_failed", error)
         refreshAuthState()
     }
 
     private suspend fun handleFirebaseAuthState(user: FirebaseUser?) {
         if (user == null) {
-            if (chatSessionScopeStore.isAccountTransitionPending()) {
+            if (chatSessionScopeStore.canCancelAccountTransition()) {
                 runCatching { chatSessionScopeStore.cancelAccountTransition() }
                     .onFailure { AppTelemetry.logError("guest_account_transition_resume_cancel", it) }
             }
@@ -630,7 +620,7 @@ class AuthViewModel @Inject constructor(
             _profile.value = null
             _connectedProviders.value = emptyList()
             _isEmailVerified.value = false
-            if (_isGuestMode.value) {
+            if (_isGuestMode.value || chatSessionScopeStore.isAccountTransitionPending()) {
                 chatSessionScopeStore.reconcile(firebaseUid = null, guestModeEnabled = true)
             } else {
                 runCatching { chatSessionScopeStore.deactivateSession() }
@@ -647,23 +637,24 @@ class AuthViewModel @Inject constructor(
             setGuestMode(true)
             refreshAuthState()
         }
-        completeAuthenticatedSession(user, "auth_state")
+        val transition = runCatching { accountAuthTransitionRunner.resumeAuthenticated(user.uid) }
+            .getOrElse { error ->
+                handleAuthenticatedTransitionError(error)
+                return
+            }
+        applyAuthenticatedSession(user, "auth_state", transition)
     }
 
-    private suspend fun completeAuthenticatedSession(
+    private suspend fun applyAuthenticatedSession(
         user: FirebaseUser?,
-        source: String
+        source: String,
+        transition: AccountTransitionResult
     ): Boolean {
         val authenticatedUser = user ?: run {
             _errorMessage.value = "Anmeldung wurde nicht bestätigt."
             return false
         }
-        return accountTransitionMutex.withLock {
-            val guestTransitionPending = chatSessionScopeStore.isAccountTransitionPending()
-            try {
-                val transition = guestChatTransitionCoordinator.completeAuthenticatedTransition(
-                    authenticatedUser.uid
-                )
+        return try {
                 setGuestMode(false)
                 _firebaseUser.value = authenticatedUser
                 AppTelemetry.setUserId(authenticatedUser.uid)
@@ -673,7 +664,8 @@ class AuthViewModel @Inject constructor(
                         "source" to source,
                         "guest_cleanup" to (transition.cleanup != null).toString(),
                         "guest_conversations_removed" to
-                            (transition.cleanup?.deletedConversations ?: 0).toString()
+                            (transition.cleanup?.deletedConversations ?: 0).toString(),
+                        "legacy_conversations_claimed" to transition.legacyClaim.claimedConversations.toString()
                     )
                 )
                 refreshProviderData()
@@ -685,17 +677,18 @@ class AuthViewModel @Inject constructor(
                 refreshAuthState()
                 true
             } catch (error: Exception) {
-                AppTelemetry.logError("guest_account_transition_cleanup", error)
-                _firebaseUser.value = null
-                if (guestTransitionPending || chatSessionScopeStore.isAccountTransitionPending()) {
-                    setGuestMode(true)
-                }
-                _errorMessage.value =
-                    "Konto ist bestätigt, aber Gastdaten konnten nicht sicher getrennt werden. Bitte erneut versuchen."
-                refreshAuthState()
+                handleAuthenticatedTransitionError(error)
                 false
             }
-        }
+    }
+
+    private fun handleAuthenticatedTransitionError(error: Throwable) {
+        AppTelemetry.logError("guest_account_transition_cleanup", error)
+        _firebaseUser.value = null
+        setGuestMode(chatSessionScopeStore.pendingGuestScope() != null)
+        _errorMessage.value =
+            "Konto ist bestätigt, aber lokale Chats konnten nicht sicher zugeordnet werden. Bitte erneut versuchen."
+        refreshAuthState()
     }
 
 

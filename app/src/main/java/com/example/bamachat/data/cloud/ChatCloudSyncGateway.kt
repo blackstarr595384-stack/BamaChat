@@ -2,6 +2,7 @@ package com.example.bamachat.data.cloud
 
 import com.example.bamachat.data.local.ChatMessageEntity
 import com.example.bamachat.data.local.ChatOwnerScope
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.util.AppTelemetry
 import com.google.firebase.firestore.FirebaseFirestore
@@ -19,6 +20,8 @@ internal fun canUploadMessage(uid: String, message: ChatMessageEntity): Boolean 
     uid.isNotBlank() && ChatOwnerScope.isAccountForUid(message.ownerScope, uid)
 
 class ChatCloudSyncGateway(
+    private val scopeStore: ChatSessionScopeStore,
+    private val uidProvider: AuthenticatedUidProvider,
     firestore: FirebaseFirestore? = null
 ) {
     private val firestore: FirebaseFirestore? = firestore
@@ -34,13 +37,15 @@ class ChatCloudSyncGateway(
         userConversationsCollection(uid)?.document(conversationId)
             ?.collection("messages")
 
-    suspend fun pushConversation(
+    internal suspend fun pushConversation(
         uid: String,
         conversation: ConversationEntity,
         workspaceName: String? = null,
         lastMessagePreview: String = ""
     ): Boolean {
-        if (!canUploadConversation(uid, conversation)) return false
+        if (!isDirectUploadAllowed(uid, conversation.ownerScope) || !canUploadConversation(uid, conversation)) {
+            return false
+        }
         val db = firestore ?: return false
         return try {
             val cloud = conversation.toCloudConversation(
@@ -62,12 +67,12 @@ class ChatCloudSyncGateway(
         }
     }
 
-    suspend fun pushMessage(
+    internal suspend fun pushMessage(
         uid: String,
         conversationId: String,
         message: ChatMessageEntity
     ): Boolean {
-        if (!canUploadMessage(uid, message)) return false
+        if (!isDirectUploadAllowed(uid, message.ownerScope) || !canUploadMessage(uid, message)) return false
         val db = firestore ?: return false
         return try {
             val cloud = message.toCloudMessage()
@@ -87,13 +92,13 @@ class ChatCloudSyncGateway(
         }
     }
 
-    suspend fun softDeleteConversation(
+    internal suspend fun softDeleteConversation(
         uid: String,
         conversationId: String,
         ownerScope: String
     ): Boolean {
         val db = firestore ?: return false
-        if (uid.isBlank() || !ChatOwnerScope.isAccountForUid(ownerScope, uid)) return false
+        if (!isDirectUploadAllowed(uid, ownerScope)) return false
         return try {
             userConversationsCollection(uid)
                 ?.document(conversationId)
@@ -116,7 +121,7 @@ class ChatCloudSyncGateway(
         }
     }
 
-    fun pushConversationAsync(
+    internal fun pushConversationAsync(
         uid: String,
         conversation: ConversationEntity,
         workspaceName: String? = null,
@@ -127,7 +132,7 @@ class ChatCloudSyncGateway(
         }
     }
 
-    fun pushMessageAsync(
+    internal fun pushMessageAsync(
         uid: String,
         conversationId: String,
         message: ChatMessageEntity
@@ -137,7 +142,7 @@ class ChatCloudSyncGateway(
         }
     }
 
-    fun softDeleteConversationAsync(
+    internal fun softDeleteConversationAsync(
         uid: String,
         conversationId: String,
         ownerScope: String
@@ -145,5 +150,12 @@ class ChatCloudSyncGateway(
         scope.launch {
             softDeleteConversation(uid, conversationId, ownerScope)
         }
+    }
+
+    internal fun isDirectUploadAllowed(uid: String, ownerScope: String): Boolean {
+        val authenticatedUid = uidProvider.currentUid()?.trim().orEmpty()
+        if (authenticatedUid.isBlank() || authenticatedUid != uid.trim()) return false
+        if (!scopeStore.isCloudSyncAllowed(authenticatedUid)) return false
+        return ChatOwnerScope.isAccountForUid(ownerScope, authenticatedUid)
     }
 }

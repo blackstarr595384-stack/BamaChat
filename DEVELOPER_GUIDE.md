@@ -371,9 +371,9 @@ Hinweis: DB-Migrationen laufen explizit über definierte Room-Migrationsschritte
 
 Chat-Datenbesitz:
 - Neue Conversations und Messages tragen immer denselben Owner-Scope: `account:<Firebase-UID>` oder `guest:<persistente Session-ID>`.
-- Die nichtdestruktive Migration auf Schema 10 erhält vorhandene Chatzeilen als `legacy:unclassified`; diese Altzeilen werden weder automatisch einem Konto/Gast zugeordnet noch zur Cloud hochgeladen.
-- Abfragen und Schreibzugriffe laufen ausschließlich im aktiven Scope. Cloud-Sync akzeptiert nur `account:<aktuelle UID>` und bleibt während eines Gast-zu-Konto-Übergangs gesperrt.
-- Erst nach bestätigter Authentifizierung entfernt eine Room-Transaktion ausschließlich den aktuellen Guest-Scope. Danach wird der Account-Scope aktiviert und Cloud-Sync freigegeben; Abbruch und Fehler lassen Gastdaten unverändert.
+- Die nichtdestruktive Migration auf Schema 10 erhält vorhandene Chatzeilen zunächst als `legacy:unclassified`. Beim ersten eindeutig authentifizierten Konto werden alle Legacy-Conversations und -Messages atomar diesem `account:<UID>` zugeordnet; vorher bleiben sie unsichtbar und Cloud-Sync-gesperrt.
+- Abfragen und Schreibzugriffe laufen ausschließlich im aktiven Scope. Cloud-Sync und Backups akzeptieren nur `account:<aktuelle UID>` aus derselben `ChatSessionScopeStore`-Singletoninstanz und bleiben während jeder persistenten Übergangsphase gesperrt.
+- Erst nach bestätigter Authentifizierung entfernt eine Room-Transaktion ausschließlich den aktuellen Guest-Scope, claimt Legacy-Daten und migriert Workspace-Bindings. Danach wird der Account-Scope aktiviert und Cloud-Sync freigegeben; Abbruch und Fehler lassen Gastdaten unverändert.
 
 ## Release-/Feature-Kommunikation
 - Wenn du ein neues User-Feature einbaust, aktualisiere immer direkt `README.md` und diesen Developer Guide.

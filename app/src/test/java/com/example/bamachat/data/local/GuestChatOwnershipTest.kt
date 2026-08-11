@@ -29,6 +29,7 @@ class GuestChatOwnershipTest {
     private lateinit var repository: ChatRepository
     private lateinit var prefs: SharedPreferences
     private lateinit var scopeStore: ChatSessionScopeStore
+    private lateinit var workspaceStore: ConversationWorkspaceStore
 
     @Before
     fun setUp() {
@@ -40,6 +41,7 @@ class GuestChatOwnershipTest {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
         scopeStore = ChatSessionScopeStore(prefs)
+        workspaceStore = ConversationWorkspaceStore(prefs)
     }
 
     @After
@@ -74,18 +76,57 @@ class GuestChatOwnershipTest {
     }
 
     @Test
-    fun successfulGoogleTransitionDeletesOnlyCurrentGuestScopeAndPreservesOtherData() = runBlocking {
-        assertSelectiveSuccessfulTransition("google")
+    fun crossScopeIdCollisionsAreRejectedWhileSameScopeRestoreCanUpdate() = runBlocking {
+        val account = ChatOwnerScope.account("uid-a")
+        val guest = ChatOwnerScope.guest("guest-a")
+        seedChat("shared-id", "shared-message", "account body", account)
+        seedChat("guest-conversation", "guest-message", "guest body", guest)
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { repository.createConversation("shared-id", ownerScope = guest) }
+        }
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking {
+                database.chatDao().upsertMessageInScope(
+                    message("shared-message", "guest-conversation", guest, "blocked")
+                )
+            }
+        }
+
+        repository.restoreAccountBackup(
+            com.example.bamachat.data.repository.ScopedConversationSnapshot(
+                conversation = ConversationEntity("shared-id", "Updated", 1L, 2L, ownerScope = account),
+                messages = listOf(message("shared-message", "shared-id", account, "updated"))
+            ),
+            account
+        )
+
+        assertEquals("Updated", repository.getConversation("shared-id", account)?.title)
+        assertEquals("updated", repository.getMessages("shared-id", account).first().single().text)
     }
 
     @Test
-    fun successfulEmailTransitionDeletesOnlyCurrentGuestScopeAndPreservesOtherData() = runBlocking {
-        assertSelectiveSuccessfulTransition("email")
+    fun workspaceBindingsAreIsolatedByOwnerScope() {
+        val accountA = ChatOwnerScope.account("uid-a")
+        val accountB = ChatOwnerScope.account("uid-b")
+        val guest = ChatOwnerScope.guest("guest-a")
+
+        workspaceStore.bind(accountA, "same-conversation", "A")
+        workspaceStore.bind(accountB, "same-conversation", "B")
+        workspaceStore.bind(guest, "same-conversation", "Guest")
+
+        assertEquals("A", workspaceStore.resolve(accountA, "same-conversation"))
+        assertEquals("B", workspaceStore.resolve(accountB, "same-conversation"))
+        assertEquals("Guest", workspaceStore.resolve(guest, "same-conversation"))
+        workspaceStore.removeAllForScope(guest)
+        assertNull(workspaceStore.resolve(guest, "same-conversation"))
+        assertEquals("A", workspaceStore.resolve(accountA, "same-conversation"))
+        assertEquals("B", workspaceStore.resolve(accountB, "same-conversation"))
     }
 
     @Test
-    fun successfulRegistrationTransitionDeletesOnlyCurrentGuestScopeAndPreservesOtherData() = runBlocking {
-        assertSelectiveSuccessfulTransition("registration")
+    fun successfulTransitionDeletesCurrentGuestClaimsLegacyAndPreservesOtherData() = runBlocking {
+        assertSelectiveSuccessfulTransition()
     }
 
     @Test
@@ -122,7 +163,10 @@ class GuestChatOwnershipTest {
         scopeStore.beginAccountTransitionIfGuest()
         val coordinator = GuestChatTransitionCoordinator(
             scopeStore = scopeStore,
-            cleaner = GuestScopeChatCleaner { error("cleanup failed") }
+            cleaner = GuestScopeChatCleaner { error("cleanup failed") },
+            legacyClaimer = RoomLegacyScopeClaimer(database),
+            repository = repository,
+            workspaceStore = workspaceStore
         )
 
         assertThrows(IllegalStateException::class.java) {
@@ -147,7 +191,10 @@ class GuestChatOwnershipTest {
             cleaner = GuestScopeChatCleaner {
                 calls++
                 ScopedChatCleanupResult(emptyList(), 0, 0, 0, 0)
-            }
+            },
+            legacyClaimer = LegacyScopeClaimer { LegacyScopeClaimResult(emptyList(), 0, 0) },
+            repository = repository,
+            workspaceStore = workspaceStore
         )
 
         coordinator.completeAuthenticatedTransition("uid-a")
@@ -158,47 +205,140 @@ class GuestChatOwnershipTest {
         assertTrue(scopeStore.isCloudSyncAllowed("uid-a"))
     }
 
-    private suspend fun assertSelectiveSuccessfulTransition(provider: String) {
+    @Test
+    fun restartAfterGuestCleanupDoesNotRepeatDestructiveStep() = runBlocking {
         val guest = scopeStore.startNewGuestSession()
-        val otherGuest = ChatOwnerScope.guest("other-$provider")
-        val account = ChatOwnerScope.account("uid-$provider")
-        seedChat("guest-$provider", "guest-message-$provider", "guest $provider", guest)
-        seedChat("other-$provider", "other-message-$provider", "other $provider", otherGuest)
-        seedChat("account-$provider", "account-message-$provider", "account $provider", account)
-        insertLegacyChat("legacy-$provider", "legacy-message-$provider")
+        seedChat("guest-restart", "guest-message-restart", "guest body", guest)
+        insertLegacyChat("legacy-restart", "legacy-message-restart")
+        scopeStore.prepareAccountTransition()
+        scopeStore.beginAuthenticatedTransition("uid-restart")
+        RoomGuestScopeChatCleaner(database.chatDao()).clear(guest)
+        scopeStore.markTransitionPhase("uid-restart", AccountTransitionPhase.GUEST_CLEANUP_COMPLETE)
+
+        val restoredStore = ChatSessionScopeStore(prefs)
+        val restoredCoordinator = GuestChatTransitionCoordinator(
+            restoredStore,
+            GuestScopeChatCleaner { error("cleanup must not repeat") },
+            RoomLegacyScopeClaimer(database),
+            repository,
+            workspaceStore
+        )
+        restoredCoordinator.completeAuthenticatedTransition("uid-restart")
+
+        assertEquals(ChatOwnerScope.account("uid-restart"), restoredStore.currentScope())
+        assertNotNull(repository.getConversation("legacy-restart", ChatOwnerScope.account("uid-restart")))
+    }
+
+    @Test
+    fun restartAfterLegacyClaimDoesNotRepeatClaim() = runBlocking {
+        insertLegacyChat("legacy-claimed", "legacy-message-claimed")
+        scopeStore.prepareAccountTransition()
+        scopeStore.beginAuthenticatedTransition("uid-claimed")
+        scopeStore.markTransitionPhase("uid-claimed", AccountTransitionPhase.GUEST_CLEANUP_COMPLETE)
+        RoomLegacyScopeClaimer(database).claim("uid-claimed")
+        scopeStore.markTransitionPhase("uid-claimed", AccountTransitionPhase.LEGACY_CLAIM_COMPLETE)
+
+        val restoredStore = ChatSessionScopeStore(prefs)
+        val restoredCoordinator = GuestChatTransitionCoordinator(
+            restoredStore,
+            GuestScopeChatCleaner { error("cleanup must not run") },
+            LegacyScopeClaimer { error("legacy claim must not repeat") },
+            repository,
+            workspaceStore
+        )
+        restoredCoordinator.completeAuthenticatedTransition("uid-claimed")
+
+        assertEquals(ChatOwnerScope.account("uid-claimed"), restoredStore.currentScope())
+        assertEquals(0, repository.legacyConversationCount())
+    }
+
+    @Test
+    fun legacyClaimFailureKeepsPersistentGateClosedUntilSafeResume() = runBlocking {
+        insertLegacyChat("legacy-failure", "legacy-message-failure")
+        scopeStore.prepareAccountTransition()
+        val failingCoordinator = GuestChatTransitionCoordinator(
+            scopeStore,
+            RoomGuestScopeChatCleaner(database.chatDao()),
+            LegacyScopeClaimer { error("legacy claim failed") },
+            repository,
+            workspaceStore
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { failingCoordinator.completeAuthenticatedTransition("uid-failure") }
+        }
+
+        assertEquals(AccountTransitionPhase.GUEST_CLEANUP_COMPLETE, scopeStore.transitionPhase())
+        assertTrue(scopeStore.isAccountTransitionPending())
+        assertFalse(scopeStore.isCloudSyncAllowed("uid-failure"))
+        assertEquals(1, repository.legacyConversationCount())
+
+        val restoredStore = ChatSessionScopeStore(prefs)
+        GuestChatTransitionCoordinator(
+            restoredStore,
+            RoomGuestScopeChatCleaner(database.chatDao()),
+            RoomLegacyScopeClaimer(database),
+            repository,
+            workspaceStore
+        ).completeAuthenticatedTransition("uid-failure")
+
+        assertEquals(ChatOwnerScope.account("uid-failure"), restoredStore.currentScope())
+        assertTrue(restoredStore.isCloudSyncAllowed("uid-failure"))
+    }
+
+    private suspend fun assertSelectiveSuccessfulTransition() {
+        val guest = scopeStore.startNewGuestSession()
+        val otherGuest = ChatOwnerScope.guest("other")
+        val account = ChatOwnerScope.account("uid-a")
+        seedChat("guest-current", "guest-message-current", "guest current", guest)
+        seedChat("guest-other", "guest-message-other", "guest other", otherGuest)
+        seedChat("account-existing", "account-message-existing", "account existing", account)
+        insertLegacyChat("legacy-chat", "legacy-message")
         prefs.edit()
             .putString("project_workspaces_json", "[]")
             .putString("openrouter_api_key", "preserved")
             .putBoolean("settings.simple_mode_enabled", true)
-            .putString(ChatSessionScopeStore.currentConversationKey(guest), "guest-$provider")
-            .putString(ChatSessionScopeStore.workspaceBindingKey("guest-$provider"), "Workspace")
+            .putString(ChatSessionScopeStore.currentConversationKey(guest), "guest-current")
+            .putString("conversation_workspace_name_guest-current", "Guest Workspace")
+            .putString("conversation_workspace_name_legacy-chat", "Legacy Workspace")
             .commit()
 
         scopeStore.beginAccountTransitionIfGuest()
-        assertFalse(scopeStore.isCloudSyncAllowed("uid-$provider"))
+        assertFalse(scopeStore.isCloudSyncAllowed("uid-a"))
         val coordinator = GuestChatTransitionCoordinator(
             scopeStore,
-            RoomGuestScopeChatCleaner(database.chatDao())
+            RoomGuestScopeChatCleaner(database.chatDao()),
+            RoomLegacyScopeClaimer(database),
+            repository,
+            workspaceStore
         )
-        val result = coordinator.completeAuthenticatedTransition("uid-$provider")
+        val result = coordinator.completeAuthenticatedTransition("uid-a")
 
         assertEquals(account, result.accountScope)
         assertEquals(1, result.cleanup?.deletedConversations)
         assertEquals(1, result.cleanup?.deletedMessages)
         assertEquals(1, result.cleanup?.deletedFtsRows)
-        assertNull(repository.getConversation("guest-$provider", guest))
-        assertNotNull(repository.getConversation("other-$provider", otherGuest))
-        assertNotNull(repository.getConversation("account-$provider", account))
-        assertEquals(1L, rawCount("conversations", "ownerScope", ChatOwnerScope.LEGACY_UNCLASSIFIED))
-        assertEquals(1L, rawCount("chat_messages_fts", "conversation_id", "legacy-$provider"))
+        assertEquals(1, result.legacyClaim.claimedConversations)
+        assertEquals(1, result.legacyClaim.claimedMessages)
+        assertNull(repository.getConversation("guest-current", guest))
+        assertNotNull(repository.getConversation("guest-other", otherGuest))
+        assertNotNull(repository.getConversation("account-existing", account))
+        assertNotNull(repository.getConversation("legacy-chat", account))
+        assertEquals(0L, rawCount("conversations", "ownerScope", ChatOwnerScope.LEGACY_UNCLASSIFIED))
+        assertEquals(0L, rawCount("chat_messages", "ownerScope", ChatOwnerScope.LEGACY_UNCLASSIFIED))
+        assertEquals(1L, rawCount("chat_messages_fts", "conversation_id", "legacy-chat"))
         assertTrue(repository.searchMessages("guest", guest).isEmpty())
+        assertEquals(1, repository.searchMessages("legacy", account).size)
         assertEquals(account, scopeStore.currentScope())
-        assertTrue(scopeStore.isCloudSyncAllowed("uid-$provider"))
+        assertTrue(scopeStore.isCloudSyncAllowed("uid-a"))
         assertEquals("[]", prefs.getString("project_workspaces_json", null))
         assertEquals("preserved", prefs.getString("openrouter_api_key", null))
         assertTrue(prefs.getBoolean("settings.simple_mode_enabled", false))
         assertFalse(prefs.contains(ChatSessionScopeStore.currentConversationKey(guest)))
-        assertFalse(prefs.contains(ChatSessionScopeStore.workspaceBindingKey("guest-$provider")))
+        assertFalse(prefs.contains("conversation_workspace_name_guest-current"))
+        assertFalse(prefs.contains("conversation_workspace_name_legacy-chat"))
+        assertNull(workspaceStore.resolve(guest, "guest-current"))
+        assertEquals("Legacy Workspace", workspaceStore.resolve(account, "legacy-chat"))
     }
 
     private suspend fun seedChat(conversationId: String, messageId: String, text: String, scope: String) {

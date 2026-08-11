@@ -4,14 +4,25 @@ import android.app.Application
 import com.google.firebase.Firebase
 import com.google.firebase.initialize
 import com.example.bamachat.service.ServiceLocator
+import com.example.bamachat.data.cloud.AuthenticatedUidProvider
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import dagger.hilt.android.HiltAndroidApp
 import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.LegalPolicy
+import javax.inject.Inject
 
 @HiltAndroidApp
 class BamaChatApplication : Application() {
+    @Inject lateinit var authenticatedUidProvider: AuthenticatedUidProvider
+    @Inject lateinit var chatSessionScopeStore: ChatSessionScopeStore
+
     override fun onCreate() {
         super.onCreate()
+
+        authenticatedUidProvider.currentUid()?.let { uid ->
+            chatSessionScopeStore.prepareAccountTransition()
+            chatSessionScopeStore.beginAuthenticatedTransition(uid)
+        }
 
         ServiceLocator.init(this)
 

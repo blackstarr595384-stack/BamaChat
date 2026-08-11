@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ChatSessionScopeStore
+import com.example.bamachat.data.local.ConversationWorkspaceStore
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.shared.core.WorkspaceNaming
 import kotlinx.coroutines.flow.Flow
@@ -15,7 +16,8 @@ import java.util.UUID
 class ConversationService(
     private val repo: ChatRepository,
     private val prefs: SharedPreferences,
-    private val scopeStore: ChatSessionScopeStore
+    private val scopeStore: ChatSessionScopeStore,
+    private val workspaceStore: ConversationWorkspaceStore
 ) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun getAllConversations(): Flow<List<ConversationEntity>> =
@@ -28,7 +30,7 @@ class ConversationService(
         val id = UUID.randomUUID().toString()
         val title = newConversationTitle(workspaceName)
         val conv = repo.createConversation(id, title, personaName, writableOwnerScope())
-        bindConversationToWorkspace(id, workspaceName)
+        bindConversationToWorkspace(writableOwnerScope(), id, workspaceName)
         return conv
     }
 
@@ -46,8 +48,9 @@ class ConversationService(
     }
 
     suspend fun delete(id: String) {
-        repo.deleteConversation(id, writableOwnerScope())
-        removeConversationWorkspaceBinding(id)
+        val ownerScope = writableOwnerScope()
+        repo.deleteConversation(id, ownerScope)
+        removeConversationWorkspaceBinding(ownerScope, id)
     }
 
     suspend fun touch(id: String) {
@@ -62,26 +65,24 @@ class ConversationService(
     fun isPlaceholderTitle(title: String): Boolean =
         WorkspaceNaming.isPlaceholderConversationTitle(title)
 
-    private fun conversationWorkspaceKey(id: String): String =
-        "conversation_workspace_name_$id"
-
-    private fun bindConversationToWorkspace(id: String, name: String) {
-        prefs.edit().putString(conversationWorkspaceKey(id), WorkspaceNaming.normalizeWorkspaceName(name)).apply()
+    private fun bindConversationToWorkspace(ownerScope: String, id: String, name: String) {
+        workspaceStore.bind(ownerScope, id, WorkspaceNaming.normalizeWorkspaceName(name))
     }
 
     fun resolveConversationWorkspaceName(id: String, title: String): String {
-        val persisted = prefs.getString(conversationWorkspaceKey(id), "")?.trim().orEmpty()
+        val ownerScope = readableOwnerScope()
+        val persisted = workspaceStore.resolve(ownerScope, id)?.trim().orEmpty()
         if (persisted.isNotBlank()) return persisted
         val inferred = WorkspaceNaming.workspaceTagFromTitle(title)
         if (!inferred.isNullOrBlank()) {
-            bindConversationToWorkspace(id, inferred)
+            bindConversationToWorkspace(ownerScope, id, inferred)
             return inferred
         }
         return "Standard"
     }
 
-    private fun removeConversationWorkspaceBinding(id: String) {
-        prefs.edit().remove(conversationWorkspaceKey(id)).apply()
+    private fun removeConversationWorkspaceBinding(ownerScope: String, id: String) {
+        workspaceStore.remove(ownerScope, id)
     }
 
     fun getConversationsForWorkspace(
@@ -111,7 +112,7 @@ class ConversationService(
     }
 
     fun isBoundToWorkspace(id: String, title: String): Boolean {
-        val persisted = prefs.getString(conversationWorkspaceKey(id), "")?.trim().orEmpty()
+        val persisted = workspaceStore.resolve(readableOwnerScope(), id)?.trim().orEmpty()
         if (persisted.isNotBlank()) return true
         return WorkspaceNaming.workspaceTagFromTitle(title) != null
     }

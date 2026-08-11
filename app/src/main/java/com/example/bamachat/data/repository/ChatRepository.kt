@@ -51,6 +51,7 @@ class ChatRepository(private val chatDao: ChatDao) {
             personaName = personaName,
             ownerScope = ownerScope
         )
+        check(chatDao.getConversationOwnerScopeById(id) == null) { "Conversation ID already exists" }
         chatDao.insertConversation(conv)
         return conv
     }
@@ -105,8 +106,7 @@ class ChatRepository(private val chatDao: ChatDao) {
         check(chatDao.getConversationByIdAndScope(conversationId, ownerScope) != null) {
             "Message conversation is not owned by the active session"
         }
-        chatDao.insertMessage(
-            ChatMessageEntity(
+        val entity = ChatMessageEntity(
                 id = message.id,
                 conversationId = conversationId,
                 text = message.text,
@@ -117,7 +117,8 @@ class ChatRepository(private val chatDao: ChatDao) {
                 webFetchedAtIso = message.webFetchedAtIso,
                 ownerScope = ownerScope
             )
-        )
+        chatDao.upsertMessageInScope(entity)
+        chatDao.deleteMessageFts(message.id)
         chatDao.insertMessageFts(
             ChatMessageFtsEntity(
                 messageId = message.id,
@@ -346,6 +347,36 @@ class ChatRepository(private val chatDao: ChatDao) {
         }.getOrDefault(emptyList())
     }
 
+    suspend fun getAccountBackupSnapshot(
+        conversationId: String,
+        ownerScope: String
+    ): ScopedConversationSnapshot {
+        require(ChatOwnerScope.isAccount(ownerScope)) { "Backups require an account owner scope" }
+        val conversation = chatDao.getConversationByIdAndScope(conversationId, ownerScope)
+            ?: error("Conversation is not owned by the active account")
+        val messages = chatDao.getMessagesSnapshot(conversationId, ownerScope)
+        check(messages.all { it.ownerScope == ownerScope && it.conversationId == conversationId }) {
+            "Backup snapshot contains mismatched message ownership"
+        }
+        return ScopedConversationSnapshot(conversation, messages)
+    }
+
+    suspend fun restoreAccountBackup(snapshot: ScopedConversationSnapshot, ownerScope: String) {
+        require(ChatOwnerScope.isAccount(ownerScope)) { "Restore requires an account owner scope" }
+        require(snapshot.conversation.ownerScope == ownerScope) { "Restore conversation owner mismatch" }
+        require(snapshot.messages.all { it.ownerScope == ownerScope }) { "Restore message owner mismatch" }
+        chatDao.restoreScopedConversation(snapshot.conversation, snapshot.messages)
+    }
+
+    suspend fun getAllConversationsForWorkspaceMigration(): List<ConversationEntity> =
+        chatDao.getAllConversationsSnapshot()
+
+    suspend fun legacyConversationCount(): Int =
+        chatDao.countConversationsForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED)
+
+    suspend fun legacyMessageCount(): Int =
+        chatDao.countMessagesForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED)
+
     private fun readableScope(ownerScope: String): String {
         require(ChatOwnerScope.isWritable(ownerScope)) { "Legacy and inactive scopes are not readable chat sessions" }
         return ownerScope
@@ -356,3 +387,8 @@ class ChatRepository(private val chatDao: ChatDao) {
         return ownerScope
     }
 }
+
+data class ScopedConversationSnapshot(
+    val conversation: ConversationEntity,
+    val messages: List<ChatMessageEntity>
+)
