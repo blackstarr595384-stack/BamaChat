@@ -9,6 +9,9 @@ import com.example.bamachat.data.github.AndroidGitHubReadOnlyRepositoryGateway
 import com.example.bamachat.data.github.DisabledAgentDraftPrGateway
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatDao
+import com.example.bamachat.data.local.ChatSessionScopeStore
+import com.example.bamachat.data.local.GuestScopeChatCleaner
+import com.example.bamachat.data.local.RoomGuestScopeChatCleaner
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.data.provider.ProviderSecretStorage
 import com.example.bamachat.data.provider.ProviderSecretStore
@@ -77,14 +80,21 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideGuestScopeChatCleaner(cleaner: RoomGuestScopeChatCleaner): GuestScopeChatCleaner = cleaner
+
+    @Provides
+    @Singleton
     fun provideChatCloudSyncGateway(): ChatCloudSyncGateway {
         return ChatCloudSyncGateway()
     }
 
     @Provides
     @Singleton
-    fun provideChatSyncPolicy(prefs: SharedPreferences): ChatSyncPolicy {
-        return ChatSyncPolicy(prefs)
+    fun provideChatSyncPolicy(
+        prefs: SharedPreferences,
+        scopeStore: ChatSessionScopeStore
+    ): ChatSyncPolicy {
+        return ChatSyncPolicy(prefs, scopeStore)
     }
 
     @Provides
@@ -120,9 +130,10 @@ object AppModule {
     @Singleton
     fun provideConversationService(
         repo: ChatRepository,
-        prefs: SharedPreferences
+        prefs: SharedPreferences,
+        scopeStore: ChatSessionScopeStore
     ): ConversationService {
-        return ConversationService(repo, prefs)
+        return ConversationService(repo, prefs, scopeStore)
     }
 
     @Provides

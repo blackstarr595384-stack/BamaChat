@@ -110,6 +110,7 @@ enum class ToolCallStatus { RUNNING, DONE, ERROR }
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     application: Application,
+    private val repo: ChatRepository,
     private val chatSyncCoordinator: AndroidChatSyncCoordinator,
     private val chatProviderSelectionStore: ActiveChatProviderSelectionStore,
     private val chatProviderResolver: ActiveChatProviderResolver,
@@ -374,9 +375,6 @@ class ChatViewModel @Inject constructor(
     private val notificationService: NotificationService
         get() = ServiceLocator.notificationService
 
-    private val repo = ChatRepository(
-        com.example.bamachat.data.local.ChatDatabase.getDatabase(application).chatDao()
-    )
     private val imageUrlResolver = ImageUrlResolver()
 
     val personaViewModel = PersonaViewModel(application)
@@ -516,8 +514,24 @@ class ChatViewModel @Inject constructor(
         prefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
 
         viewModelScope.launch {
-            repo.getAllConversations().collectLatest {
-                _conversations.value = it
+            conversationService.getAllConversations().collectLatest { conversations ->
+                _conversations.value = conversations
+                val currentId = _currentConversationId.value
+                if (currentId != null && conversations.any { it.id == currentId }) {
+                    return@collectLatest
+                }
+                messagesJob?.cancel()
+                _currentConversationId.value = null
+                _messages.value = emptyList()
+                bufferLock.write { allMessagesBuffer.clear() }
+                if (!conversationService.hasWritableSession()) return@collectLatest
+                val storedId = conversationService.getCurrentConversationId()
+                    ?.takeIf { id -> conversations.any { it.id == id } }
+                when {
+                    storedId != null -> switchConversation(storedId)
+                    conversations.isNotEmpty() -> switchConversation(conversations.first().id)
+                    else -> newConversation()
+                }
             }
         }
         viewModelScope.launch {
@@ -545,12 +559,6 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        val lastConvId = conversationService.getCurrentConversationId()
-        if (lastConvId != null) {
-            switchConversation(lastConvId)
-        } else {
-            viewModelScope.launch { newConversation() }
-        }
     }
 
     // ===== Conversations =====
@@ -598,6 +606,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun switchConversation(id: String) {
+        val ownerScope = conversationService.currentOwnerScope()
         _currentConversationId.value = id
         viewModelScope.launch {
             conversationService.switchConversation(id)
@@ -608,7 +617,7 @@ class ChatViewModel @Inject constructor(
         bufferLock.write { allMessagesBuffer.clear() }
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            repo.getMessages(id).collectLatest { items ->
+            repo.getMessages(id, ownerScope).collectLatest { items ->
                 bufferLock.write {
                     allMessagesBuffer.clear()
                     allMessagesBuffer.addAll(items)
@@ -625,16 +634,18 @@ class ChatViewModel @Inject constructor(
     }
 
     fun renameConversation(id: String, newTitle: String) {
+        val ownerScope = conversationService.writableOwnerScope()
         viewModelScope.launch {
             conversationService.rename(id, newTitle)
-            scheduleConversationMetadataSync(id)
+            scheduleConversationMetadataSync(id, ownerScope)
         }
     }
 
     fun deleteConversation(id: String) {
+        val ownerScope = conversationService.writableOwnerScope()
         viewModelScope.launch {
             conversationService.delete(id)
-            scheduleConversationSoftDelete(id)
+            scheduleConversationSoftDelete(id, ownerScope)
             if (_currentConversationId.value == id) {
                 val remaining = _conversations.value.filter { it.id != id }
                 if (remaining.isNotEmpty()) switchConversation(remaining.first().id)
@@ -645,7 +656,8 @@ class ChatViewModel @Inject constructor(
 
     fun clearChat() {
         val convId = _currentConversationId.value ?: return
-        viewModelScope.launch { repo.clearMessages(convId) }
+        val ownerScope = conversationService.writableOwnerScope()
+        viewModelScope.launch { repo.clearMessages(convId, ownerScope) }
     }
 
     private suspend fun saveMessageLocally(
@@ -653,29 +665,41 @@ class ChatViewModel @Inject constructor(
         message: ChatMessage,
         touchConversation: Boolean = true
     ) {
-        repo.saveMessage(conversationId, message, touchConversation = touchConversation)
+        repo.saveMessage(
+            conversationId,
+            message,
+            ownerScope = conversationService.writableOwnerScope(),
+            touchConversation = touchConversation
+        )
     }
 
     private fun scheduleMessageSync(conversationId: String, message: ChatMessage) {
         val activePersonaName = personaViewModel.selectedPersona.value.displayName
+        val ownerScope = conversationService.currentOwnerScope()
         viewModelScope.launch {
-            chatSyncCoordinator.syncMessageAfterLocalSave(conversationId, message, activePersonaName)
-        }
-    }
-
-    private fun scheduleConversationMetadataSync(conversationId: String) {
-        val activePersonaName = personaViewModel.selectedPersona.value.displayName
-        viewModelScope.launch {
-            chatSyncCoordinator.syncConversationMetadataAfterLocalChange(
+            chatSyncCoordinator.syncMessageAfterLocalSave(
                 conversationId,
-                activePersonaName
+                message,
+                activePersonaName,
+                ownerScope
             )
         }
     }
 
-    private fun scheduleConversationSoftDelete(conversationId: String) {
+    private fun scheduleConversationMetadataSync(conversationId: String, ownerScope: String) {
+        val activePersonaName = personaViewModel.selectedPersona.value.displayName
         viewModelScope.launch {
-            chatSyncCoordinator.softDeleteConversationAfterLocalDelete(conversationId)
+            chatSyncCoordinator.syncConversationMetadataAfterLocalChange(
+                conversationId,
+                activePersonaName,
+                ownerScope = ownerScope
+            )
+        }
+    }
+
+    private fun scheduleConversationSoftDelete(conversationId: String, ownerScope: String) {
+        viewModelScope.launch {
+            chatSyncCoordinator.softDeleteConversationAfterLocalDelete(conversationId, ownerScope)
         }
     }
 
@@ -698,10 +722,12 @@ class ChatViewModel @Inject constructor(
             }
             val resolvedConversationId = conversationId ?: return@launch
             saveMessageLocally(resolvedConversationId, message)
-            val current = repo.getConversation(resolvedConversationId)
+            val ownerScope = conversationService.writableOwnerScope()
+            val current = repo.getConversation(resolvedConversationId, ownerScope)
             if (message.isUser && current != null && conversationService.isPlaceholderTitle(current.title)) {
                 repo.renameConversation(
                     resolvedConversationId,
+                    ownerScope,
                     message.text.take(40).ifBlank { "Chat" }
                 )
             }
@@ -790,7 +816,11 @@ class ChatViewModel @Inject constructor(
 
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
-                repo.renameConversation(convId, trimmedText.take(40).ifBlank { "Chat" })
+                repo.renameConversation(
+                    convId,
+                    conversationService.writableOwnerScope(),
+                    trimmedText.take(40).ifBlank { "Chat" }
+                )
             }
             scheduleMessageSync(convId, userMessage)
 
@@ -855,7 +885,11 @@ class ChatViewModel @Inject constructor(
             saveMessageLocally(convId, userMessage)
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
-                repo.renameConversation(convId, text.take(40).ifBlank { "Bild-Chat" })
+                repo.renameConversation(
+                    convId,
+                    conversationService.writableOwnerScope(),
+                    text.take(40).ifBlank { "Bild-Chat" }
+                )
             }
             scheduleMessageSync(convId, userMessage)
             try {
@@ -904,7 +938,11 @@ class ChatViewModel @Inject constructor(
             }
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
-                repo.renameConversation(convId, "Bild: ${prompt.take(30)}")
+                repo.renameConversation(
+                    convId,
+                    conversationService.writableOwnerScope(),
+                    "Bild: ${prompt.take(30)}"
+                )
             }
             _isLoading.value = true
             try {
@@ -1091,7 +1129,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         retryable = true,
                         actionLabel = "Erneut versuchen"
                     )
-                    repo.deleteMessage(assistantMsg.id)
+                    repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
                     return
                 }
 
@@ -1156,7 +1194,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                     retryable = true,
                     actionLabel = "Erneut versuchen"
                 )
-                repo.deleteMessage(assistantMsg.id)
+                repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
                 return
             }
 
@@ -1171,7 +1209,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
         } catch (e: Exception) {
             handleError(e)
-            repo.deleteMessage(assistantMsg.id)
+            repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
         } finally {
             _activeToolCalls.value = emptyList()
             _isStreaming.value = false
@@ -1295,13 +1333,13 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
                     )
                 )
-                repo.deleteMessage(assistantMsg.id)
+                repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             handleError(e)
-            repo.deleteMessage(assistantMsg.id)
+            repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
         } finally {
             _providerFallbackMessage.value = null
         }
@@ -1608,10 +1646,10 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             clearRetryContext()
             notificationService.show("BamaChat", finalText, prefs.getBoolean("notifications_enabled", true))
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            if (assistantCreated) repo.deleteMessage(assistantId)
+            if (assistantCreated) repo.deleteMessage(assistantId, conversationService.writableOwnerScope())
             throw cancelled
         } catch (error: ProviderChatException) {
-            if (assistantCreated) repo.deleteMessage(assistantId)
+            if (assistantCreated) repo.deleteMessage(assistantId, conversationService.writableOwnerScope())
             publishError(ProviderChatErrorMessages.message(error.error), retryable = true, actionLabel = "Erneut versuchen")
         } finally {
             _isStreaming.value = false

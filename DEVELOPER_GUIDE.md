@@ -369,6 +369,12 @@ Tools: `read_file`, `write_file`, `list_directory`, `search_files`, `search_in_f
 
 Hinweis: DB-Migrationen laufen explizit über definierte Room-Migrationsschritte (fail-fast bei fehlender Migration, kein automatischer Daten-Reset).
 
+Chat-Datenbesitz:
+- Neue Conversations und Messages tragen immer denselben Owner-Scope: `account:<Firebase-UID>` oder `guest:<persistente Session-ID>`.
+- Die nichtdestruktive Migration auf Schema 10 erhält vorhandene Chatzeilen als `legacy:unclassified`; diese Altzeilen werden weder automatisch einem Konto/Gast zugeordnet noch zur Cloud hochgeladen.
+- Abfragen und Schreibzugriffe laufen ausschließlich im aktiven Scope. Cloud-Sync akzeptiert nur `account:<aktuelle UID>` und bleibt während eines Gast-zu-Konto-Übergangs gesperrt.
+- Erst nach bestätigter Authentifizierung entfernt eine Room-Transaktion ausschließlich den aktuellen Guest-Scope. Danach wird der Account-Scope aktiviert und Cloud-Sync freigegeben; Abbruch und Fehler lassen Gastdaten unverändert.
+
 ## Release-/Feature-Kommunikation
 - Wenn du ein neues User-Feature einbaust, aktualisiere immer direkt `README.md` und diesen Developer Guide.
 - Für Release-Notizen nutze pro Feature immer dieselbe Kurzform: "Was ist neu?", "Warum ist es hilfreich?", "Wie nutze ich es?".

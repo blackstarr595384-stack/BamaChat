@@ -1,9 +1,11 @@
 package com.example.bamachat.data.cloud
 
 import android.content.SharedPreferences
+import com.example.bamachat.data.local.ChatSessionScopeStore
 
 class ChatSyncPolicy(
-    private val prefs: SharedPreferences
+    private val prefs: SharedPreferences,
+    private val scopeStore: ChatSessionScopeStore
 ) {
     fun preferenceKey(uid: String): String =
         "$KEY_PREFIX${uid.trim()}"
@@ -11,6 +13,7 @@ class ChatSyncPolicy(
     fun isEnabledForUid(uid: String?): Boolean {
         val cleanUid = uid?.trim().orEmpty()
         if (cleanUid.isBlank()) return false
+        if (!scopeStore.isCloudSyncAllowed(cleanUid)) return false
         return prefs.getBoolean(preferenceKey(cleanUid), false)
     }
 

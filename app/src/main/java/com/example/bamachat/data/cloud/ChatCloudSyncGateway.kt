@@ -1,6 +1,7 @@
 package com.example.bamachat.data.cloud
 
 import com.example.bamachat.data.local.ChatMessageEntity
+import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.util.AppTelemetry
 import com.google.firebase.firestore.FirebaseFirestore
@@ -10,6 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+
+internal fun canUploadConversation(uid: String, conversation: ConversationEntity): Boolean =
+    uid.isNotBlank() && ChatOwnerScope.isAccountForUid(conversation.ownerScope, uid)
+
+internal fun canUploadMessage(uid: String, message: ChatMessageEntity): Boolean =
+    uid.isNotBlank() && ChatOwnerScope.isAccountForUid(message.ownerScope, uid)
 
 class ChatCloudSyncGateway(
     firestore: FirebaseFirestore? = null
@@ -33,8 +40,8 @@ class ChatCloudSyncGateway(
         workspaceName: String? = null,
         lastMessagePreview: String = ""
     ): Boolean {
+        if (!canUploadConversation(uid, conversation)) return false
         val db = firestore ?: return false
-        if (uid.isBlank()) return false
         return try {
             val cloud = conversation.toCloudConversation(
                 workspaceName = workspaceName,
@@ -60,8 +67,8 @@ class ChatCloudSyncGateway(
         conversationId: String,
         message: ChatMessageEntity
     ): Boolean {
+        if (!canUploadMessage(uid, message)) return false
         val db = firestore ?: return false
-        if (uid.isBlank()) return false
         return try {
             val cloud = message.toCloudMessage()
             userMessagesCollection(uid, conversationId)
@@ -82,10 +89,11 @@ class ChatCloudSyncGateway(
 
     suspend fun softDeleteConversation(
         uid: String,
-        conversationId: String
+        conversationId: String,
+        ownerScope: String
     ): Boolean {
         val db = firestore ?: return false
-        if (uid.isBlank()) return false
+        if (uid.isBlank() || !ChatOwnerScope.isAccountForUid(ownerScope, uid)) return false
         return try {
             userConversationsCollection(uid)
                 ?.document(conversationId)
@@ -131,10 +139,11 @@ class ChatCloudSyncGateway(
 
     fun softDeleteConversationAsync(
         uid: String,
-        conversationId: String
+        conversationId: String,
+        ownerScope: String
     ) {
         scope.launch {
-            softDeleteConversation(uid, conversationId)
+            softDeleteConversation(uid, conversationId, ownerScope)
         }
     }
 }

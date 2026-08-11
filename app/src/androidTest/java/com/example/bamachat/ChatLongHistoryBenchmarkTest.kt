@@ -10,6 +10,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatMessageEntity
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.ConversationEntity
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
@@ -36,10 +37,16 @@ class ChatLongHistoryBenchmarkTest {
         val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
         val benchmarkConversationId = "benchmark-long-history-1200"
         val preferences = targetContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        val previousConversationId = preferences.getString("current_conversation_id", null)
+        val previousActiveScope = preferences.getString("chat_active_owner_scope", null)
+        val previousGuestScope = preferences.getString("chat_guest_owner_scope", null)
+        val previousGuestMode = preferences.getBoolean("guest_mode_enabled", false)
+        val benchmarkScope = ChatSessionScopeStore(preferences).startNewGuestSession()
+        val currentConversationKey = ChatSessionScopeStore.currentConversationKey(benchmarkScope)
+        val previousConversationId = preferences.getString(currentConversationKey, null)
+        preferences.edit().putBoolean("guest_mode_enabled", true).commit()
 
         try {
-            seedConversation(targetContext, benchmarkConversationId, 1_200)
+            seedConversation(targetContext, benchmarkConversationId, benchmarkScope, 1_200)
 
             device.pressHome()
             SystemClock.sleep(400)
@@ -79,22 +86,32 @@ class ChatLongHistoryBenchmarkTest {
             assertTrue("Jank-Wert konnte nicht gelesen werden", jankPercent >= 0f)
         } finally {
             device.pressHome()
-            cleanupBenchmarkConversation(targetContext, benchmarkConversationId)
+            cleanupBenchmarkConversation(targetContext, benchmarkConversationId, benchmarkScope)
             preferences.edit().apply {
                 if (previousConversationId == null) {
-                    remove("current_conversation_id")
+                    remove(currentConversationKey)
                 } else {
-                    putString("current_conversation_id", previousConversationId)
+                    putString(currentConversationKey, previousConversationId)
                 }
+                if (previousActiveScope == null) remove("chat_active_owner_scope")
+                else putString("chat_active_owner_scope", previousActiveScope)
+                if (previousGuestScope == null) remove("chat_guest_owner_scope")
+                else putString("chat_guest_owner_scope", previousGuestScope)
+                putBoolean("guest_mode_enabled", previousGuestMode)
             }.commit()
         }
     }
 
-    private suspend fun seedConversation(context: Context, conversationId: String, messageCount: Int) {
+    private suspend fun seedConversation(
+        context: Context,
+        conversationId: String,
+        ownerScope: String,
+        messageCount: Int
+    ) {
         val dao = ChatDatabase.getDatabase(context).chatDao()
-        dao.deleteMessagesForConversation(conversationId)
+        dao.deleteMessagesForConversation(conversationId, ownerScope)
         dao.deleteMessagesFtsForConversation(conversationId)
-        dao.deleteConversation(conversationId)
+        dao.deleteConversation(conversationId, ownerScope)
 
         val now = System.currentTimeMillis()
         dao.insertConversation(
@@ -103,7 +120,8 @@ class ChatLongHistoryBenchmarkTest {
                 title = "Benchmark Chat",
                 createdAt = now,
                 updatedAt = now,
-                personaName = "ASSISTANT"
+                personaName = "ASSISTANT",
+                ownerScope = ownerScope
             )
         )
 
@@ -119,14 +137,15 @@ class ChatLongHistoryBenchmarkTest {
                         "Assistant message $index - benchmark response with context and detail."
                     },
                     isUser = index % 2 == 0,
-                    timestamp = baseTs + index * 1_000L
+                    timestamp = baseTs + index * 1_000L,
+                    ownerScope = ownerScope
                 )
             )
         }
 
         context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .edit()
-            .putString("current_conversation_id", conversationId)
+            .putString(ChatSessionScopeStore.currentConversationKey(ownerScope), conversationId)
             .apply()
     }
 
@@ -138,11 +157,11 @@ class ChatLongHistoryBenchmarkTest {
         context.startActivity(launchIntent)
     }
 
-    private suspend fun cleanupBenchmarkConversation(context: Context, conversationId: String) {
+    private suspend fun cleanupBenchmarkConversation(context: Context, conversationId: String, ownerScope: String) {
         val dao = ChatDatabase.getDatabase(context).chatDao()
-        dao.deleteMessagesForConversation(conversationId)
+        dao.deleteMessagesForConversation(conversationId, ownerScope)
         dao.deleteMessagesFtsForConversation(conversationId)
-        dao.deleteConversation(conversationId)
+        dao.deleteConversation(conversationId, ownerScope)
     }
 
     private fun clickAnyText(vararg values: String): Boolean {

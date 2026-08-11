@@ -3,7 +3,7 @@ package com.example.bamachat.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.bamachat.data.local.ChatDatabase
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.MessageFtsResult
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.util.AppTelemetry
@@ -29,9 +29,10 @@ enum class SearchSortBy {
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    application: Application
+    application: Application,
+    private val repo: ChatRepository,
+    private val scopeStore: ChatSessionScopeStore
 ) : AndroidViewModel(application) {
-    private val repo = ChatRepository(ChatDatabase.getDatabase(application).chatDao())
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query
@@ -115,7 +116,7 @@ class SearchViewModel @Inject constructor(
         searchJob = viewModelScope.launch {
             delay(250) // Debounce
             try {
-                var results = repo.searchMessages(q, limit = 50)
+                var results = repo.searchMessages(q, scopeStore.currentScope(), limit = 50)
 
                 // Apply filters
                 results = results.filter { result ->

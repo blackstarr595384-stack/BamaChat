@@ -18,14 +18,22 @@ data class PersonaFeedbackStats(
     val unhelpfulCount: Int
 )
 
+data class ScopedChatCleanupResult(
+    val conversationIds: List<String>,
+    val deletedMessages: Int,
+    val deletedConversations: Int,
+    val deletedFtsRows: Int,
+    val deletedLinkedReferences: Int
+)
+
 @Dao
 interface ChatDao {
     // ===== Conversations =====
-    @Query("SELECT * FROM conversations ORDER BY updatedAt DESC")
-    fun getAllConversations(): Flow<List<ConversationEntity>>
+    @Query("SELECT * FROM conversations WHERE ownerScope = :ownerScope ORDER BY updatedAt DESC")
+    fun getConversationsForScope(ownerScope: String): Flow<List<ConversationEntity>>
 
-    @Query("SELECT * FROM conversations WHERE id = :id LIMIT 1")
-    suspend fun getConversationById(id: String): ConversationEntity?
+    @Query("SELECT * FROM conversations WHERE id = :id AND ownerScope = :ownerScope LIMIT 1")
+    suspend fun getConversationByIdAndScope(id: String, ownerScope: String): ConversationEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertConversation(conversation: ConversationEntity)
@@ -33,34 +41,37 @@ interface ChatDao {
     @Update
     suspend fun updateConversation(conversation: ConversationEntity)
 
-    @Query("UPDATE conversations SET title = :title, updatedAt = :updatedAt WHERE id = :id")
-    suspend fun renameConversation(id: String, title: String, updatedAt: Long)
+    @Query("UPDATE conversations SET title = :title, updatedAt = :updatedAt WHERE id = :id AND ownerScope = :ownerScope")
+    suspend fun renameConversation(id: String, ownerScope: String, title: String, updatedAt: Long): Int
 
-    @Query("UPDATE conversations SET updatedAt = :updatedAt WHERE id = :id")
-    suspend fun touchConversation(id: String, updatedAt: Long)
+    @Query("UPDATE conversations SET updatedAt = :updatedAt WHERE id = :id AND ownerScope = :ownerScope")
+    suspend fun touchConversation(id: String, ownerScope: String, updatedAt: Long): Int
 
-    @Query("UPDATE conversations SET personaName = :personaName WHERE id = :id")
-    suspend fun updateConversationPersonaName(id: String, personaName: String)
+    @Query("UPDATE conversations SET personaName = :personaName WHERE id = :id AND ownerScope = :ownerScope")
+    suspend fun updateConversationPersonaName(id: String, ownerScope: String, personaName: String): Int
 
-    @Query("DELETE FROM conversations WHERE id = :id")
-    suspend fun deleteConversation(id: String)
+    @Query("DELETE FROM conversations WHERE id = :id AND ownerScope = :ownerScope")
+    suspend fun deleteConversation(id: String, ownerScope: String): Int
 
     @Query("DELETE FROM conversations")
     suspend fun deleteAllConversations()
 
     // ===== Messages =====
-    @Query("SELECT * FROM chat_messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
-    fun getMessagesForConversation(conversationId: String): Flow<List<ChatMessageEntity>>
+    @Query("SELECT * FROM chat_messages WHERE conversationId = :conversationId AND ownerScope = :ownerScope ORDER BY timestamp ASC")
+    fun getMessagesForConversationAndScope(conversationId: String, ownerScope: String): Flow<List<ChatMessageEntity>>
+
+    @Query("SELECT * FROM chat_messages WHERE id = :messageId AND ownerScope = :ownerScope LIMIT 1")
+    suspend fun getMessageByIdAndScope(messageId: String, ownerScope: String): ChatMessageEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: ChatMessageEntity)
 
-    @Query("DELETE FROM chat_messages WHERE id = :messageId")
-    suspend fun deleteMessage(messageId: String)
+    @Query("DELETE FROM chat_messages WHERE id = :messageId AND ownerScope = :ownerScope")
+    suspend fun deleteMessage(messageId: String, ownerScope: String): Int
 
     // ===== FTS4 Message Search =====
-    @Query("SELECT rowid, message_id, conversation_id, text, is_user, timestamp, snippet(chat_messages_fts, '<b>', '</b>', '...', -1, 20) AS snippet FROM chat_messages_fts WHERE chat_messages_fts MATCH :query ORDER BY rowid DESC LIMIT :limit")
-    suspend fun searchMessagesFts(query: String, limit: Int = 30): List<MessageFtsResult>
+    @Query("SELECT f.rowid, f.message_id, f.conversation_id, f.text, f.is_user, f.timestamp, snippet(chat_messages_fts, '<b>', '</b>', '...', -1, 20) AS snippet FROM chat_messages_fts AS f INNER JOIN chat_messages AS m ON m.id = f.message_id AND m.conversationId = f.conversation_id WHERE chat_messages_fts MATCH :query AND m.ownerScope = :ownerScope ORDER BY f.rowid DESC LIMIT :limit")
+    suspend fun searchMessagesFtsForScope(query: String, ownerScope: String, limit: Int = 30): List<MessageFtsResult>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessageFts(fts: ChatMessageFtsEntity)
@@ -74,11 +85,52 @@ interface ChatDao {
     @Query("DELETE FROM chat_messages_fts")
     suspend fun deleteAllMessagesFts()
 
-    @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
-    suspend fun deleteMessagesForConversation(conversationId: String)
+    @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId AND ownerScope = :ownerScope")
+    suspend fun deleteMessagesForConversation(conversationId: String, ownerScope: String): Int
 
     @Query("DELETE FROM chat_messages")
     suspend fun deleteAllMessages()
+
+    @Query("SELECT id FROM conversations WHERE ownerScope = :ownerScope")
+    suspend fun getConversationIdsForScope(ownerScope: String): List<String>
+
+    @Query("DELETE FROM chat_messages_fts WHERE conversation_id IN (SELECT id FROM conversations WHERE ownerScope = :ownerScope)")
+    suspend fun deleteMessageFtsForScope(ownerScope: String): Int
+
+    @Query("DELETE FROM chat_messages WHERE ownerScope = :ownerScope")
+    suspend fun deleteMessagesForScope(ownerScope: String): Int
+
+    @Query("DELETE FROM conversations WHERE ownerScope = :ownerScope")
+    suspend fun deleteConversationsForScope(ownerScope: String): Int
+
+    @Query("DELETE FROM persona_memory WHERE sourceMessageId IN (SELECT id FROM chat_messages WHERE ownerScope = :ownerScope)")
+    suspend fun deletePersonaMemoryForMessageScope(ownerScope: String): Int
+
+    @Query("DELETE FROM persona_feedback WHERE messageId IN (SELECT id FROM chat_messages WHERE ownerScope = :ownerScope)")
+    suspend fun deletePersonaFeedbackForMessageScope(ownerScope: String): Int
+
+    @Query("DELETE FROM user_memory_facts WHERE sourceMessageId IN (SELECT id FROM chat_messages WHERE ownerScope = :ownerScope)")
+    suspend fun deleteUserMemoryFactsForMessageScope(ownerScope: String): Int
+
+    @Transaction
+    suspend fun deleteChatDataForScope(ownerScope: String): ScopedChatCleanupResult {
+        require(ChatOwnerScope.isGuest(ownerScope)) { "Only guest scopes can be selectively cleared" }
+        val conversationIds = getConversationIdsForScope(ownerScope)
+        val deletedLinkedReferences =
+            deletePersonaMemoryForMessageScope(ownerScope) +
+                deletePersonaFeedbackForMessageScope(ownerScope) +
+                deleteUserMemoryFactsForMessageScope(ownerScope)
+        val deletedFtsRows = deleteMessageFtsForScope(ownerScope)
+        val deletedMessages = deleteMessagesForScope(ownerScope)
+        val deletedConversations = deleteConversationsForScope(ownerScope)
+        return ScopedChatCleanupResult(
+            conversationIds = conversationIds,
+            deletedMessages = deletedMessages,
+            deletedConversations = deletedConversations,
+            deletedFtsRows = deletedFtsRows,
+            deletedLinkedReferences = deletedLinkedReferences
+        )
+    }
 
     @Query("DELETE FROM persona_memory")
     suspend fun deleteAllPersonaMemory()

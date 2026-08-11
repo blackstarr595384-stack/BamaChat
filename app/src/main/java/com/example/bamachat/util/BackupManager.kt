@@ -2,6 +2,7 @@ package com.example.bamachat.util
 
 import android.content.Context
 import com.example.bamachat.data.model.ChatMessage
+import com.example.bamachat.data.local.ChatOwnerScope
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
@@ -49,8 +50,12 @@ object BackupManager {
     suspend fun backupToCloud(
         conversationId: String,
         messages: List<ChatMessage>,
-        userId: String
+        userId: String,
+        ownerScope: String
     ): Result<String> {
+        if (!ChatOwnerScope.isAccountForUid(ownerScope, userId)) {
+            return Result.failure(IllegalStateException("Only account-owned chats can be backed up"))
+        }
         return try {
             val db = FirebaseFirestore.getInstance()
             val backup = mapOf(

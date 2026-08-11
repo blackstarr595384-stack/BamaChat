@@ -1,6 +1,7 @@
 package com.example.bamachat.data.cloud
 
 import com.example.bamachat.data.local.ChatMessageEntity
+import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ConversationEntity
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.model.ConversationPersonaMetadata
@@ -14,6 +15,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+
+internal fun isCloudSyncEligible(
+    uid: String,
+    ownerScope: String,
+    policyEnabled: Boolean
+): Boolean = policyEnabled && ChatOwnerScope.isAccountForUid(ownerScope, uid)
 
 @Singleton
 class AndroidChatSyncCoordinator @Inject constructor(
@@ -43,15 +50,16 @@ class AndroidChatSyncCoordinator @Inject constructor(
     suspend fun syncMessageAfterLocalSave(
         conversationId: String,
         message: ChatMessage,
-        activePersonaName: String?
+        activePersonaName: String?,
+        ownerScope: String
     ): SyncResult {
         val uid = currentUidOrNull() ?: return SyncResult.Disabled
-        if (!policy.isEnabledForUid(uid)) return SyncResult.Disabled
+        if (!isCloudSyncEligible(uid, ownerScope, policy.isEnabledForUid(uid))) return SyncResult.Disabled
         _runtimeStatus.value = ChatSyncRuntimeStatus(uid, ChatSyncState.Pending)
 
-        val conversation = repository.getConversation(conversationId) ?: return SyncResult.Pending
-        val cloudConversation = conversation.withResolvedPersona(activePersonaName)
-        val messageEntity = message.toEntity(conversationId)
+        val conversation = repository.getConversation(conversationId, ownerScope) ?: return SyncResult.Pending
+        val cloudConversation = conversation.withResolvedPersona(activePersonaName, ownerScope)
+        val messageEntity = message.toEntity(conversationId, ownerScope)
         val preview = safePreview(message.text)
 
         val conversationPushed = gateway.pushConversation(
@@ -88,16 +96,17 @@ class AndroidChatSyncCoordinator @Inject constructor(
     suspend fun syncConversationMetadataAfterLocalChange(
         conversationId: String,
         activePersonaName: String?,
+        ownerScope: String,
         lastMessagePreview: String? = null
     ): SyncResult {
         val uid = currentUidOrNull() ?: return SyncResult.Disabled
-        if (!policy.isEnabledForUid(uid)) return SyncResult.Disabled
+        if (!isCloudSyncEligible(uid, ownerScope, policy.isEnabledForUid(uid))) return SyncResult.Disabled
         _runtimeStatus.value = ChatSyncRuntimeStatus(uid, ChatSyncState.Pending)
 
-        val conversation = repository.getConversation(conversationId) ?: return SyncResult.Pending
-        val cloudConversation = conversation.withResolvedPersona(activePersonaName)
+        val conversation = repository.getConversation(conversationId, ownerScope) ?: return SyncResult.Pending
+        val cloudConversation = conversation.withResolvedPersona(activePersonaName, ownerScope)
         val preview = lastMessagePreview
-            ?: repository.getMessages(conversationId).first().lastOrNull()?.text.orEmpty()
+            ?: repository.getMessages(conversationId, ownerScope).first().lastOrNull()?.text.orEmpty()
         val success = gateway.pushConversation(
             uid = uid,
             conversation = cloudConversation,
@@ -111,12 +120,15 @@ class AndroidChatSyncCoordinator @Inject constructor(
         return if (success) SyncResult.Success else SyncResult.Failed
     }
 
-    suspend fun softDeleteConversationAfterLocalDelete(conversationId: String): SyncResult {
+    suspend fun softDeleteConversationAfterLocalDelete(
+        conversationId: String,
+        ownerScope: String
+    ): SyncResult {
         val uid = currentUidOrNull() ?: return SyncResult.Disabled
-        if (!policy.isEnabledForUid(uid)) return SyncResult.Disabled
+        if (!isCloudSyncEligible(uid, ownerScope, policy.isEnabledForUid(uid))) return SyncResult.Disabled
         _runtimeStatus.value = ChatSyncRuntimeStatus(uid, ChatSyncState.Pending)
 
-        val success = gateway.softDeleteConversation(uid, conversationId)
+        val success = gateway.softDeleteConversation(uid, conversationId, ownerScope)
         _runtimeStatus.value = ChatSyncRuntimeStatus(
             uid,
             if (success) ChatSyncState.Success else ChatSyncState.Failed
@@ -139,16 +151,20 @@ class AndroidChatSyncCoordinator @Inject constructor(
         }
 
     private suspend fun ConversationEntity.withResolvedPersona(
-        activePersonaName: String?
+        activePersonaName: String?,
+        ownerScope: String
     ): ConversationEntity {
         val resolvedPersonaName = ConversationPersonaMetadata.resolve(personaName, activePersonaName)
         if (resolvedPersonaName != personaName) {
-            repository.updateConversationPersonaName(id, resolvedPersonaName)
+            repository.updateConversationPersonaName(id, ownerScope, resolvedPersonaName)
         }
         return copy(personaName = resolvedPersonaName)
     }
 
-    private fun ChatMessage.toEntity(conversationId: String): ChatMessageEntity =
+    private fun ChatMessage.toEntity(
+        conversationId: String,
+        ownerScope: String
+    ): ChatMessageEntity =
         ChatMessageEntity(
             id = id,
             conversationId = conversationId,
@@ -157,7 +173,8 @@ class AndroidChatSyncCoordinator @Inject constructor(
             timestamp = timestamp,
             imageUrl = imageUrl,
             sourcesJson = null,
-            webFetchedAtIso = null
+            webFetchedAtIso = null,
+            ownerScope = ownerScope
         )
 
     companion object {

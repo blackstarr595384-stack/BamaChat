@@ -2,42 +2,56 @@ package com.example.bamachat.service
 
 import android.content.SharedPreferences
 import com.example.bamachat.data.local.ConversationEntity
+import com.example.bamachat.data.local.ChatOwnerScope
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.shared.core.WorkspaceNaming
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import java.util.UUID
 
 class ConversationService(
     private val repo: ChatRepository,
-    private val prefs: SharedPreferences
+    private val prefs: SharedPreferences,
+    private val scopeStore: ChatSessionScopeStore
 ) {
-    fun getAllConversations(): Flow<List<ConversationEntity>> = repo.getAllConversations()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun getAllConversations(): Flow<List<ConversationEntity>> =
+        scopeStore.activeScope.flatMapLatest { ownerScope ->
+            if (ChatOwnerScope.isWritable(ownerScope)) repo.getAllConversations(ownerScope)
+            else flowOf(emptyList())
+        }
 
     suspend fun createConversation(personaName: String, workspaceName: String): ConversationEntity {
         val id = UUID.randomUUID().toString()
         val title = newConversationTitle(workspaceName)
-        val conv = repo.createConversation(id, title, personaName)
+        val conv = repo.createConversation(id, title, personaName, writableOwnerScope())
         bindConversationToWorkspace(id, workspaceName)
         return conv
     }
 
     suspend fun switchConversation(id: String) {
-        prefs.edit().putString(CURRENT_CONVERSATION_KEY, id).apply()
+        check(repo.getConversation(id, readableOwnerScope()) != null) {
+            "Conversation is not visible in the active session"
+        }
+        prefs.edit().putString(currentConversationKey(), id).apply()
     }
 
-    fun getCurrentConversationId(): String? = prefs.getString(CURRENT_CONVERSATION_KEY, null)
+    fun getCurrentConversationId(): String? = prefs.getString(currentConversationKey(), null)
 
     suspend fun rename(id: String, newTitle: String) {
-        repo.renameConversation(id, newTitle.ifBlank { "Chat" })
+        repo.renameConversation(id, writableOwnerScope(), newTitle.ifBlank { "Chat" })
     }
 
     suspend fun delete(id: String) {
-        repo.deleteConversation(id)
+        repo.deleteConversation(id, writableOwnerScope())
         removeConversationWorkspaceBinding(id)
     }
 
     suspend fun touch(id: String) {
-        repo.touchConversation(id)
+        repo.touchConversation(id, writableOwnerScope())
     }
 
     fun newConversationTitle(workspaceName: String): String {
@@ -104,7 +118,7 @@ class ConversationService(
 
     suspend fun createNormalConversation(personaName: String): ConversationEntity {
         val id = UUID.randomUUID().toString()
-        val conv = repo.createConversation(id, "Neuer Chat", personaName)
+        val conv = repo.createConversation(id, "Neuer Chat", personaName, writableOwnerScope())
         return conv
     }
 
@@ -137,7 +151,18 @@ class ConversationService(
         }
     }
 
-    private companion object {
-        private const val CURRENT_CONVERSATION_KEY = "current_conversation_id"
+    fun currentOwnerScope(): String = readableOwnerScope()
+
+    fun writableOwnerScope(): String = scopeStore.requireWritableActiveScope()
+
+    fun hasWritableSession(): Boolean =
+        ChatOwnerScope.isWritable(scopeStore.currentScope()) && !scopeStore.isAccountTransitionPending()
+
+    private fun readableOwnerScope(): String = scopeStore.currentScope().also { ownerScope ->
+        check(ChatOwnerScope.isWritable(ownerScope)) { "No readable chat session is active" }
     }
+
+    private fun currentConversationKey(): String =
+        ChatSessionScopeStore.currentConversationKey(readableOwnerScope())
+
 }

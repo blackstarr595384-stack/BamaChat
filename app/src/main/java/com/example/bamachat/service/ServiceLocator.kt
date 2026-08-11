@@ -3,6 +3,7 @@ package com.example.bamachat.service
 import android.app.Application
 import android.content.Context
 import com.example.bamachat.data.local.ChatDatabase
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.ui.viewmodel.ApiManager
 
@@ -39,7 +40,7 @@ object ServiceLocator {
         val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
         apiManager = ApiManager(application)
-        conversationService = ConversationService(chatRepository, prefs)
+        conversationService = ConversationService(chatRepository, prefs, ChatSessionScopeStore(prefs))
         knowledgeService = KnowledgeService(chatRepository, application)
         mediaService = MediaService(application, apiManager, knowledgeService)
         chatEngine = ChatEngine(apiManager, application)

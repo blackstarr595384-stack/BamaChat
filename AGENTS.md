@@ -9,7 +9,7 @@
 - `ChatViewModel` ist der Orchestrierungskern: AI-Provider-Routing, Streaming, Persona-Logik, Quotas/Paywall, Benachrichtigungen, multimodaler Import und Cloud-Persona-Sync.
 - Für installierbare Workspace-Plugins gibt es einen separaten Flow aus `ExtensionManagerViewModel` + `ExtensionManagerScreen` + `util/WorkspaceExtensions.kt` (Katalog, Capabilities, Persistenz); aktive Extensions werden im `ChatViewModel` turn-basiert in den Runtime-Kontext injiziert. Zusätzlich steuert die Composer-Quick-Action (`Auto`/`Research`/`Code Review`/`Plan`) den Extension-Modus pro Nachricht.
 - GitHub Intelligence (`data/github/*`, `ui/viewmodel/GitHubIntelligenceViewModel.kt`, `ui/screen/GitHubIntelligenceScreen.kt`, `shared/core/github/*`) ist strikt read-only: nur das öffentliche Allowlist-Repository `blackstarr595384-stack/BamaChat`, nur GET ohne Auth-Header, ausschließlich reguläre Git-Blobs mit SHA-Abgleich, Credential-Redaction, begrenzte Textsnapshots und feste Untrusted-Content-Grenzen.
-- Lokale Persistenz verwendet Room (`data/local/*`) über `ChatRepository`; AI-Netzwerkaufrufe werden absichtlich in `ChatViewModel` durchgeführt (siehe Repo-Kommentar in `ChatRepository.kt`).
+- Lokale Chat-Persistenz verwendet Room (`data/local/*`) über `ChatRepository` und ist immer nach `account:<Firebase-UID>` oder `guest:<Session-ID>` getrennt; migrierte Altzeilen bleiben als `legacy:unclassified` erhalten und sind weder einer Sitzung sichtbar noch Cloud-Sync-fähig. AI-Netzwerkaufrufe werden absichtlich in `ChatViewModel` durchgeführt (siehe Repo-Kommentar in `ChatRepository.kt`).
 - Cloud-Status ist aufgeteilt:
   - Benutzereigene Dokumente unter `users/{uid}` (+ `persona_profiles`, `persona_prompts`, `persona_training_examples`).
   - Realtime-Kollaboration unter `collab_sessions/{sessionId}` mit `messages` und `presence` Unterkollektionen.
@@ -36,7 +36,7 @@
 - SharedPreferences (`"settings"`) ist ein wichtiger Konfigurationsbus (API-Schlüssel, Provider-Auswahl, Persona-Tuning, Billing-Flags).
 - Benutzerseitige Fehler/Status werden über ViewModel-Status (`_errorMessage`, `_statusMessage`) angezeigt und meist deutscher Text.
 - Room DB nutzt explizite Migrationen in `ChatDatabase` (kein `fallbackToDestructiveMigration`); fehlende Migrationen schlagen bewusst fehl statt lokale Daten zu loeschen.
-- Gastdaten-Bereinigung ist explizit in `LocalDataSanitizer.clearGuestSessionData`; füge neue private Schlüssel dort hinzu, falls nötig.
+- Der Gast-zu-Konto-Übergang löscht ausschließlich den aktuellen Guest-Scope über `GuestChatTransitionCoordinator`; `LocalDataSanitizer.clearGuestSessionData` bleibt vollständigen, ausdrücklich ausgelösten lokalen Datenlöschungen vorbehalten und darf nicht im Auth-Erfolgspfad verwendet werden.
 - Plugin- und Dependency-Versionen liegen zentral in `gradle/libs.versions.toml`; maschinenbezogene Gradle-/AGP-Overrides bleiben in `%USERPROFILE%/.gradle/gradle.properties` oder `local.properties`.
 - Lint-Ausnahmen liegen bewusst in `app/lint.xml`: `AndroidGradlePluginVersion` ist wegen Toolchain-Pin auf AGP 8.7.3 ignoriert; `TrustAllX509TrustManager` nur fuer externes `bcpkix`-Jar (pdfbox-Transitiv).
 
