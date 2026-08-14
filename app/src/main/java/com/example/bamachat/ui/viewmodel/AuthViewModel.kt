@@ -10,6 +10,7 @@ import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.auth.AccountAuthenticationCoordinator
 import com.example.bamachat.data.local.AccountAuthTransitionRunner
 import com.example.bamachat.data.local.AccountTransitionResult
+import com.example.bamachat.data.local.PendingAccountUidConflictException
 import com.example.bamachat.data.model.UserProfile
 import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.LocalDataSanitizer
@@ -83,7 +84,6 @@ class AuthViewModel @Inject constructor(
         .getOrNull()
     private val _firebaseUser = MutableStateFlow<FirebaseUser?>(
         run {
-            auth?.currentUser?.uid?.let(accountAuthTransitionRunner::prepareAuthenticatedProcessResume)
             chatSessionScopeStore.reconcile(
                 firebaseUid = auth?.currentUser?.uid,
                 guestModeEnabled = prefs.getBoolean(KEY_GUEST_MODE, false)
@@ -131,6 +131,9 @@ class AuthViewModel @Inject constructor(
     }
 
     init {
+        if (chatSessionScopeStore.consumeSecurityConflictNotice()) {
+            _errorMessage.value = "Die Anmeldung konnte nicht sicher fortgesetzt werden. Bitte erneut anmelden."
+        }
         if (auth == null) {
             AppTelemetry.logEvent("firebase_auth_unavailable")
             if (!_isGuestMode.value) {
@@ -243,7 +246,6 @@ class AuthViewModel @Inject constructor(
         runCatching {
             chatSessionScopeStore.startNewGuestSession()
             setGuestMode(true)
-            AppTelemetry.setUserId("guest")
             AppTelemetry.logEvent("continue_as_guest")
             refreshAuthState()
         }.onFailure {
@@ -612,9 +614,14 @@ class AuthViewModel @Inject constructor(
 
     private suspend fun handleFirebaseAuthState(user: FirebaseUser?) {
         if (user == null) {
-            if (chatSessionScopeStore.canCancelAccountTransition()) {
-                runCatching { chatSessionScopeStore.cancelAccountTransition() }
-                    .onFailure { AppTelemetry.logError("guest_account_transition_resume_cancel", it) }
+            if (chatSessionScopeStore.isAccountTransitionPending()) {
+                runCatching {
+                    if (chatSessionScopeStore.canCancelAccountTransition()) {
+                        chatSessionScopeStore.cancelAccountTransition()
+                    } else {
+                        chatSessionScopeStore.resetConflictingTransitionAfterSignOut()
+                    }
+                }.onFailure { AppTelemetry.logError("guest_account_transition_resume_cancel", it) }
             }
             _firebaseUser.value = null
             _profile.value = null
@@ -657,7 +664,6 @@ class AuthViewModel @Inject constructor(
         return try {
                 setGuestMode(false)
                 _firebaseUser.value = authenticatedUser
-                AppTelemetry.setUserId(authenticatedUser.uid)
                 AppTelemetry.logEvent(
                     "auth_state_signed_in",
                     mapOf(
@@ -682,12 +688,22 @@ class AuthViewModel @Inject constructor(
             }
     }
 
-    private fun handleAuthenticatedTransitionError(error: Throwable) {
+    private suspend fun handleAuthenticatedTransitionError(error: Throwable) {
         AppTelemetry.logError("guest_account_transition_cleanup", error)
+        if (error is PendingAccountUidConflictException) {
+            runCatching { auth?.signOut() }
+            if (auth?.currentUser == null && chatSessionScopeStore.isAccountTransitionPending()) {
+                runCatching { chatSessionScopeStore.resetConflictingTransitionAfterSignOut() }
+                    .onFailure { AppTelemetry.logError("auth_uid_conflict_reset", it) }
+            }
+            _errorMessage.value = "Die Anmeldung konnte nicht sicher fortgesetzt werden. Bitte erneut anmelden."
+        }
         _firebaseUser.value = null
         setGuestMode(chatSessionScopeStore.pendingGuestScope() != null)
-        _errorMessage.value =
-            "Konto ist bestätigt, aber lokale Chats konnten nicht sicher zugeordnet werden. Bitte erneut versuchen."
+        if (error !is PendingAccountUidConflictException) {
+            _errorMessage.value =
+                "Konto ist bestätigt, aber lokale Chats konnten nicht sicher zugeordnet werden. Bitte erneut versuchen."
+        }
         refreshAuthState()
     }
 

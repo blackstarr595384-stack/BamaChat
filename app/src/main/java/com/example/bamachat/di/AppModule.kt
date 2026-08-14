@@ -38,8 +38,7 @@ import com.example.bamachat.shared.core.github.RepositoryContextBuilder
 import com.example.bamachat.ui.viewmodel.ApiManager
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
-import com.example.bamachat.util.ChatBackupCloudStore
-import com.example.bamachat.util.FirestoreChatBackupCloudStore
+import com.example.bamachat.data.cloud.AccountCloudOperationGate
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -97,10 +96,6 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideChatBackupCloudStore(store: FirestoreChatBackupCloudStore): ChatBackupCloudStore = store
-
-    @Provides
-    @Singleton
     fun provideAuthenticatedUidProvider(
         provider: FirebaseAuthenticatedUidProvider
     ): AuthenticatedUidProvider = provider
@@ -115,9 +110,15 @@ object AppModule {
     @Singleton
     fun provideChatCloudSyncGateway(
         scopeStore: ChatSessionScopeStore,
-        uidProvider: AuthenticatedUidProvider
+        uidProvider: AuthenticatedUidProvider,
+        operationGate: AccountCloudOperationGate
     ): ChatCloudSyncGateway {
-        return ChatCloudSyncGateway(scopeStore, uidProvider)
+        return ChatCloudSyncGateway(
+            scopeStore,
+            uidProvider,
+            operationGate,
+            com.example.bamachat.data.cloud.FirestoreChatCloudWriter()
+        )
     }
 
     @Provides

@@ -1,5 +1,6 @@
 package com.example.bamachat.data.local
 
+import com.example.bamachat.data.cloud.AccountCloudOperationGate
 import com.example.bamachat.data.repository.ChatRepository
 import androidx.room.withTransaction
 import javax.inject.Inject
@@ -53,7 +54,8 @@ class GuestChatTransitionCoordinator @Inject constructor(
     private val cleaner: GuestScopeChatCleaner,
     private val legacyClaimer: LegacyScopeClaimer,
     private val repository: ChatRepository,
-    private val workspaceStore: ConversationWorkspaceStore
+    private val workspaceStore: ConversationWorkspaceStore,
+    private val cloudOperationGate: AccountCloudOperationGate = AccountCloudOperationGate()
 ) {
     private val transitionMutex = Mutex()
 
@@ -72,7 +74,9 @@ class GuestChatTransitionCoordinator @Inject constructor(
                     legacyClaim = LegacyScopeClaimResult(emptyList(), 0, 0)
                 )
             }
-            scopeStore.beginAuthenticatedTransition(uid)
+            cloudOperationGate.withTransitionStart {
+                scopeStore.beginAuthenticatedTransition(uid)
+            }
 
             var cleanup: ScopedChatCleanupResult? = null
             if (scopeStore.transitionPhase().ordinal < AccountTransitionPhase.GUEST_CLEANUP_COMPLETE.ordinal) {

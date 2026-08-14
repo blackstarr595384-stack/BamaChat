@@ -1,5 +1,7 @@
 package com.example.bamachat.util
 
+import com.example.bamachat.data.cloud.AccountCloudOperationGate
+import com.example.bamachat.data.cloud.AccountCloudOperationLease
 import com.example.bamachat.data.cloud.AuthenticatedUidProvider
 import com.example.bamachat.data.local.ChatMessageEntity
 import com.example.bamachat.data.local.ChatOwnerScope
@@ -13,97 +15,117 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.tasks.await
 
-data class AccountChatBackup(
+internal data class AccountChatBackup(
     val conversation: ConversationEntity,
     val messages: List<ChatMessageEntity>
 )
 
-interface ChatBackupCloudStore {
-    suspend fun write(uid: String, backup: AccountChatBackup): String
-    suspend fun read(uid: String, backupId: String): AccountChatBackup?
+internal interface ChatBackupCloudStore {
+    suspend fun write(
+        lease: AccountCloudOperationLease,
+        requestedUid: String,
+        backup: AccountChatBackup
+    ): String
+
+    suspend fun read(
+        lease: AccountCloudOperationLease,
+        requestedUid: String,
+        backupId: String
+    ): AccountChatBackup?
 }
 
-@Singleton
-class FirestoreChatBackupCloudStore @Inject constructor() : ChatBackupCloudStore {
-    private val firestore: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
-
-    override suspend fun write(uid: String, backup: AccountChatBackup): String {
+internal class FirestoreChatBackupCloudStore(
+    private val scopeStore: ChatSessionScopeStore,
+    private val uidProvider: AuthenticatedUidProvider,
+    private val operationGate: AccountCloudOperationGate,
+    private val firestore: FirebaseFirestore? = runCatching { FirebaseFirestore.getInstance() }.getOrNull()
+) : ChatBackupCloudStore {
+    override suspend fun write(
+        lease: AccountCloudOperationLease,
+        requestedUid: String,
+        backup: AccountChatBackup
+    ): String {
+        val uid = requireAuthorizedAccount(lease, requestedUid)
+        require(backup.conversation.ownerScope == ChatOwnerScope.account(uid)) { "Backup-Scope ist ungültig." }
+        require(backup.messages.all { it.ownerScope == backup.conversation.ownerScope }) {
+            "Backup-Nachrichten besitzen einen ungültigen Scope."
+        }
+        val db = firestore ?: error("Cloud-Backup ist nicht verfügbar.")
         val payload = mapOf(
             "conversation" to backup.conversation.toBackupMap(),
             "messages" to backup.messages.map { it.toBackupMap() },
             "backupDate" to Date()
         )
-        return firestore.collection("users")
-            .document(uid)
-            .collection("chat_backups")
-            .add(payload)
-            .await()
-            .id
+        return db.collection("users").document(uid).collection("chat_backups")
+            .add(payload).await().id
     }
 
-    override suspend fun read(uid: String, backupId: String): AccountChatBackup? {
-        val snapshot = firestore.collection("users")
-            .document(uid)
-            .collection("chat_backups")
-            .document(backupId)
-            .get()
-            .await()
+    override suspend fun read(
+        lease: AccountCloudOperationLease,
+        requestedUid: String,
+        backupId: String
+    ): AccountChatBackup? {
+        val uid = requireAuthorizedAccount(lease, requestedUid)
+        val db = firestore ?: error("Cloud-Backup ist nicht verfügbar.")
+        val snapshot = db.collection("users").document(uid).collection("chat_backups")
+            .document(backupId).get().await()
         if (!snapshot.exists()) return null
         val conversation = (snapshot.get("conversation") as? Map<*, *>)?.toConversationEntity() ?: return null
         val messages = (snapshot.get("messages") as? List<*>)
-            .orEmpty()
-            .mapNotNull { (it as? Map<*, *>)?.toMessageEntity() }
+            .orEmpty().mapNotNull { (it as? Map<*, *>)?.toMessageEntity() }
+        require(conversation.ownerScope == ChatOwnerScope.account(uid)) { "Restore-Scope ist ungültig." }
+        require(messages.all { it.ownerScope == conversation.ownerScope }) { "Restore-Nachrichten sind ungültig." }
         return AccountChatBackup(conversation, messages)
     }
 
+    private fun requireAuthorizedAccount(
+        lease: AccountCloudOperationLease,
+        requestedUid: String
+    ): String {
+        operationGate.requireValidLease(lease)
+        val currentUid = uidProvider.currentUid()?.trim()?.takeIf { it.isNotBlank() }
+            ?: error("Kein authentifiziertes Konto aktiv.")
+        check(currentUid == requestedUid.trim()) { "Cloud-Backup-Konto stimmt nicht überein." }
+        check(scopeStore.isCloudSyncAllowed(currentUid)) { "Cloud-Backup ist während des Übergangs gesperrt." }
+        check(ChatOwnerScope.isAccountForUid(scopeStore.currentScope(), currentUid)) {
+            "Cloud-Backup benötigt den aktiven Account-Scope."
+        }
+        return currentUid
+    }
+
     private fun ConversationEntity.toBackupMap(): Map<String, Any?> = mapOf(
-        "id" to id,
-        "title" to title,
-        "createdAt" to createdAt,
-        "updatedAt" to updatedAt,
-        "personaName" to personaName,
-        "ownerScope" to ownerScope
+        "id" to id, "title" to title, "createdAt" to createdAt, "updatedAt" to updatedAt,
+        "personaName" to personaName, "ownerScope" to ownerScope
     )
 
     private fun ChatMessageEntity.toBackupMap(): Map<String, Any?> = mapOf(
-        "id" to id,
-        "conversationId" to conversationId,
-        "text" to text,
-        "isUser" to isUser,
-        "timestamp" to timestamp,
-        "imageUrl" to imageUrl,
-        "sourcesJson" to sourcesJson,
-        "webFetchedAtIso" to webFetchedAtIso,
-        "ownerScope" to ownerScope
+        "id" to id, "conversationId" to conversationId, "text" to text, "isUser" to isUser,
+        "timestamp" to timestamp, "imageUrl" to imageUrl, "sourcesJson" to sourcesJson,
+        "webFetchedAtIso" to webFetchedAtIso, "ownerScope" to ownerScope
     )
 
     private fun Map<*, *>.toConversationEntity(): ConversationEntity? {
-        val id = this["id"] as? String ?: return null
-        val ownerScope = this["ownerScope"] as? String ?: return null
         return ConversationEntity(
-            id = id,
+            id = this["id"] as? String ?: return null,
             title = this["title"] as? String ?: return null,
             createdAt = (this["createdAt"] as? Number)?.toLong() ?: return null,
             updatedAt = (this["updatedAt"] as? Number)?.toLong() ?: return null,
             personaName = this["personaName"] as? String ?: "ASSISTANT",
-            ownerScope = ownerScope
+            ownerScope = this["ownerScope"] as? String ?: return null
         )
     }
 
     private fun Map<*, *>.toMessageEntity(): ChatMessageEntity? {
-        val id = this["id"] as? String ?: return null
-        val conversationId = this["conversationId"] as? String ?: return null
-        val ownerScope = this["ownerScope"] as? String ?: return null
         return ChatMessageEntity(
-            id = id,
-            conversationId = conversationId,
+            id = this["id"] as? String ?: return null,
+            conversationId = this["conversationId"] as? String ?: return null,
             text = this["text"] as? String ?: return null,
             isUser = this["isUser"] as? Boolean ?: return null,
             timestamp = (this["timestamp"] as? Number)?.toLong() ?: return null,
             imageUrl = this["imageUrl"] as? String,
             sourcesJson = this["sourcesJson"] as? String,
             webFetchedAtIso = this["webFetchedAtIso"] as? String,
-            ownerScope = ownerScope
+            ownerScope = this["ownerScope"] as? String ?: return null
         )
     }
 }
@@ -113,24 +135,51 @@ class BackupManager @Inject constructor(
     private val repository: ChatRepository,
     private val scopeStore: ChatSessionScopeStore,
     private val uidProvider: AuthenticatedUidProvider,
-    private val cloudStore: ChatBackupCloudStore
+    private val operationGate: AccountCloudOperationGate
 ) {
+    private var cloudStore: ChatBackupCloudStore = FirestoreChatBackupCloudStore(
+        scopeStore,
+        uidProvider,
+        operationGate
+    )
+
+    internal constructor(
+        repository: ChatRepository,
+        scopeStore: ChatSessionScopeStore,
+        uidProvider: AuthenticatedUidProvider,
+        cloudStore: ChatBackupCloudStore
+    ) : this(repository, scopeStore, uidProvider, AccountCloudOperationGate(), cloudStore)
+
+    internal constructor(
+        repository: ChatRepository,
+        scopeStore: ChatSessionScopeStore,
+        uidProvider: AuthenticatedUidProvider,
+        operationGate: AccountCloudOperationGate,
+        cloudStore: ChatBackupCloudStore
+    ) : this(repository, scopeStore, uidProvider, operationGate) {
+        this.cloudStore = cloudStore
+    }
+
     suspend fun backupActiveAccountConversation(conversationId: String): Result<String> = runCatching {
-        val session = requireActiveAccountSession()
-        val snapshot = repository.getAccountBackupSnapshot(conversationId, session.ownerScope)
-        validateSnapshot(snapshot, session.ownerScope)
-        requireActiveAccountSession(session.uid, session.ownerScope)
-        cloudStore.write(session.uid, AccountChatBackup(snapshot.conversation, snapshot.messages))
+        operationGate.withCloudOperation { lease ->
+            val session = requireActiveAccountSession()
+            val snapshot = repository.getAccountBackupSnapshot(conversationId, session.ownerScope)
+            validateSnapshot(snapshot, session.ownerScope)
+            requireActiveAccountSession(session.uid, session.ownerScope)
+            cloudStore.write(lease, session.uid, AccountChatBackup(snapshot.conversation, snapshot.messages))
+        }
     }.onFailure { AppTelemetry.logError("backup_to_cloud_failed", it) }
 
     suspend fun restoreActiveAccountBackup(backupId: String): Result<ScopedConversationSnapshot> = runCatching {
-        val session = requireActiveAccountSession()
-        val backup = cloudStore.read(session.uid, backupId) ?: error("Backup wurde nicht gefunden.")
-        val snapshot = ScopedConversationSnapshot(backup.conversation, backup.messages)
-        validateSnapshot(snapshot, session.ownerScope)
-        requireActiveAccountSession(session.uid, session.ownerScope)
-        repository.restoreAccountBackup(snapshot, session.ownerScope)
-        snapshot
+        operationGate.withCloudOperation { lease ->
+            val session = requireActiveAccountSession()
+            val backup = cloudStore.read(lease, session.uid, backupId) ?: error("Backup wurde nicht gefunden.")
+            val snapshot = ScopedConversationSnapshot(backup.conversation, backup.messages)
+            validateSnapshot(snapshot, session.ownerScope)
+            requireActiveAccountSession(session.uid, session.ownerScope)
+            repository.restoreAccountBackup(snapshot, session.ownerScope)
+            snapshot
+        }
     }.onFailure { AppTelemetry.logError("restore_from_cloud_failed", it) }
 
     private fun validateSnapshot(snapshot: ScopedConversationSnapshot, ownerScope: String) {

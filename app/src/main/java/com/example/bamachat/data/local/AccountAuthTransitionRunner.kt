@@ -1,5 +1,6 @@
 package com.example.bamachat.data.local
 
+import com.example.bamachat.data.cloud.AccountCloudOperationGate
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
@@ -15,7 +16,8 @@ enum class AccountAuthProvider {
 @Singleton
 class AccountAuthTransitionRunner @Inject constructor(
     private val scopeStore: ChatSessionScopeStore,
-    private val coordinator: GuestChatTransitionCoordinator
+    private val coordinator: GuestChatTransitionCoordinator,
+    private val cloudOperationGate: AccountCloudOperationGate = AccountCloudOperationGate()
 ) {
     private val mutex = Mutex()
 
@@ -23,7 +25,7 @@ class AccountAuthTransitionRunner @Inject constructor(
         provider: AccountAuthProvider,
         authenticate: suspend () -> String
     ): AccountTransitionResult = mutex.withLock {
-        scopeStore.prepareAccountTransition()
+        cloudOperationGate.withTransitionStart { scopeStore.prepareAccountTransition() }
         try {
             val uid = authenticate().trim().also {
                 require(it.isNotBlank()) { "Authentifizierung lieferte keine Firebase UID." }
@@ -41,9 +43,11 @@ class AccountAuthTransitionRunner @Inject constructor(
         coordinator.completeAuthenticatedTransition(uid)
     }
 
-    fun prepareAuthenticatedProcessResume(uid: String) {
-        scopeStore.prepareAccountTransition()
-        scopeStore.beginAuthenticatedTransition(uid)
+    suspend fun prepareAuthenticatedProcessResume(uid: String) {
+        cloudOperationGate.withTransitionStart {
+            scopeStore.prepareAccountTransition()
+            scopeStore.beginAuthenticatedTransition(uid)
+        }
     }
 }
 

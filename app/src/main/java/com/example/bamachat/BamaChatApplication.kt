@@ -5,23 +5,36 @@ import com.google.firebase.Firebase
 import com.google.firebase.initialize
 import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.data.cloud.AuthenticatedUidProvider
+import com.example.bamachat.data.local.AccountAuthTransitionRunner
 import com.example.bamachat.data.local.ChatSessionScopeStore
+import com.example.bamachat.data.local.PendingAccountUidConflictException
 import dagger.hilt.android.HiltAndroidApp
 import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.LegalPolicy
 import javax.inject.Inject
+import kotlinx.coroutines.runBlocking
 
 @HiltAndroidApp
 class BamaChatApplication : Application() {
     @Inject lateinit var authenticatedUidProvider: AuthenticatedUidProvider
     @Inject lateinit var chatSessionScopeStore: ChatSessionScopeStore
+    @Inject lateinit var accountAuthTransitionRunner: AccountAuthTransitionRunner
 
     override fun onCreate() {
         super.onCreate()
 
         authenticatedUidProvider.currentUid()?.let { uid ->
-            chatSessionScopeStore.prepareAccountTransition()
-            chatSessionScopeStore.beginAuthenticatedTransition(uid)
+            runCatching {
+                runBlocking { accountAuthTransitionRunner.prepareAuthenticatedProcessResume(uid) }
+            }.onFailure { error ->
+                if (error is PendingAccountUidConflictException) {
+                    runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().signOut() }
+                    if (authenticatedUidProvider.currentUid() == null) {
+                        runCatching { chatSessionScopeStore.resetConflictingTransitionAfterSignOut() }
+                    }
+                }
+                AppTelemetry.logError("auth_process_resume", error)
+            }
         }
 
         ServiceLocator.init(this)
@@ -36,7 +49,7 @@ class BamaChatApplication : Application() {
                 AppTelemetry.logEvent("app_open")
             }
         } catch (e: Exception) {
-            android.util.Log.e("BamaChatApplication", "Firebase init failed", e)
+            AppTelemetry.logError("firebase_init_failed", e)
         }
     }
 }

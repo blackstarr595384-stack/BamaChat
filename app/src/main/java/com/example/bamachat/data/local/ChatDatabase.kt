@@ -22,7 +22,7 @@ import com.example.bamachat.data.provider.local.ProviderRoomSchema
         ProviderEntity::class, ProviderModelEntity::class
     ],
     version = 10,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao

@@ -147,7 +147,7 @@ class ChatSessionScopeStore @Inject constructor(
         val currentPhase = transitionPhase()
         val existingUid = pendingAccountUid()
         if (existingUid != null) {
-            check(existingUid == cleanUid) { "Ein Kontoübergang ist bereits für ein anderes Konto aktiv." }
+            if (existingUid != cleanUid) throw PendingAccountUidConflictException()
         }
         if (currentPhase.ordinal >= AccountTransitionPhase.AUTHENTICATED.ordinal) return currentPhase
 
@@ -254,6 +254,32 @@ class ChatSessionScopeStore @Inject constructor(
 
     fun canCancelAccountTransition(): Boolean = transitionPhase() == AccountTransitionPhase.PREPARED
 
+    @Synchronized
+    fun resetConflictingTransitionAfterSignOut() {
+        check(isAccountTransitionPending()) { "Kein Kontoübergang aktiv." }
+        val guestScope = pendingGuestScope()
+        val editor = prefs.edit()
+            .remove(KEY_PENDING_GUEST_SCOPE)
+            .remove(KEY_PENDING_ACCOUNT_UID)
+            .putString(KEY_TRANSITION_PHASE, AccountTransitionPhase.NONE.name)
+            .putBoolean(KEY_AUTH_TRANSITION_PENDING, false)
+            .putBoolean(KEY_AUTH_SECURITY_CONFLICT, true)
+        if (guestScope != null) {
+            editor.putString(KEY_ACTIVE_SCOPE, guestScope)
+        } else {
+            editor.putString(KEY_ACTIVE_SCOPE, ChatOwnerScope.NO_ACTIVE_SESSION)
+        }
+        check(editor.commit()) { "Sicherheitskonflikt konnte nicht zurückgesetzt werden." }
+        _activeScope.value = guestScope ?: ChatOwnerScope.NO_ACTIVE_SESSION
+    }
+
+    @Synchronized
+    fun consumeSecurityConflictNotice(): Boolean {
+        val pending = prefs.getBoolean(KEY_AUTH_SECURITY_CONFLICT, false)
+        if (pending) prefs.edit().remove(KEY_AUTH_SECURITY_CONFLICT).apply()
+        return pending
+    }
+
     fun isCloudSyncAllowed(uid: String): Boolean =
         !isAccountTransitionPending() && ChatOwnerScope.isAccountForUid(currentScope(), uid)
 
@@ -287,9 +313,14 @@ class ChatSessionScopeStore @Inject constructor(
         private const val KEY_AUTH_TRANSITION_PENDING = "chat_account_transition_pending"
         private const val KEY_TRANSITION_PHASE = "chat_account_transition_phase"
         private const val KEY_LAST_COMPLETED_TRANSITION_PHASE = "chat_last_completed_transition_phase"
+        private const val KEY_AUTH_SECURITY_CONFLICT = "chat_auth_security_conflict"
 
         fun currentConversationKey(ownerScope: String): String =
             "current_conversation_id_${ownerScope.replace(':', '_')}"
 
     }
 }
+
+class PendingAccountUidConflictException : IllegalStateException(
+    "Die Anmeldung konnte nicht sicher fortgesetzt werden. Bitte erneut anmelden."
+)

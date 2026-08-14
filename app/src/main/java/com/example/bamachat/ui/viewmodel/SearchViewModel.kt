@@ -147,10 +147,11 @@ class SearchViewModel @Inject constructor(
                 _hasSearched.value = true
 
                 AppTelemetry.logEvent("search_performed", mapOf(
-                    "query" to q,
-                    "results_count" to results.size.toString(),
-                    "filter_user_only" to filter.isUserMessagesOnly.toString(),
-                    "filter_ai_only" to filter.isAiMessagesOnly.toString()
+                    "input_length_bucket" to queryLengthBucket(q.length),
+                    "results_count" to results.size,
+                    "filter_user_only" to filter.isUserMessagesOnly,
+                    "filter_ai_only" to filter.isAiMessagesOnly,
+                    "sort_type" to filter.sortBy
                 ))
             } catch (e: Exception) {
                 AppTelemetry.logError("search_error", e)
@@ -160,5 +161,12 @@ class SearchViewModel @Inject constructor(
                 _loading.value = false
             }
         }
+    }
+
+    private fun queryLengthBucket(length: Int): Int = when {
+        length <= 4 -> 4
+        length <= 16 -> 16
+        length <= 64 -> 64
+        else -> 65
     }
 }

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.room.Room
 import com.example.bamachat.data.cloud.AuthenticatedUidProvider
+import com.example.bamachat.data.cloud.AccountCloudOperationLease
+import com.example.bamachat.data.cloud.AccountCloudOperationGate
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatMessageEntity
 import com.example.bamachat.data.local.ChatOwnerScope
@@ -17,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -111,6 +114,48 @@ class BackupManagerScopeSafetyTest {
         assertEquals(1, repository.getAllConversationsForWorkspaceMigration().size)
     }
 
+    @Test
+    fun lowLevelStoreRejectsForgedLeaseMissingAuthForeignUidGuestAndPendingBeforeFirestore() = runBlocking {
+        val operationGate = AccountCloudOperationGate()
+        val lowLevel = FirestoreChatBackupCloudStore(scopeStore, uidProvider, operationGate, firestore = null)
+        val accountBackup = backup("account", ChatOwnerScope.account("uid-a"))
+        val forgedLease = AccountCloudOperationLease(Any())
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { lowLevel.write(forgedLease, "uid-a", accountBackup) }
+        }
+
+        operationGate.withCloudOperation { lease ->
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking { lowLevel.write(lease, "uid-a", accountBackup) }
+            }
+        }
+
+        uidProvider.uid = "uid-a"
+        scopeStore.startNewGuestSession()
+        operationGate.withCloudOperation { lease ->
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking { lowLevel.write(lease, "uid-a", accountBackup) }
+            }
+        }
+
+        scopeStore.deactivateSession()
+        scopeStore.activateAccount("uid-a")
+        operationGate.withCloudOperation { lease ->
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking { lowLevel.write(lease, "uid-b", accountBackup) }
+            }
+        }
+
+        scopeStore.prepareAccountTransition()
+        operationGate.withCloudOperation { lease ->
+            assertThrows(IllegalStateException::class.java) {
+                runBlocking { lowLevel.read(lease, "uid-a", "backup") }
+            }
+        }
+        Unit
+    }
+
     private suspend fun seed(id: String, scope: String) {
         repository.createConversation(id, ownerScope = scope)
         repository.saveMessage(id, ChatMessage("message-$id", "body", true, 1L), scope)
@@ -130,12 +175,20 @@ class BackupManagerScopeSafetyTest {
         val writes = mutableListOf<Pair<String, AccountChatBackup>>()
         val reads = mutableMapOf<String, AccountChatBackup>()
 
-        override suspend fun write(uid: String, backup: AccountChatBackup): String {
-            writes += uid to backup
+        override suspend fun write(
+            lease: AccountCloudOperationLease,
+            requestedUid: String,
+            backup: AccountChatBackup
+        ): String {
+            writes += requestedUid to backup
             return "backup-id"
         }
 
-        override suspend fun read(uid: String, backupId: String): AccountChatBackup? = reads[backupId]
+        override suspend fun read(
+            lease: AccountCloudOperationLease,
+            requestedUid: String,
+            backupId: String
+        ): AccountChatBackup? = reads[backupId]
     }
 
     private companion object {
