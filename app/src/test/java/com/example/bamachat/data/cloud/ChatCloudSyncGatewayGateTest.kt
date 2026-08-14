@@ -1,10 +1,20 @@
 package com.example.bamachat.data.cloud
 
 import android.content.Context
+import androidx.room.Room
+import com.example.bamachat.data.local.AccountAuthProvider
+import com.example.bamachat.data.local.AccountAuthTransitionRunner
+import com.example.bamachat.data.local.AccountTransitionPhase
+import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatMessageEntity
 import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.ConversationEntity
+import com.example.bamachat.data.local.ConversationWorkspaceStore
+import com.example.bamachat.data.local.GuestChatTransitionCoordinator
+import com.example.bamachat.data.local.RoomGuestScopeChatCleaner
+import com.example.bamachat.data.local.RoomLegacyScopeClaimer
+import com.example.bamachat.data.repository.ChatRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -32,6 +42,8 @@ class ChatCloudSyncGatewayGateTest {
     private lateinit var operationGate: AccountCloudOperationGate
     private lateinit var writer: RecordingWriter
     private lateinit var gateway: ChatCloudSyncGateway
+    private lateinit var database: ChatDatabase
+    private lateinit var runner: AccountAuthTransitionRunner
 
     @Before
     fun setUp() {
@@ -39,12 +51,26 @@ class ChatCloudSyncGatewayGateTest {
         scopeStore = ChatSessionScopeStore(prefs)
         uidProvider = MutableUidProvider()
         operationGate = AccountCloudOperationGate()
+        database = Room.inMemoryDatabaseBuilder(context, ChatDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val repository = ChatRepository(database.chatDao())
+        val coordinator = GuestChatTransitionCoordinator(
+            scopeStore,
+            RoomGuestScopeChatCleaner(database.chatDao()),
+            RoomLegacyScopeClaimer(database),
+            repository,
+            ConversationWorkspaceStore(prefs),
+            operationGate
+        )
+        runner = AccountAuthTransitionRunner(scopeStore, coordinator, operationGate)
         writer = RecordingWriter()
         gateway = ChatCloudSyncGateway(scopeStore, uidProvider, operationGate, writer)
     }
 
     @After
     fun tearDown() {
+        database.close()
         prefs.edit().clear().commit()
     }
 
@@ -87,28 +113,66 @@ class ChatCloudSyncGatewayGateTest {
         writer.failure = IllegalStateException("canary-sensitive-message")
         assertFalse(gateway.pushConversation("uid-a", conversation("failure", ChatOwnerScope.account("uid-a"))))
         assertEquals(1, writer.totalCalls)
-        operationGate.withTransitionStart { scopeStore.prepareAccountTransition() }
+        runner.authenticate(AccountAuthProvider.GOOGLE) { "uid-b" }
         assertFalse(gateway.pushConversation("uid-a", conversation("blocked", ChatOwnerScope.account("uid-a"))))
         assertEquals(1, writer.totalCalls)
+        assertEquals(ChatOwnerScope.account("uid-b"), scopeStore.currentScope())
     }
 
     @Test
-    fun transitionWaitsForInFlightWriteAndBlocksLaterWrites() = runTest {
+    fun runnerWaitsForInFlightMessageWriteThenPreparedBlocksLaterWrites() = runTest {
         activateAccount()
         writer.blockWrites = true
         val scope = ChatOwnerScope.account("uid-a")
-        val write = async { gateway.pushConversation("uid-a", conversation("before", scope)) }
+        val write = async { gateway.pushMessage("uid-a", "conversation", message("before", scope)) }
         writer.entered.await()
+        val authEntered = CompletableDeferred<Unit>()
+        val authRelease = CompletableDeferred<Unit>()
         val transition = async {
-            operationGate.withTransitionStart { scopeStore.prepareAccountTransition() }
+            runner.authenticate(AccountAuthProvider.GOOGLE) {
+                authEntered.complete(Unit)
+                authRelease.await()
+                "uid-b"
+            }
         }
         yield()
-        assertFalse(transition.isCompleted)
+        assertFalse(authEntered.isCompleted)
         writer.release.complete(Unit)
         assertTrue(write.await())
-        transition.await()
-        assertFalse(gateway.pushConversation("uid-a", conversation("after", scope)))
+        authEntered.await()
+        assertEquals(AccountTransitionPhase.PREPARED, scopeStore.transitionPhase())
+        assertFalse(gateway.pushMessage("uid-a", "conversation", message("after", scope)))
         assertEquals(1, writer.totalCalls)
+        authRelease.complete(Unit)
+        transition.await()
+    }
+
+    @Test
+    fun runnerWaitsForInFlightSoftDeleteAndBlocksLaterDelete() = runTest {
+        activateAccount()
+        writer.blockWrites = true
+        val scope = ChatOwnerScope.account("uid-a")
+        val write = async { gateway.softDeleteConversation("uid-a", "before", scope) }
+        writer.entered.await()
+        val authEntered = CompletableDeferred<Unit>()
+        val authRelease = CompletableDeferred<Unit>()
+        val transition = async {
+            runner.authenticate(AccountAuthProvider.EMAIL) {
+                authEntered.complete(Unit)
+                authRelease.await()
+                "uid-b"
+            }
+        }
+        yield()
+        assertFalse(authEntered.isCompleted)
+        writer.release.complete(Unit)
+        assertTrue(write.await())
+        authEntered.await()
+        assertEquals(AccountTransitionPhase.PREPARED, scopeStore.transitionPhase())
+        assertFalse(gateway.softDeleteConversation("uid-a", "after", scope))
+        assertEquals(1, writer.totalCalls)
+        authRelease.complete(Unit)
+        transition.await()
     }
 
     @Test
@@ -132,8 +196,8 @@ class ChatCloudSyncGatewayGateTest {
         }
         writer.entered.await()
         write.cancelAndJoin()
-        operationGate.withTransitionStart { scopeStore.prepareAccountTransition() }
-        assertTrue(scopeStore.isAccountTransitionPending())
+        runner.authenticate(AccountAuthProvider.GOOGLE) { "uid-b" }
+        assertEquals(ChatOwnerScope.account("uid-b"), scopeStore.currentScope())
     }
 
     private fun activateAccount() {

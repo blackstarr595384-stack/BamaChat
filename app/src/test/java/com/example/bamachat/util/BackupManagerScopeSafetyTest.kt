@@ -6,14 +6,25 @@ import androidx.room.Room
 import com.example.bamachat.data.cloud.AuthenticatedUidProvider
 import com.example.bamachat.data.cloud.AccountCloudOperationLease
 import com.example.bamachat.data.cloud.AccountCloudOperationGate
+import com.example.bamachat.data.local.AccountAuthProvider
+import com.example.bamachat.data.local.AccountAuthTransitionRunner
+import com.example.bamachat.data.local.AccountTransitionPhase
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatMessageEntity
 import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.ConversationEntity
+import com.example.bamachat.data.local.ConversationWorkspaceStore
+import com.example.bamachat.data.local.GuestChatTransitionCoordinator
+import com.example.bamachat.data.local.RoomGuestScopeChatCleaner
+import com.example.bamachat.data.local.RoomLegacyScopeClaimer
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.repository.ChatRepository
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,6 +48,8 @@ class BackupManagerScopeSafetyTest {
     private lateinit var uidProvider: MutableUidProvider
     private lateinit var cloudStore: RecordingBackupCloudStore
     private lateinit var manager: BackupManager
+    private lateinit var operationGate: AccountCloudOperationGate
+    private lateinit var runner: AccountAuthTransitionRunner
 
     @Before
     fun setUp() {
@@ -49,8 +62,18 @@ class BackupManagerScopeSafetyTest {
         prefs.edit().clear().commit()
         scopeStore = ChatSessionScopeStore(prefs)
         uidProvider = MutableUidProvider()
+        operationGate = AccountCloudOperationGate()
         cloudStore = RecordingBackupCloudStore()
-        manager = BackupManager(repository, scopeStore, uidProvider, cloudStore)
+        manager = BackupManager(repository, scopeStore, uidProvider, operationGate, cloudStore)
+        val coordinator = GuestChatTransitionCoordinator(
+            scopeStore,
+            RoomGuestScopeChatCleaner(database.chatDao()),
+            RoomLegacyScopeClaimer(database),
+            repository,
+            ConversationWorkspaceStore(prefs),
+            operationGate
+        )
+        runner = AccountAuthTransitionRunner(scopeStore, coordinator, operationGate)
     }
 
     @After
@@ -156,6 +179,44 @@ class BackupManagerScopeSafetyTest {
         Unit
     }
 
+    @Test
+    fun runnerWaitsForBackupAndPreparedBlocksLaterBackupAndRestore() = runTest {
+        val accountScope = ChatOwnerScope.account("uid-a")
+        seed("account", accountScope)
+        uidProvider.uid = "uid-a"
+        scopeStore.activateAccount("uid-a")
+        cloudStore.blockWrites = true
+
+        val backup = async { manager.backupActiveAccountConversation("account") }
+        cloudStore.writeEntered.await()
+        val authEntered = CompletableDeferred<Unit>()
+        val authRelease = CompletableDeferred<Unit>()
+        val transition = async {
+            runner.authenticate(AccountAuthProvider.GOOGLE) {
+                authEntered.complete(Unit)
+                authRelease.await()
+                "uid-b"
+            }
+        }
+
+        yield()
+        assertFalse(authEntered.isCompleted)
+        cloudStore.writeRelease.complete(Unit)
+        assertTrue(backup.await().isSuccess)
+        authEntered.await()
+        assertEquals(AccountTransitionPhase.PREPARED, scopeStore.transitionPhase())
+
+        val writesBefore = cloudStore.writes.size
+        val readsBefore = cloudStore.readCalls
+        assertTrue(manager.backupActiveAccountConversation("account").isFailure)
+        assertTrue(manager.restoreActiveAccountBackup("backup-id").isFailure)
+        assertEquals(writesBefore, cloudStore.writes.size)
+        assertEquals(readsBefore, cloudStore.readCalls)
+
+        authRelease.complete(Unit)
+        transition.await()
+    }
+
     private suspend fun seed(id: String, scope: String) {
         repository.createConversation(id, ownerScope = scope)
         repository.saveMessage(id, ChatMessage("message-$id", "body", true, 1L), scope)
@@ -174,6 +235,10 @@ class BackupManagerScopeSafetyTest {
     private class RecordingBackupCloudStore : ChatBackupCloudStore {
         val writes = mutableListOf<Pair<String, AccountChatBackup>>()
         val reads = mutableMapOf<String, AccountChatBackup>()
+        var readCalls = 0
+        var blockWrites = false
+        val writeEntered = CompletableDeferred<Unit>()
+        val writeRelease = CompletableDeferred<Unit>()
 
         override suspend fun write(
             lease: AccountCloudOperationLease,
@@ -181,6 +246,8 @@ class BackupManagerScopeSafetyTest {
             backup: AccountChatBackup
         ): String {
             writes += requestedUid to backup
+            writeEntered.complete(Unit)
+            if (blockWrites) writeRelease.await()
             return "backup-id"
         }
 
@@ -188,7 +255,10 @@ class BackupManagerScopeSafetyTest {
             lease: AccountCloudOperationLease,
             requestedUid: String,
             backupId: String
-        ): AccountChatBackup? = reads[backupId]
+        ): AccountChatBackup? {
+            readCalls++
+            return reads[backupId]
+        }
     }
 
     private companion object {

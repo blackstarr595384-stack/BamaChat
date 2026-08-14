@@ -38,11 +38,11 @@ class ChatOwnershipMigrationInstrumentedTest {
             )
             execSQL(
                 "INSERT INTO chat_messages(id,conversationId,text,isUser,timestamp) " +
-                    "VALUES('legacy-message','legacy-conversation','fixture text',1,3)"
+                    "VALUES('legacy-message','legacy-conversation','accountfixture text',1,3)"
             )
             execSQL(
                 "INSERT INTO chat_messages_fts(message_id,conversation_id,text,is_user,timestamp) " +
-                    "VALUES('legacy-message','legacy-conversation','fixture text',1,3)"
+                    "VALUES('legacy-message','legacy-conversation','accountfixture text',1,3)"
             )
             close()
         }
@@ -73,7 +73,7 @@ class ChatOwnershipMigrationInstrumentedTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals(ChatOwnerScope.LEGACY_UNCLASSIFIED, cursor.getString(0))
             }
-            query("SELECT message_id FROM chat_messages_fts WHERE chat_messages_fts MATCH 'fixture'")
+            query("SELECT message_id FROM chat_messages_fts WHERE chat_messages_fts MATCH 'accountfixture'")
                 .use { cursor -> assertTrue(cursor.moveToFirst()) }
             close()
         }
@@ -91,6 +91,7 @@ class ChatOwnershipMigrationInstrumentedTest {
             assertEquals(1, dao.countConversationsForScope(ChatOwnerScope.account("fixture-account")))
             assertEquals(1, dao.countMessagesForScope(ChatOwnerScope.account("fixture-account")))
         }
+        assertEquals(1, ftsCount(database, "accountfixture"))
         database.close()
 
         database = openDatabase()
@@ -109,18 +110,51 @@ class ChatOwnershipMigrationInstrumentedTest {
             )
             database.openHelper.writableDatabase.execSQL(
                 "INSERT INTO chat_messages(id,conversationId,text,isUser,timestamp,ownerScope) " +
-                    "VALUES('guest-message','guest-conversation','guest fixture',1,6,?)",
+                    "VALUES('guest-message','guest-conversation','guestfixture text',1,6,?)",
                 arrayOf(guestScope)
             )
+            database.openHelper.writableDatabase.execSQL(
+                "INSERT INTO chat_messages_fts(message_id,conversation_id,text,is_user,timestamp) " +
+                    "VALUES('guest-message','guest-conversation','guestfixture text',1,6)"
+            )
+            assertEquals(1, ftsCount(database, "guestfixture"))
+            assertEquals(1, ftsCount(database, "accountfixture"))
             RoomGuestScopeChatCleaner(dao).clear(guestScope)
             assertEquals(0, dao.countConversationsForScope(guestScope))
             assertEquals(1, dao.countConversationsForScope(ChatOwnerScope.account("fixture-account")))
+            assertEquals(0, ftsCount(database, "guestfixture"))
+            assertEquals(1, ftsCount(database, "accountfixture"))
+            val repeatedCleanup = RoomGuestScopeChatCleaner(dao).clear(guestScope)
+            assertEquals(0, repeatedCleanup.deletedConversations)
+            assertEquals(0, repeatedCleanup.deletedMessages)
         }
         database.openHelper.writableDatabase.query("PRAGMA foreign_key_check").use { cursor ->
             assertFalse(cursor.moveToFirst())
         }
         database.close()
+
+        database = openDatabase()
+        kotlinx.coroutines.runBlocking {
+            val dao = database.chatDao()
+            assertEquals(0, dao.countConversationsForScope(ChatOwnerScope.guest("fixture-session")))
+            assertEquals(1, dao.countConversationsForScope(ChatOwnerScope.account("fixture-account")))
+            val repeatedClaim = RoomLegacyScopeClaimer(database).claim("fixture-account")
+            assertEquals(0, repeatedClaim.claimedConversations)
+            assertEquals(0, repeatedClaim.claimedMessages)
+        }
+        assertEquals(0, ftsCount(database, "guestfixture"))
+        assertEquals(1, ftsCount(database, "accountfixture"))
+        database.openHelper.writableDatabase.query("PRAGMA foreign_key_check").use { cursor ->
+            assertFalse(cursor.moveToFirst())
+        }
+        database.close()
     }
+
+    private fun ftsCount(database: ChatDatabase, query: String): Int =
+        database.openHelper.readableDatabase.query(
+            "SELECT message_id FROM chat_messages_fts WHERE chat_messages_fts MATCH ?",
+            arrayOf(query)
+        ).use { cursor -> cursor.count }
 
     private fun openDatabase(): ChatDatabase = Room.databaseBuilder(
         context,

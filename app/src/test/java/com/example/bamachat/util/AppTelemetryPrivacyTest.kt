@@ -27,7 +27,11 @@ class AppTelemetryPrivacyTest {
             "private search phrase canary",
             "private message canary",
             "api-key-canary-123",
-            "token-canary-123"
+            "token-canary-123",
+            "mcp-server-canary",
+            "https://canary.invalid/private-endpoint",
+            "C:\\private\\canary\\config.json",
+            "exception-message-canary"
         )
 
         AppTelemetry.setUserId(canaries[0])
@@ -40,15 +44,21 @@ class AppTelemetryPrivacyTest {
                 "message" to canaries[3],
                 "api_key" to canaries[4],
                 "access_token" to canaries[5],
+                "server_id" to canaries[6],
+                "endpoint" to canaries[7],
+                "local_path" to canaries[8],
                 "results_count" to 7
             )
         )
-        AppTelemetry.logError("provider_error", IllegalStateException(canaries.joinToString()))
+        AppTelemetry.logError("mcp_connection_failed", IllegalStateException(canaries.joinToString()))
+        AppTelemetry.logError("chat_copy_failed", IllegalStateException(canaries[9]))
 
         val rendered = output.joinToString("\n")
         canaries.forEach { canary -> assertFalse(rendered.contains(canary)) }
         assertTrue(rendered.contains("event=search_performed"))
         assertTrue(rendered.contains("results_count=7"))
+        assertTrue(rendered.contains("error=mcp_connection_failed"))
+        assertTrue(rendered.contains("error=chat_copy_failed"))
         assertTrue(rendered.contains("type=IllegalStateException"))
     }
 

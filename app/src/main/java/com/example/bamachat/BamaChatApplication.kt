@@ -6,7 +6,7 @@ import com.google.firebase.initialize
 import com.example.bamachat.service.ServiceLocator
 import com.example.bamachat.data.cloud.AuthenticatedUidProvider
 import com.example.bamachat.data.local.AccountAuthTransitionRunner
-import com.example.bamachat.data.local.ChatSessionScopeStore
+import com.example.bamachat.data.local.PendingAccountConflictRecovery
 import com.example.bamachat.data.local.PendingAccountUidConflictException
 import dagger.hilt.android.HiltAndroidApp
 import com.example.bamachat.util.AppTelemetry
@@ -17,8 +17,8 @@ import kotlinx.coroutines.runBlocking
 @HiltAndroidApp
 class BamaChatApplication : Application() {
     @Inject lateinit var authenticatedUidProvider: AuthenticatedUidProvider
-    @Inject lateinit var chatSessionScopeStore: ChatSessionScopeStore
     @Inject lateinit var accountAuthTransitionRunner: AccountAuthTransitionRunner
+    @Inject lateinit var pendingAccountConflictRecovery: PendingAccountConflictRecovery
 
     override fun onCreate() {
         super.onCreate()
@@ -28,10 +28,10 @@ class BamaChatApplication : Application() {
                 runBlocking { accountAuthTransitionRunner.prepareAuthenticatedProcessResume(uid) }
             }.onFailure { error ->
                 if (error is PendingAccountUidConflictException) {
-                    runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().signOut() }
-                    if (authenticatedUidProvider.currentUid() == null) {
-                        runCatching { chatSessionScopeStore.resetConflictingTransitionAfterSignOut() }
-                    }
+                    pendingAccountConflictRecovery.recoverUidConflict(
+                        signOut = { com.google.firebase.auth.FirebaseAuth.getInstance().signOut() },
+                        currentUid = authenticatedUidProvider::currentUid
+                    )
                 }
                 AppTelemetry.logError("auth_process_resume", error)
             }

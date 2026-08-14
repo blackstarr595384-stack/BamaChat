@@ -11,6 +11,7 @@ import com.example.bamachat.data.auth.AccountAuthenticationCoordinator
 import com.example.bamachat.data.local.AccountAuthTransitionRunner
 import com.example.bamachat.data.local.AccountTransitionResult
 import com.example.bamachat.data.local.PendingAccountUidConflictException
+import com.example.bamachat.data.local.PendingAccountConflictRecovery
 import com.example.bamachat.data.model.UserProfile
 import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.LocalDataSanitizer
@@ -57,7 +58,8 @@ class AuthViewModel @Inject constructor(
     application: Application,
     private val chatSessionScopeStore: ChatSessionScopeStore,
     private val accountAuthTransitionRunner: AccountAuthTransitionRunner,
-    private val accountAuthenticationCoordinator: AccountAuthenticationCoordinator
+    private val accountAuthenticationCoordinator: AccountAuthenticationCoordinator,
+    private val pendingAccountConflictRecovery: PendingAccountConflictRecovery
 ) : AndroidViewModel(application) {
     companion object {
         private const val KEY_GUEST_MODE = "guest_mode_enabled"
@@ -615,13 +617,7 @@ class AuthViewModel @Inject constructor(
     private suspend fun handleFirebaseAuthState(user: FirebaseUser?) {
         if (user == null) {
             if (chatSessionScopeStore.isAccountTransitionPending()) {
-                runCatching {
-                    if (chatSessionScopeStore.canCancelAccountTransition()) {
-                        chatSessionScopeStore.cancelAccountTransition()
-                    } else {
-                        chatSessionScopeStore.resetConflictingTransitionAfterSignOut()
-                    }
-                }.onFailure { AppTelemetry.logError("guest_account_transition_resume_cancel", it) }
+                pendingAccountConflictRecovery.reconcileSignedOutState()
             }
             _firebaseUser.value = null
             _profile.value = null
@@ -691,11 +687,10 @@ class AuthViewModel @Inject constructor(
     private suspend fun handleAuthenticatedTransitionError(error: Throwable) {
         AppTelemetry.logError("guest_account_transition_cleanup", error)
         if (error is PendingAccountUidConflictException) {
-            runCatching { auth?.signOut() }
-            if (auth?.currentUser == null && chatSessionScopeStore.isAccountTransitionPending()) {
-                runCatching { chatSessionScopeStore.resetConflictingTransitionAfterSignOut() }
-                    .onFailure { AppTelemetry.logError("auth_uid_conflict_reset", it) }
-            }
+            pendingAccountConflictRecovery.recoverUidConflict(
+                signOut = { auth?.signOut() },
+                currentUid = { auth?.currentUser?.uid }
+            )
             _errorMessage.value = "Die Anmeldung konnte nicht sicher fortgesetzt werden. Bitte erneut anmelden."
         }
         _firebaseUser.value = null
