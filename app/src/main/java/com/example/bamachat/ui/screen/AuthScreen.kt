@@ -73,6 +73,7 @@ import kotlinx.coroutines.launch
 fun AuthScreen(
     authViewModel: AuthViewModel,
     onAuthenticated: () -> Unit,
+    onContinueAsGuest: () -> Unit,
     onBack: () -> Unit = {},
     onOpenHelp: () -> Unit = {}
 ) {
@@ -83,7 +84,7 @@ fun AuthScreen(
             .onFailure { AppTelemetry.logError("auth_credential_manager_ui_init", it) }
             .getOrNull()
     }
-    val isAuthenticated by authViewModel.isAuthenticated.collectAsStateWithLifecycle()
+    val firebaseUser by authViewModel.firebaseUser.collectAsStateWithLifecycle()
     val isLoading by authViewModel.isLoading.collectAsStateWithLifecycle()
     val errorMessage by authViewModel.errorMessage.collectAsStateWithLifecycle()
     val statusMessage by authViewModel.statusMessage.collectAsStateWithLifecycle()
@@ -147,8 +148,8 @@ fun AuthScreen(
         return extractGoogleIdToken(response.credential)
     }
 
-    LaunchedEffect(isAuthenticated) {
-        if (isAuthenticated) onAuthenticated()
+    LaunchedEffect(firebaseUser?.uid) {
+        if (firebaseUser != null) onAuthenticated()
     }
 
     Box(
@@ -481,6 +482,7 @@ fun AuthScreen(
                         onClick = {
                             authViewModel.clearError()
                             authViewModel.continueAsGuest()
+                            onContinueAsGuest()
                         },
                         shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))

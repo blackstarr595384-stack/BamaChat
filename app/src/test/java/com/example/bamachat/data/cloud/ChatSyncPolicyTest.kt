@@ -1,6 +1,8 @@
 package com.example.bamachat.data.cloud
 
 import android.content.SharedPreferences
+import com.example.bamachat.data.local.ChatOwnerScope
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,7 +11,8 @@ import org.junit.Test
 class ChatSyncPolicyTest {
     @Test
     fun syncIsDisabledWithoutUidAndByDefault() {
-        val policy = ChatSyncPolicy(FakeSharedPreferences())
+        val prefs = FakeSharedPreferences()
+        val policy = ChatSyncPolicy(prefs, ChatSessionScopeStore(prefs))
 
         assertFalse(policy.isEnabledForUid(null))
         assertFalse(policy.isEnabledForUid(""))
@@ -19,8 +22,10 @@ class ChatSyncPolicyTest {
     @Test
     fun perUserPreferenceDoesNotLeakBetweenAccounts() {
         val prefs = FakeSharedPreferences()
-        val policy = ChatSyncPolicy(prefs)
+        val scopeStore = ChatSessionScopeStore(prefs)
+        val policy = ChatSyncPolicy(prefs, scopeStore)
 
+        scopeStore.activateAccount("uid-a")
         policy.setEnabledForUid("uid-a", true)
 
         assertTrue(policy.isEnabledForUid("uid-a"))
@@ -32,10 +37,34 @@ class ChatSyncPolicyTest {
         val prefs = FakeSharedPreferences(
             mutableMapOf(ChatSyncPolicy.LEGACY_GLOBAL_KEY to true)
         )
-        val policy = ChatSyncPolicy(prefs)
+        val policy = ChatSyncPolicy(prefs, ChatSessionScopeStore(prefs))
 
         assertTrue(policy.hasLegacyGlobalPreference())
         assertFalse(policy.isEnabledForUid("uid-a"))
+    }
+
+    @Test
+    fun guestLegacyAndPendingTransitionNeverEnableCloudSync() {
+        val prefs = FakeSharedPreferences()
+        val scopeStore = ChatSessionScopeStore(prefs)
+        val policy = ChatSyncPolicy(prefs, scopeStore)
+        policy.setEnabledForUid("uid-a", true)
+
+        scopeStore.startNewGuestSession()
+        assertFalse(policy.isEnabledForUid("uid-a"))
+        assertFalse(isCloudSyncEligible("uid-a", scopeStore.currentScope(), true))
+        assertFalse(isCloudSyncEligible("uid-a", ChatOwnerScope.LEGACY_UNCLASSIFIED, true))
+
+        scopeStore.beginAccountTransitionIfGuest()
+        assertFalse(policy.isEnabledForUid("uid-a"))
+        assertFalse(scopeStore.isCloudSyncAllowed("uid-a"))
+    }
+
+    @Test
+    fun accountScopeMustMatchAuthenticatedUid() {
+        assertTrue(isCloudSyncEligible("uid-a", ChatOwnerScope.account("uid-a"), true))
+        assertFalse(isCloudSyncEligible("uid-a", ChatOwnerScope.account("uid-b"), true))
+        assertFalse(isCloudSyncEligible("uid-a", ChatOwnerScope.account("uid-a"), false))
     }
 
     @Test

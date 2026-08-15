@@ -5,7 +5,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -36,6 +35,7 @@ import coil.compose.AsyncImage
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.theme.NeonPurple
 import com.example.bamachat.ui.theme.SurfaceDarkCard
+import com.example.bamachat.util.AppTelemetry
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -176,15 +176,15 @@ fun ChatBubble(
                                 onClick = {
                                     val text = message.text
                                     if (text.isNotBlank()) {
-                                        Log.d("ChatBubble", "Copy text length: ${text.length}")
                                         try {
                                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                             clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
                                             copied = true
+                                            AppTelemetry.logEvent("chat_copy_succeeded")
                                             android.widget.Toast.makeText(context, "Nachricht kopiert.", android.widget.Toast.LENGTH_SHORT).show()
                                         } catch (e: Exception) {
-                                            Log.e("ChatBubble", "Clipboard setPrimaryClip failed", e)
-                                            android.widget.Toast.makeText(context, "Kopieren fehlgeschlagen: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                                            AppTelemetry.logError("chat_copy_failed", e)
+                                            android.widget.Toast.makeText(context, "Kopieren fehlgeschlagen.", android.widget.Toast.LENGTH_LONG).show()
                                         }
                                     }
                                 },

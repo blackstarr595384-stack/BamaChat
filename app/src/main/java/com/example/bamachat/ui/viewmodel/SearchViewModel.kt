@@ -3,7 +3,7 @@ package com.example.bamachat.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.bamachat.data.local.ChatDatabase
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.MessageFtsResult
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.util.AppTelemetry
@@ -29,9 +29,10 @@ enum class SearchSortBy {
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    application: Application
+    application: Application,
+    private val repo: ChatRepository,
+    private val scopeStore: ChatSessionScopeStore
 ) : AndroidViewModel(application) {
-    private val repo = ChatRepository(ChatDatabase.getDatabase(application).chatDao())
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query
@@ -115,7 +116,7 @@ class SearchViewModel @Inject constructor(
         searchJob = viewModelScope.launch {
             delay(250) // Debounce
             try {
-                var results = repo.searchMessages(q, limit = 50)
+                var results = repo.searchMessages(q, scopeStore.currentScope(), limit = 50)
 
                 // Apply filters
                 results = results.filter { result ->
@@ -146,10 +147,11 @@ class SearchViewModel @Inject constructor(
                 _hasSearched.value = true
 
                 AppTelemetry.logEvent("search_performed", mapOf(
-                    "query" to q,
-                    "results_count" to results.size.toString(),
-                    "filter_user_only" to filter.isUserMessagesOnly.toString(),
-                    "filter_ai_only" to filter.isAiMessagesOnly.toString()
+                    "input_length_bucket" to queryLengthBucket(q.length),
+                    "results_count" to results.size,
+                    "filter_user_only" to filter.isUserMessagesOnly,
+                    "filter_ai_only" to filter.isAiMessagesOnly,
+                    "sort_type" to filter.sortBy
                 ))
             } catch (e: Exception) {
                 AppTelemetry.logError("search_error", e)
@@ -159,5 +161,12 @@ class SearchViewModel @Inject constructor(
                 _loading.value = false
             }
         }
+    }
+
+    private fun queryLengthBucket(length: Int): Int = when {
+        length <= 4 -> 4
+        length <= 16 -> 16
+        length <= 64 -> 64
+        else -> 65
     }
 }

@@ -21,8 +21,8 @@ import com.example.bamachat.data.provider.local.ProviderRoomSchema
         PersonaTrainingExampleEntity::class, ChatMessageFtsEntity::class,
         ProviderEntity::class, ProviderModelEntity::class
     ],
-    version = 9,
-    exportSchema = false
+    version = 10,
+    exportSchema = true
 )
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
@@ -36,19 +36,37 @@ abstract class ChatDatabase : RoomDatabase() {
                 "CREATE TABLE IF NOT EXISTS `conversations` (" +
                     "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
                     "`updatedAt` INTEGER NOT NULL, `personaName` TEXT NOT NULL DEFAULT 'ASSISTANT', " +
+                    "`ownerScope` TEXT NOT NULL DEFAULT 'legacy:unclassified', " +
                     "PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_conversations_ownerScope` " +
+                    "ON `conversations` (`ownerScope`)"
+            )
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_conversations_id_ownerScope` " +
+                    "ON `conversations` (`id`, `ownerScope`)"
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `chat_messages` (" +
                     "`id` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `text` TEXT NOT NULL, " +
                     "`isUser` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `imageUrl` TEXT, " +
-                    "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, PRIMARY KEY(`id`), " +
-                    "FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) " +
+                    "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, " +
+                    "`ownerScope` TEXT NOT NULL DEFAULT 'legacy:unclassified', PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`conversationId`, `ownerScope`) REFERENCES `conversations`(`id`, `ownerScope`) " +
                     "ON UPDATE NO ACTION ON DELETE CASCADE)"
             )
             db.execSQL(
                 "CREATE INDEX IF NOT EXISTS `index_chat_messages_conversationId` " +
                     "ON `chat_messages` (`conversationId`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_chat_messages_ownerScope` " +
+                    "ON `chat_messages` (`ownerScope`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_chat_messages_conversationId_ownerScope` " +
+                    "ON `chat_messages` (`conversationId`, `ownerScope`)"
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `persona_memory` (" +
@@ -214,6 +232,70 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                if (!columnExists(db, "conversations", "ownerScope")) {
+                    db.execSQL(
+                        "ALTER TABLE `conversations` ADD COLUMN `ownerScope` TEXT NOT NULL " +
+                            "DEFAULT '${ChatOwnerScope.LEGACY_UNCLASSIFIED}'"
+                    )
+                }
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_conversations_ownerScope` " +
+                        "ON `conversations` (`ownerScope`)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_conversations_id_ownerScope` " +
+                        "ON `conversations` (`id`, `ownerScope`)"
+                )
+                val messageScopeExpression = if (columnExists(db, "chat_messages", "ownerScope")) {
+                    "`ownerScope`"
+                } else {
+                    "'${ChatOwnerScope.LEGACY_UNCLASSIFIED}'"
+                }
+                db.execSQL(
+                    "CREATE TABLE `chat_messages_scoped` (" +
+                        "`id` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `text` TEXT NOT NULL, " +
+                        "`isUser` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `imageUrl` TEXT, " +
+                        "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, " +
+                        "`ownerScope` TEXT NOT NULL DEFAULT '${ChatOwnerScope.LEGACY_UNCLASSIFIED}', " +
+                        "PRIMARY KEY(`id`), FOREIGN KEY(`conversationId`, `ownerScope`) " +
+                        "REFERENCES `conversations`(`id`, `ownerScope`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL(
+                    "INSERT INTO `chat_messages_scoped` " +
+                        "(`id`, `conversationId`, `text`, `isUser`, `timestamp`, `imageUrl`, `sourcesJson`, `webFetchedAtIso`, `ownerScope`) " +
+                        "SELECT `id`, `conversationId`, `text`, `isUser`, `timestamp`, `imageUrl`, `sourcesJson`, `webFetchedAtIso`, " +
+                        "$messageScopeExpression FROM `chat_messages`"
+                )
+                db.execSQL("DROP TABLE `chat_messages`")
+                db.execSQL("ALTER TABLE `chat_messages_scoped` RENAME TO `chat_messages`")
+                db.execSQL(
+                    "CREATE INDEX `index_chat_messages_conversationId` ON `chat_messages` (`conversationId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX `index_chat_messages_ownerScope` ON `chat_messages` (`ownerScope`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX `index_chat_messages_conversationId_ownerScope` " +
+                        "ON `chat_messages` (`conversationId`, `ownerScope`)"
+                )
+            }
+        }
+
+        private fun columnExists(
+            db: SupportSQLiteDatabase,
+            table: String,
+            column: String
+        ): Boolean = db.query("PRAGMA table_info(`$table`)").use { cursor ->
+            val nameIndex = cursor.getColumnIndexOrThrow("name")
+            var found = false
+            while (cursor.moveToNext() && !found) {
+                found = cursor.getString(nameIndex) == column
+            }
+            found
+        }
+
         fun getDatabase(context: Context): ChatDatabase {
             return INSTANCE ?: synchronized(this) {
                 var instance = INSTANCE
@@ -226,7 +308,7 @@ abstract class ChatDatabase : RoomDatabase() {
                         .addMigrations(
                             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                             MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                            MIGRATION_7_8, MIGRATION_8_9
+                            MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10
                         )
                         .addCallback(object : RoomDatabase.Callback() {
                             override fun onDestructiveMigration(db: SupportSQLiteDatabase) {

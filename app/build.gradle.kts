@@ -139,6 +139,7 @@ android {
         buildConfig = true
     }
     ksp {
+        arg("room.schemaLocation", layout.buildDirectory.dir("roomSchemas").get().asFile.absolutePath)
     }
 
     testOptions {
@@ -149,12 +150,17 @@ android {
         }
     }
 
+    sourceSets.getByName("androidTest").assets.srcDirs(
+        "$projectDir/schemas",
+        "$projectDir/schemas-current"
+    )
+
 }
 
 dependencies {
     // Play In-App Review
     implementation("com.google.android.play:review-ktx:2.0.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     val mlKitTranslateVersion = "17.0.3"
     val mlKitLanguageIdVersion = "17.0.6"
     val mlKitSmartReplyVersion = "17.0.4"
@@ -261,6 +267,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("androidx.room:room-testing:$roomVersion")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
@@ -270,6 +277,12 @@ tasks.register("stabilityCheck") {
     group = "verification"
     description = "Runs core smoke checks for app stability."
     dependsOn("assembleDebug", "testDebugUnitTest", "lintDebug")
+}
+
+tasks.matching { it.name.startsWith("ksp") }.configureEach {
+    doFirst {
+        delete(layout.buildDirectory.dir("roomSchemas"))
+    }
 }
 
 // Fix Room/KSP kotlinx-serialization compatibility

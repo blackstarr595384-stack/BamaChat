@@ -235,8 +235,8 @@ fun BamaChatApp() {
         popSettingsFlowDestinations()
     }
 
-    LaunchedEffect(isAuthenticated, normalizedRoute) {
-        if (isAuthenticated && normalizedRoute == Routes.AUTH) {
+    LaunchedEffect(firebaseUser?.uid, normalizedRoute) {
+        if (firebaseUser != null && normalizedRoute == Routes.AUTH) {
             navController.navigate(Routes.HOME_HUB) {
                 popUpTo(Routes.AUTH) { inclusive = true }
                 launchSingleTop = true
@@ -427,6 +427,11 @@ fun BamaChatApp() {
                     },
                     onOpenHelp = { navController.navigate(Routes.HELP) },
                     onAuthenticated = {
+                        navController.navigate(Routes.HOME_HUB) {
+                            popUpTo(Routes.AUTH) { inclusive = true }
+                        }
+                    },
+                    onContinueAsGuest = {
                         navController.navigate(Routes.HOME_HUB) {
                             popUpTo(Routes.AUTH) { inclusive = true }
                         }
