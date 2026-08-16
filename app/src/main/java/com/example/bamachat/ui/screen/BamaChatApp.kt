@@ -626,6 +626,7 @@ fun BamaChatApp() {
             }
             composable(Routes.KNOWLEDGE_GRAPH) {
                 KnowledgeGraphScreen(
+                    ownerScope = chatViewModel.currentOwnerScope(),
                     onBack = { navController.popBackStack() }
                 )
             }

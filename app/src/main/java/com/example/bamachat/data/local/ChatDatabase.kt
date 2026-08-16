@@ -21,7 +21,7 @@ import com.example.bamachat.data.provider.local.ProviderRoomSchema
         PersonaTrainingExampleEntity::class, ChatMessageFtsEntity::class,
         ProviderEntity::class, ProviderModelEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -31,42 +31,67 @@ abstract class ChatDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: ChatDatabase? = null
 
-        private fun createAllTables(db: SupportSQLiteDatabase) {
+        private fun createLegacyConversationsTable(db: SupportSQLiteDatabase) {
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `conversations` (" +
                     "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
                     "`updatedAt` INTEGER NOT NULL, `personaName` TEXT NOT NULL DEFAULT 'ASSISTANT', " +
-                    "`ownerScope` TEXT NOT NULL DEFAULT 'legacy:unclassified', " +
                     "PRIMARY KEY(`id`))"
             )
+            if (!columnExists(db, "conversations", "personaName")) {
+                db.execSQL(
+                    "ALTER TABLE `conversations` ADD COLUMN `personaName` TEXT NOT NULL DEFAULT 'ASSISTANT'"
+                )
+            }
+        }
+
+        private fun migrateVersionOneMessages(db: SupportSQLiteDatabase) {
+            if (!tableExists(db, "chat_messages") || columnExists(db, "chat_messages", "conversationId")) return
+            createLegacyConversationsTable(db)
+            db.execSQL("ALTER TABLE `chat_messages` RENAME TO `chat_messages_v1`")
             db.execSQL(
-                "CREATE INDEX IF NOT EXISTS `index_conversations_ownerScope` " +
-                    "ON `conversations` (`ownerScope`)"
+                "CREATE TABLE `chat_messages` (" +
+                    "`id` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `text` TEXT NOT NULL, " +
+                    "`isUser` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `imageUrl` TEXT, " +
+                    "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE)"
             )
             db.execSQL(
-                "CREATE UNIQUE INDEX IF NOT EXISTS `index_conversations_id_ownerScope` " +
-                    "ON `conversations` (`id`, `ownerScope`)"
+                "INSERT OR IGNORE INTO `conversations` (`id`, `title`, `createdAt`, `updatedAt`, `personaName`) " +
+                    "SELECT 'legacy-import-v1', 'Importierter Verlauf', MIN(`timestamp`), MAX(`timestamp`), 'ASSISTANT' " +
+                    "FROM `chat_messages_v1` HAVING COUNT(*) > 0"
             )
+            db.execSQL(
+                "INSERT INTO `chat_messages` (`id`, `conversationId`, `text`, `isUser`, `timestamp`) " +
+                    "SELECT `id`, 'legacy-import-v1', `text`, `isUser`, `timestamp` FROM `chat_messages_v1`"
+            )
+            db.execSQL("DROP TABLE `chat_messages_v1`")
+        }
+
+        private fun createLegacyTables(db: SupportSQLiteDatabase) {
+            createLegacyConversationsTable(db)
+            migrateVersionOneMessages(db)
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `chat_messages` (" +
                     "`id` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `text` TEXT NOT NULL, " +
                     "`isUser` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `imageUrl` TEXT, " +
-                    "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, " +
-                    "`ownerScope` TEXT NOT NULL DEFAULT 'legacy:unclassified', PRIMARY KEY(`id`), " +
-                    "FOREIGN KEY(`conversationId`, `ownerScope`) REFERENCES `conversations`(`id`, `ownerScope`) " +
+                    "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, PRIMARY KEY(`id`), " +
+                    "FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) " +
                     "ON UPDATE NO ACTION ON DELETE CASCADE)"
             )
+            if (!columnExists(db, "chat_messages", "imageUrl")) {
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `imageUrl` TEXT")
+            }
+            if (!columnExists(db, "chat_messages", "sourcesJson")) {
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `sourcesJson` TEXT")
+            }
+            if (!columnExists(db, "chat_messages", "webFetchedAtIso")) {
+                db.execSQL("ALTER TABLE `chat_messages` ADD COLUMN `webFetchedAtIso` TEXT")
+            }
             db.execSQL(
                 "CREATE INDEX IF NOT EXISTS `index_chat_messages_conversationId` " +
                     "ON `chat_messages` (`conversationId`)"
-            )
-            db.execSQL(
-                "CREATE INDEX IF NOT EXISTS `index_chat_messages_ownerScope` " +
-                    "ON `chat_messages` (`ownerScope`)"
-            )
-            db.execSQL(
-                "CREATE INDEX IF NOT EXISTS `index_chat_messages_conversationId_ownerScope` " +
-                    "ON `chat_messages` (`conversationId`, `ownerScope`)"
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `persona_memory` (" +
@@ -176,48 +201,48 @@ abstract class ChatDatabase : RoomDatabase() {
 
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
             }
         }
 
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
             }
         }
 
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
             }
         }
 
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
             }
         }
 
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
             }
         }
 
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
             }
         }
 
         val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createAllTables(db)
+                createLegacyTables(db)
                 db.execSQL(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS `chat_messages_fts` USING FTS4(" +
-                        "`message_id` TEXT, `conversation_id` TEXT, " +
-                        "`text` TEXT, `is_user` INTEGER, " +
-                        "`timestamp` INTEGER, notindexed=`message_id`, notindexed=`conversation_id`, notindexed=`is_user`, notindexed=`timestamp`)"
+                        "`message_id` TEXT NOT NULL, `conversation_id` TEXT NOT NULL, " +
+                        "`text` TEXT NOT NULL, `is_user` INTEGER NOT NULL, " +
+                        "`timestamp` INTEGER NOT NULL)"
                 )
                 db.execSQL(
                     "INSERT INTO `chat_messages_fts` (`message_id`, `conversation_id`, `text`, `is_user`, `timestamp`) " +
@@ -283,6 +308,57 @@ abstract class ChatDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                if (!columnExists(db, "knowledge_chunks", "ownerScope")) {
+                    db.execSQL(
+                        "ALTER TABLE `knowledge_chunks` ADD COLUMN `ownerScope` TEXT NOT NULL " +
+                            "DEFAULT '${ChatOwnerScope.LEGACY_UNCLASSIFIED}'"
+                    )
+                }
+                if (!columnExists(db, "knowledge_edges", "ownerScope")) {
+                    db.execSQL(
+                        "ALTER TABLE `knowledge_edges` ADD COLUMN `ownerScope` TEXT NOT NULL " +
+                            "DEFAULT '${ChatOwnerScope.LEGACY_UNCLASSIFIED}'"
+                    )
+                }
+                db.execSQL("DROP INDEX IF EXISTS `index_knowledge_chunks_sourceTitle`")
+                db.execSQL("DROP INDEX IF EXISTS `index_knowledge_chunks_createdAt`")
+                db.execSQL("DROP INDEX IF EXISTS `index_knowledge_edges_fromConcept`")
+                db.execSQL("DROP INDEX IF EXISTS `index_knowledge_edges_toConcept`")
+                db.execSQL("DROP INDEX IF EXISTS `index_knowledge_edges_fromConcept_relation_toConcept`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_knowledge_chunks_ownerScope` " +
+                        "ON `knowledge_chunks` (`ownerScope`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_knowledge_chunks_ownerScope_sourceTitle` " +
+                        "ON `knowledge_chunks` (`ownerScope`, `sourceTitle`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_knowledge_chunks_ownerScope_createdAt` " +
+                        "ON `knowledge_chunks` (`ownerScope`, `createdAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_knowledge_edges_ownerScope` " +
+                        "ON `knowledge_edges` (`ownerScope`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_knowledge_edges_ownerScope_fromConcept` " +
+                        "ON `knowledge_edges` (`ownerScope`, `fromConcept`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_knowledge_edges_ownerScope_toConcept` " +
+                        "ON `knowledge_edges` (`ownerScope`, `toConcept`)"
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS " +
+                        "`index_knowledge_edges_ownerScope_fromConcept_relation_toConcept` " +
+                        "ON `knowledge_edges` (`ownerScope`, `fromConcept`, `relation`, `toConcept`)"
+                )
+            }
+        }
+
         private fun columnExists(
             db: SupportSQLiteDatabase,
             table: String,
@@ -296,6 +372,12 @@ abstract class ChatDatabase : RoomDatabase() {
             found
         }
 
+        private fun tableExists(db: SupportSQLiteDatabase, table: String): Boolean =
+            db.query(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+                arrayOf(table)
+            ).use { cursor -> cursor.moveToFirst() }
+
         fun getDatabase(context: Context): ChatDatabase {
             return INSTANCE ?: synchronized(this) {
                 var instance = INSTANCE
@@ -308,7 +390,7 @@ abstract class ChatDatabase : RoomDatabase() {
                         .addMigrations(
                             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                             MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                            MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10
+                            MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11
                         )
                         .addCallback(object : RoomDatabase.Callback() {
                             override fun onDestructiveMigration(db: SupportSQLiteDatabase) {

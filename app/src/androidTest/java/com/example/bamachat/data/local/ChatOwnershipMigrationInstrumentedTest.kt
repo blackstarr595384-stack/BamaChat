@@ -44,14 +44,23 @@ class ChatOwnershipMigrationInstrumentedTest {
                 "INSERT INTO chat_messages_fts(message_id,conversation_id,text,is_user,timestamp) " +
                     "VALUES('legacy-message','legacy-conversation','accountfixture text',1,3)"
             )
+            execSQL(
+                "INSERT INTO knowledge_chunks(sourceTitle,content,keywords,sourceType,createdAt) " +
+                    "VALUES('Legacy knowledge','legacy knowledge','legacy','text',4)"
+            )
+            execSQL(
+                "INSERT INTO knowledge_edges(fromConcept,relation,toConcept,weight,updatedAt) " +
+                    "VALUES('legacy-source','relates','legacy-target',0.8,5)"
+            )
             close()
         }
 
         helper.runMigrationsAndValidate(
             TEST_DB,
-            10,
+            11,
             true,
-            ChatDatabase.MIGRATION_9_10
+            ChatDatabase.MIGRATION_9_10,
+            ChatDatabase.MIGRATION_10_11
         ).apply {
             query("PRAGMA foreign_key_check").use { cursor -> assertEquals(0, cursor.count) }
             query("PRAGMA index_list('conversations')").use { cursor ->
@@ -75,6 +84,14 @@ class ChatOwnershipMigrationInstrumentedTest {
             }
             query("SELECT message_id FROM chat_messages_fts WHERE chat_messages_fts MATCH 'accountfixture'")
                 .use { cursor -> assertTrue(cursor.moveToFirst()) }
+            query("SELECT ownerScope FROM knowledge_chunks WHERE sourceTitle='Legacy knowledge'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(ChatOwnerScope.LEGACY_UNCLASSIFIED, cursor.getString(0))
+            }
+            query("SELECT ownerScope FROM knowledge_edges WHERE fromConcept='legacy-source'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(ChatOwnerScope.LEGACY_UNCLASSIFIED, cursor.getString(0))
+            }
             close()
         }
 
@@ -84,12 +101,16 @@ class ChatOwnershipMigrationInstrumentedTest {
         }
         assertEquals(1, claim.claimedConversations)
         assertEquals(1, claim.claimedMessages)
+        assertEquals(1, claim.claimedKnowledgeChunks)
+        assertEquals(1, claim.claimedKnowledgeEdges)
         kotlinx.coroutines.runBlocking {
             val dao = database.chatDao()
             assertEquals(0, dao.countConversationsForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED))
             assertEquals(0, dao.countMessagesForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED))
             assertEquals(1, dao.countConversationsForScope(ChatOwnerScope.account("fixture-account")))
             assertEquals(1, dao.countMessagesForScope(ChatOwnerScope.account("fixture-account")))
+            assertEquals(1, dao.countKnowledgeChunksForScope(ChatOwnerScope.account("fixture-account")))
+            assertEquals(1, dao.countKnowledgeEdgesForScope(ChatOwnerScope.account("fixture-account")))
         }
         assertEquals(1, ftsCount(database, "accountfixture"))
         database.close()
@@ -117,11 +138,33 @@ class ChatOwnershipMigrationInstrumentedTest {
                 "INSERT INTO chat_messages_fts(message_id,conversation_id,text,is_user,timestamp) " +
                     "VALUES('guest-message','guest-conversation','guestfixture text',1,6)"
             )
+            dao.insertKnowledgeChunk(
+                KnowledgeChunkEntity(
+                    sourceTitle = "Guest knowledge",
+                    content = "guestfixture knowledge",
+                    keywords = "guestfixture",
+                    createdAt = 7,
+                    ownerScope = guestScope
+                )
+            )
+            dao.insertKnowledgeEdge(
+                KnowledgeEdgeEntity(
+                    fromConcept = "guestfixture",
+                    relation = "relates",
+                    toConcept = "knowledge",
+                    updatedAt = 8,
+                    ownerScope = guestScope
+                )
+            )
             assertEquals(1, ftsCount(database, "guestfixture"))
             assertEquals(1, ftsCount(database, "accountfixture"))
             RoomGuestScopeChatCleaner(dao).clear(guestScope)
             assertEquals(0, dao.countConversationsForScope(guestScope))
             assertEquals(1, dao.countConversationsForScope(ChatOwnerScope.account("fixture-account")))
+            assertEquals(0, dao.countKnowledgeChunksForScope(guestScope))
+            assertEquals(0, dao.countKnowledgeEdgesForScope(guestScope))
+            assertEquals(1, dao.countKnowledgeChunksForScope(ChatOwnerScope.account("fixture-account")))
+            assertEquals(1, dao.countKnowledgeEdgesForScope(ChatOwnerScope.account("fixture-account")))
             assertEquals(0, ftsCount(database, "guestfixture"))
             assertEquals(1, ftsCount(database, "accountfixture"))
             val repeatedCleanup = RoomGuestScopeChatCleaner(dao).clear(guestScope)
@@ -160,7 +203,7 @@ class ChatOwnershipMigrationInstrumentedTest {
         context,
         ChatDatabase::class.java,
         TEST_DB
-    ).addMigrations(ChatDatabase.MIGRATION_9_10).build()
+    ).addMigrations(ChatDatabase.MIGRATION_9_10, ChatDatabase.MIGRATION_10_11).build()
 
     private companion object {
         const val TEST_DB = "chat-ownership-migration-instrumented"

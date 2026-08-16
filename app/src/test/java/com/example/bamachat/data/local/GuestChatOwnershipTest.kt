@@ -133,6 +133,7 @@ class GuestChatOwnershipTest {
     fun authCancellationAndFailureKeepGuestDataAndRestoreUsableGuestScope() = runBlocking {
         val guest = scopeStore.startNewGuestSession()
         seedChat("guest-conversation", "guest-message", "guest body", guest)
+        repository.saveKnowledgeChunk(guest, "Guest", "guest knowledge", "guest")
 
         scopeStore.beginAccountTransitionIfGuest()
         assertTrue(scopeStore.isAccountTransitionPending())
@@ -143,6 +144,84 @@ class GuestChatOwnershipTest {
         assertEquals(guest, scopeStore.currentScope())
         assertNotNull(repository.getConversation("guest-conversation", guest))
         assertEquals(1, repository.getMessages("guest-conversation", guest).first().size)
+        assertEquals(1, repository.searchKnowledge(guest, "guest").size)
+    }
+
+    @Test
+    fun repeatedGuestEntryReusesPersistedScopeAndCancelsPreparedTransition() = runBlocking {
+        val guest = scopeStore.startNewGuestSession()
+        seedChat("reused-guest", "reused-message", "still reachable", guest)
+        repository.saveKnowledgeChunk(guest, "Guest", "reused knowledge", "reused")
+        scopeStore.prepareAccountTransition()
+
+        val reused = scopeStore.startNewGuestSession()
+
+        assertEquals(guest, reused)
+        assertEquals(guest, scopeStore.currentScope())
+        assertEquals(AccountTransitionPhase.NONE, scopeStore.transitionPhase())
+        assertFalse(scopeStore.isAccountTransitionPending())
+        assertNotNull(repository.getConversation("reused-guest", reused))
+        assertEquals(1, repository.searchKnowledge(reused, "reused").size)
+    }
+
+    @Test
+    fun successfulTransitionScopesKnowledgeCleansOnlyCurrentGuestAndClaimsLegacy() = runBlocking {
+        val guest = scopeStore.startNewGuestSession()
+        val otherGuest = ChatOwnerScope.guest("other-knowledge-session")
+        val account = ChatOwnerScope.account("knowledge-account")
+        repository.saveKnowledgeChunk(guest, "Guest", "current guest knowledge", "current")
+        repository.saveKnowledgeChunk(otherGuest, "Other", "other guest knowledge", "other")
+        repository.saveKnowledgeChunk(account, "Account", "account knowledge", "account")
+        repository.saveKnowledgeEdge(guest, "shared", "relates", "concept", 0.4f)
+        repository.saveKnowledgeEdge(otherGuest, "shared", "relates", "concept", 0.5f)
+        repository.saveKnowledgeEdge(account, "shared", "relates", "concept", 0.6f)
+        database.chatDao().insertKnowledgeChunk(
+            KnowledgeChunkEntity(
+                sourceTitle = "Legacy",
+                content = "legacy knowledge",
+                keywords = "legacy",
+                createdAt = 1L,
+                ownerScope = ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        database.chatDao().insertKnowledgeEdge(
+            KnowledgeEdgeEntity(
+                fromConcept = "shared",
+                relation = "relates",
+                toConcept = "concept",
+                weight = 0.9f,
+                updatedAt = 2L,
+                ownerScope = ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { repository.searchKnowledge(ChatOwnerScope.LEGACY_UNCLASSIFIED, "legacy") }
+        }
+
+        scopeStore.prepareAccountTransition()
+        val result = GuestChatTransitionCoordinator(
+            scopeStore,
+            RoomGuestScopeChatCleaner(database.chatDao()),
+            RoomLegacyScopeClaimer(database),
+            repository,
+            workspaceStore
+        ).completeAuthenticatedTransition("knowledge-account")
+
+        assertEquals(1, result.cleanup?.deletedKnowledgeChunks)
+        assertEquals(1, result.cleanup?.deletedKnowledgeEdges)
+        assertEquals(1, result.legacyClaim.claimedKnowledgeChunks)
+        assertEquals(1, result.legacyClaim.claimedKnowledgeEdges)
+        assertEquals(0, database.chatDao().countKnowledgeChunksForScope(guest))
+        assertEquals(0, database.chatDao().countKnowledgeEdgesForScope(guest))
+        assertEquals(1, database.chatDao().countKnowledgeChunksForScope(otherGuest))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(otherGuest))
+        assertEquals(2, database.chatDao().countKnowledgeChunksForScope(account))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(account))
+        assertEquals(0, database.chatDao().countKnowledgeChunksForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED))
+        assertEquals(0, database.chatDao().countKnowledgeEdgesForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED))
+        assertEquals(1, repository.searchKnowledge(account, "legacy").size)
+        assertEquals(1, repository.getKnowledgeEdges(account).size)
+        assertEquals(1, repository.searchKnowledge(otherGuest, "other").size)
     }
 
     @Test

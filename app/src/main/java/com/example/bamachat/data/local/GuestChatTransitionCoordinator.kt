@@ -34,11 +34,24 @@ class RoomLegacyScopeClaimer @Inject constructor(
         val dao = database.chatDao()
         val conversationIds = dao.getConversationIdsForScope(legacyScope)
         database.openHelper.writableDatabase.execSQL("PRAGMA defer_foreign_keys = ON")
+        val claimedKnowledgeChunks = dao.claimLegacyKnowledgeChunks(accountScope, legacyScope)
+        val claimedKnowledgeEdges = dao.countKnowledgeEdgesForScope(legacyScope)
+        dao.mergeDuplicateLegacyKnowledgeEdges(accountScope, legacyScope)
+        dao.deleteDuplicateLegacyKnowledgeEdges(accountScope, legacyScope)
+        dao.claimLegacyKnowledgeEdges(accountScope, legacyScope)
         val claimedMessages = dao.claimLegacyMessages(accountScope, legacyScope)
         val claimedConversations = dao.claimLegacyConversations(accountScope, legacyScope)
         check(dao.countMessagesForScope(legacyScope) == 0) { "Legacy messages remain after claim" }
         check(dao.countConversationsForScope(legacyScope) == 0) { "Legacy conversations remain after claim" }
-        LegacyScopeClaimResult(conversationIds, claimedConversations, claimedMessages)
+        check(dao.countKnowledgeChunksForScope(legacyScope) == 0) { "Legacy knowledge chunks remain after claim" }
+        check(dao.countKnowledgeEdgesForScope(legacyScope) == 0) { "Legacy knowledge edges remain after claim" }
+        LegacyScopeClaimResult(
+            conversationIds,
+            claimedConversations,
+            claimedMessages,
+            claimedKnowledgeChunks,
+            claimedKnowledgeEdges
+        )
     }
 }
 

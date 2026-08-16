@@ -268,45 +268,60 @@ class ChatRepository(private val chatDao: ChatDao) {
 
     // ===== RAG: Knowledge Chunks =====
     suspend fun saveKnowledgeChunk(
+        ownerScope: String,
         sourceTitle: String,
         content: String,
         keywords: String,
         sourceType: String = "text"
     ) {
         if (content.isBlank()) return
+        writableScope(ownerScope)
         chatDao.insertKnowledgeChunk(
             KnowledgeChunkEntity(
                 sourceTitle = sourceTitle.ifBlank { "Unbekannt" },
                 content = content.trim(),
                 keywords = keywords.trim(),
                 sourceType = sourceType,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                ownerScope = ownerScope
             )
         )
     }
 
-    suspend fun searchKnowledge(queryToken: String, limit: Int = 5): List<KnowledgeChunkEntity> {
+    suspend fun searchKnowledge(
+        ownerScope: String,
+        queryToken: String,
+        limit: Int = 5
+    ): List<KnowledgeChunkEntity> {
         val token = queryToken.trim().lowercase()
         if (token.isBlank()) return emptyList()
-        return chatDao.searchKnowledgeChunks("%$token%", limit)
+        return chatDao.searchKnowledgeChunks(readableScope(ownerScope), "%$token%", limit)
     }
 
     // ===== Knowledge Graph =====
-    suspend fun saveKnowledgeEdge(fromConcept: String, relation: String, toConcept: String, weight: Float = 1f) {
+    suspend fun saveKnowledgeEdge(
+        ownerScope: String,
+        fromConcept: String,
+        relation: String,
+        toConcept: String,
+        weight: Float = 1f
+    ) {
         if (fromConcept.isBlank() || relation.isBlank() || toConcept.isBlank()) return
+        writableScope(ownerScope)
         chatDao.insertKnowledgeEdge(
             KnowledgeEdgeEntity(
                 fromConcept = fromConcept.trim(),
                 relation = relation.trim(),
                 toConcept = toConcept.trim(),
                 weight = weight,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = System.currentTimeMillis(),
+                ownerScope = ownerScope
             )
         )
     }
 
-    suspend fun getKnowledgeEdges(limit: Int = 12): List<KnowledgeEdgeEntity> =
-        chatDao.getKnowledgeEdges(limit)
+    suspend fun getKnowledgeEdges(ownerScope: String, limit: Int = 12): List<KnowledgeEdgeEntity> =
+        chatDao.getKnowledgeEdges(readableScope(ownerScope), limit)
 
     // ===== Persona Training =====
     suspend fun savePersonaTrainingExample(

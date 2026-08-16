@@ -84,7 +84,10 @@ class ChatSessionScopeStore @Inject constructor(
 
     @Synchronized
     fun startNewGuestSession(): String {
-        val scope = ChatOwnerScope.guest(UUID.randomUUID().toString())
+        check(transitionPhase().ordinal <= AccountTransitionPhase.PREPARED.ordinal) {
+            "Ein bestätigter Kontoübergang darf nicht durch eine Gast-Sitzung ersetzt werden."
+        }
+        val scope = storedGuestScope() ?: ChatOwnerScope.guest(UUID.randomUUID().toString())
         val committed = prefs.edit()
             .putString(KEY_GUEST_SCOPE, scope)
             .putString(KEY_ACTIVE_SCOPE, scope)

@@ -31,27 +31,28 @@ class KnowledgeService(
         }
     }
 
-    suspend fun extractAndSaveEdges(text: String, weight: Float = 0.7f) {
+    suspend fun extractAndSaveEdges(text: String, ownerScope: String, weight: Float = 0.7f) {
         val edges = KnowledgeGraphExtractor.extractEdges(text)
         edges.forEach { edge ->
-            repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = weight)
+            repo.saveKnowledgeEdge(ownerScope, edge.from, edge.relation, edge.to, weight = weight)
         }
     }
 
-    suspend fun importDocument(uri: Uri): String? {
+    suspend fun importDocument(uri: Uri, ownerScope: String): String? {
         return withContext(Dispatchers.IO) {
             try {
                 val doc = DocumentIngestor.ingest(app, uri) ?: return@withContext null
                 splitIntoChunks(doc.text, 700, 120).take(40).forEach { chunk ->
                     val keywords = extractKeywords(chunk).joinToString(",")
                     repo.saveKnowledgeChunk(
+                        ownerScope = ownerScope,
                         sourceTitle = doc.title,
                         content = chunk,
                         keywords = keywords,
                         sourceType = doc.sourceType
                     )
                     KnowledgeGraphExtractor.extractEdges(chunk).forEach { edge ->
-                        repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = 1.0f)
+                        repo.saveKnowledgeEdge(ownerScope, edge.from, edge.relation, edge.to, weight = 1.0f)
                     }
                 }
                 AppTelemetry.logEvent("knowledge_import_success", mapOf("source" to doc.sourceType))
@@ -63,37 +64,43 @@ class KnowledgeService(
         }
     }
 
-    suspend fun ingestText(title: String, sourceType: String, text: String): Boolean {
+    suspend fun ingestText(title: String, sourceType: String, text: String, ownerScope: String): Boolean {
         if (text.length < 20) return false
         splitIntoChunks(text, 700, 120).take(50).forEach { chunk ->
             val keywords = extractKeywords(chunk).joinToString(",")
             repo.saveKnowledgeChunk(
+                ownerScope = ownerScope,
                 sourceTitle = title,
                 content = chunk,
                 keywords = keywords,
                 sourceType = sourceType
             )
             KnowledgeGraphExtractor.extractEdges(chunk).forEach { edge ->
-                repo.saveKnowledgeEdge(edge.from, edge.relation, edge.to, weight = 0.9f)
+                repo.saveKnowledgeEdge(ownerScope, edge.from, edge.relation, edge.to, weight = 0.9f)
             }
         }
         return true
     }
 
-    suspend fun getEdges(limit: Int = 12) = repo.getKnowledgeEdges(limit)
+    suspend fun getEdges(ownerScope: String, limit: Int = 12) = repo.getKnowledgeEdges(ownerScope, limit)
 
-    suspend fun searchKnowledge(token: String, limit: Int = 5) =
-        repo.searchKnowledge(token, limit)
+    suspend fun searchKnowledge(token: String, ownerScope: String, limit: Int = 5) =
+        repo.searchKnowledge(ownerScope, token, limit)
 
     suspend fun getFacts(personaName: String, limit: Int = 8) =
         repo.getUserMemoryFacts(personaName, limit)
 
-    suspend fun retrieveRelevantContext(query: String, personaName: String, maxChunks: Int = 3): String {
+    suspend fun retrieveRelevantContext(
+        query: String,
+        personaName: String,
+        ownerScope: String,
+        maxChunks: Int = 3
+    ): String {
         val keywords = extractKeywords(query)
         if (keywords.isEmpty()) return ""
 
         val chunkResults = keywords.take(3).flatMap { kw ->
-            repo.searchKnowledge(kw, limit = maxChunks)
+            repo.searchKnowledge(ownerScope, kw, limit = maxChunks)
         }.distinctBy { it.id }.take(maxChunks)
 
         val facts = repo.getUserMemoryFacts(personaName, limit = 5)
@@ -101,7 +108,7 @@ class KnowledgeService(
                 keywords.any { kw -> fact.factText.contains(kw, ignoreCase = true) }
             }
 
-        val edges = repo.getKnowledgeEdges(limit = 20)
+        val edges = repo.getKnowledgeEdges(ownerScope, limit = 20)
             .filter { edge ->
                 keywords.any { kw ->
                     edge.fromConcept.contains(kw, ignoreCase = true) ||

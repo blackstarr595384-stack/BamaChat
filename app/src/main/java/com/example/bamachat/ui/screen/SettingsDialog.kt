@@ -164,7 +164,6 @@ fun SettingsDialog(
     val uiCornerRoundnessScale by viewModel.uiCornerRoundnessScale.collectAsState()
     val uiShadowIntensityScale by viewModel.uiShadowIntensityScale.collectAsState()
     val uiSurfaceOpacity by viewModel.uiSurfaceOpacity.collectAsState()
-    val guestAutoClearOnAccountSignIn by viewModel.guestAutoClearOnAccountSignIn.collectAsState()
     val guestAutoClearOnSignOut by viewModel.guestAutoClearOnSignOut.collectAsState()
     val cloudPersonaLastSyncAt by viewModel.cloudPersonaLastSyncAt.collectAsState()
     val cloudPersonaLastSyncStatus by viewModel.cloudPersonaLastSyncStatus.collectAsState()
@@ -1628,12 +1627,6 @@ fun SettingsDialog(
                                     onClick = { _uriHandler.openUri(LegalPolicy.SUPPORT_URL) }
                                 )
                             )
-                        )
-                    }
-                    SettingRow("Gastdaten bei Konto-Login löschen", "Schützt private Testdaten beim Wechsel auf echtes Konto") {
-                        Switch(
-                            checked = guestAutoClearOnAccountSignIn,
-                            onCheckedChange = { viewModel.setGuestAutoClearOnAccountSignIn(it) }
                         )
                     }
                     SettingRow("Gastdaten beim Abmelden löschen", "Löscht lokale Chat-Verläufe und gelernte Anpassungen") {

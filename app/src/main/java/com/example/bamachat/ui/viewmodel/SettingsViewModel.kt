@@ -387,11 +387,6 @@ class SettingsViewModel @Inject constructor(
     )
     val uiSurfaceOpacity: StateFlow<Float> = _uiSurfaceOpacity.asStateFlow()
 
-    private val _guestAutoClearOnAccountSignIn = MutableStateFlow(
-        prefs.getBoolean("guest_auto_clear_on_account_signin", true)
-    )
-    val guestAutoClearOnAccountSignIn: StateFlow<Boolean> = _guestAutoClearOnAccountSignIn.asStateFlow()
-
     private val _guestAutoClearOnSignOut = MutableStateFlow(
         prefs.getBoolean("guest_auto_clear_on_signout", true)
     )
@@ -1153,11 +1148,6 @@ class SettingsViewModel @Inject constructor(
         setBubbleAnimations(true)
         setStreamingEnabled(true)
         setDisplayPreset(DisplaySettingsPresets.STANDARD)
-    }
-
-    fun setGuestAutoClearOnAccountSignIn(enabled: Boolean) {
-        _guestAutoClearOnAccountSignIn.value = enabled
-        prefs.edit().putBoolean("guest_auto_clear_on_account_signin", enabled).apply()
     }
 
     fun setGuestAutoClearOnSignOut(enabled: Boolean) {
