@@ -6,6 +6,7 @@ import androidx.room.Room
 import com.example.bamachat.data.cloud.isCloudSyncEligible
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.data.model.ChatMessage
+import com.example.bamachat.util.LocalDataSanitizer
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -145,6 +146,72 @@ class GuestChatOwnershipTest {
         assertNotNull(repository.getConversation("guest-conversation", guest))
         assertEquals(1, repository.getMessages("guest-conversation", guest).first().size)
         assertEquals(1, repository.searchKnowledge(guest, "guest").size)
+    }
+
+    @Test
+    fun localDataSanitizerDeletesOnlyRequestedGuestAndPreservesAccountMetadata() = runBlocking {
+        val requestedGuest = ChatOwnerScope.guest("sanitizer-target")
+        val otherGuest = ChatOwnerScope.guest("sanitizer-other")
+        val account = ChatOwnerScope.account("sanitizer-account")
+        seedSanitizerScope(requestedGuest, "target")
+        seedSanitizerScope(otherGuest, "other")
+        seedSanitizerScope(account, "account")
+        database.chatDao().insertPromptVersion(
+            PersonaPromptVersionEntity(
+                personaName = "TEST_PERSONA",
+                promptText = "retained prompt",
+                createdAt = 10L
+            )
+        )
+        prefs.edit()
+            .putString("project_workspaces_json", "test-workspace")
+            .putString("active_workspace_id", "test-workspace-id")
+            .putString("ai_provider", "test-provider")
+            .putString("openrouter_api_key", "test-api-key-sentinel")
+            .commit()
+
+        val result = LocalDataSanitizer(
+            RuntimeEnvironment.getApplication(),
+            prefs,
+            database.chatDao()
+        ).clearGuestSessionData(requestedGuest)
+
+        assertEquals(1, result.deletedConversations)
+        assertEquals(1, result.deletedMessages)
+        assertEquals(1, result.deletedKnowledgeChunks)
+        assertEquals(1, result.deletedKnowledgeEdges)
+        assertNull(repository.getConversation("sanitizer-target", requestedGuest))
+        assertEquals(0, database.chatDao().countKnowledgeChunksForScope(requestedGuest))
+        assertEquals(0, database.chatDao().countKnowledgeEdgesForScope(requestedGuest))
+        assertSanitizerScopePresent(otherGuest, "other")
+        assertSanitizerScopePresent(account, "account")
+        assertNotNull(database.chatDao().getLatestPromptVersionForPersona("TEST_PERSONA"))
+        assertEquals("test-workspace", prefs.getString("project_workspaces_json", null))
+        assertEquals("test-workspace-id", prefs.getString("active_workspace_id", null))
+        assertEquals("test-provider", prefs.getString("ai_provider", null))
+        assertEquals("test-api-key-sentinel", prefs.getString("openrouter_api_key", null))
+    }
+
+    @Test
+    fun localDataSanitizerRejectsNonGuestScopesWithoutDeletingData() = runBlocking {
+        val guest = ChatOwnerScope.guest("sanitizer-protected-guest")
+        val account = ChatOwnerScope.account("sanitizer-protected-account")
+        seedSanitizerScope(guest, "protected-guest")
+        seedSanitizerScope(account, "protected-account")
+        val sanitizer = LocalDataSanitizer(
+            RuntimeEnvironment.getApplication(),
+            prefs,
+            database.chatDao()
+        )
+
+        listOf(account, ChatOwnerScope.LEGACY_UNCLASSIFIED, "", "guest:", "guest:bad scope").forEach { scope ->
+            assertThrows(IllegalArgumentException::class.java) {
+                runBlocking { sanitizer.clearGuestSessionData(scope) }
+            }
+        }
+
+        assertSanitizerScopePresent(guest, "protected-guest")
+        assertSanitizerScopePresent(account, "protected-account")
     }
 
     @Test
@@ -334,6 +401,24 @@ class GuestChatOwnershipTest {
     @Test
     fun legacyClaimFailureKeepsPersistentGateClosedUntilSafeResume() = runBlocking {
         insertLegacyChat("legacy-failure", "legacy-message-failure")
+        database.chatDao().insertKnowledgeChunk(
+            KnowledgeChunkEntity(
+                sourceTitle = "Legacy failure",
+                content = "legacy ownership must remain unchanged",
+                keywords = "legacy",
+                createdAt = 1L,
+                ownerScope = ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        database.chatDao().insertKnowledgeEdge(
+            KnowledgeEdgeEntity(
+                fromConcept = "legacy-failure",
+                relation = "relates",
+                toConcept = "unchanged",
+                updatedAt = 2L,
+                ownerScope = ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
         scopeStore.prepareAccountTransition()
         val failingCoordinator = GuestChatTransitionCoordinator(
             scopeStore,
@@ -351,6 +436,8 @@ class GuestChatOwnershipTest {
         assertTrue(scopeStore.isAccountTransitionPending())
         assertFalse(scopeStore.isCloudSyncAllowed("uid-failure"))
         assertEquals(1, repository.legacyConversationCount())
+        assertEquals(1, repository.legacyKnowledgeChunkCount())
+        assertEquals(1, repository.legacyKnowledgeEdgeCount())
 
         val restoredStore = ChatSessionScopeStore(prefs)
         GuestChatTransitionCoordinator(
@@ -363,6 +450,16 @@ class GuestChatOwnershipTest {
 
         assertEquals(ChatOwnerScope.account("uid-failure"), restoredStore.currentScope())
         assertTrue(restoredStore.isCloudSyncAllowed("uid-failure"))
+        assertEquals(0, repository.legacyKnowledgeChunkCount())
+        assertEquals(0, repository.legacyKnowledgeEdgeCount())
+        assertEquals(
+            1,
+            database.chatDao().countKnowledgeChunksForScope(ChatOwnerScope.account("uid-failure"))
+        )
+        assertEquals(
+            1,
+            database.chatDao().countKnowledgeEdgesForScope(ChatOwnerScope.account("uid-failure"))
+        )
     }
 
     private suspend fun assertSelectiveSuccessfulTransition() {
@@ -427,6 +524,19 @@ class GuestChatOwnershipTest {
             message = ChatMessage(id = messageId, text = text, isUser = true, timestamp = 1L),
             ownerScope = scope
         )
+    }
+
+    private suspend fun seedSanitizerScope(ownerScope: String, suffix: String) {
+        val conversationId = "sanitizer-$suffix"
+        seedChat(conversationId, "sanitizer-message-$suffix", suffix, ownerScope)
+        repository.saveKnowledgeChunk(ownerScope, suffix, "$suffix knowledge", suffix)
+        repository.saveKnowledgeEdge(ownerScope, suffix, "relates", "target-$suffix")
+    }
+
+    private suspend fun assertSanitizerScopePresent(ownerScope: String, suffix: String) {
+        assertNotNull(repository.getConversation("sanitizer-$suffix", ownerScope))
+        assertEquals(1, database.chatDao().countKnowledgeChunksForScope(ownerScope))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(ownerScope))
     }
 
     private suspend fun insertLegacyChat(conversationId: String, messageId: String) {

@@ -1,14 +1,31 @@
 package com.example.bamachat.util
 
 import android.content.Context
+import android.content.SharedPreferences
+import com.example.bamachat.data.local.ChatDao
 import com.example.bamachat.data.local.ChatDatabase
+import com.example.bamachat.data.local.ChatOwnerScope
+import com.example.bamachat.data.local.ScopedChatCleanupResult
 
-class LocalDataSanitizer(context: Context) {
+class LocalDataSanitizer internal constructor(
+    context: Context,
+    private val prefs: SharedPreferences,
+    private val chatDao: ChatDao
+) {
     private val appContext = context.applicationContext
-    private val prefs = appContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    private val chatDao = ChatDatabase.getDatabase(appContext).chatDao()
 
-    suspend fun clearGuestSessionData(clearApiKeys: Boolean = false) {
+    constructor(context: Context) : this(
+        context = context.applicationContext,
+        prefs = context.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE),
+        chatDao = ChatDatabase.getDatabase(context.applicationContext).chatDao()
+    )
+
+    suspend fun clearGuestSessionData(ownerScope: String): ScopedChatCleanupResult {
+        require(ChatOwnerScope.isGuest(ownerScope)) { "Only a valid guest scope can be cleared" }
+        return chatDao.deleteChatDataForScope(ownerScope)
+    }
+
+    private suspend fun clearAllLocalData(clearApiKeys: Boolean) {
         chatDao.deleteAllMessages()
         chatDao.deleteAllConversations()
         chatDao.deleteAllPersonaMemory()
@@ -70,7 +87,7 @@ class LocalDataSanitizer(context: Context) {
     }
 
     suspend fun clearAllAppData(clearApiKeys: Boolean = false) {
-        clearGuestSessionData(clearApiKeys = clearApiKeys)
+        clearAllLocalData(clearApiKeys = clearApiKeys)
         if (clearApiKeys) {
             SecureSettingsStore.clear(appContext)
         }

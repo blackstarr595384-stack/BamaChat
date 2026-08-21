@@ -75,6 +75,7 @@ fun SettingsDialog(
     mcpWorkflowManager: McpWorkflowManager? = null
 ) {
     val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
+    val guestCleanupAvailable by viewModel.guestCleanupAvailable.collectAsState()
     val primaryColor by viewModel.primaryColorInt.collectAsState()
     val fontSize by viewModel.fontSize.collectAsState()
     val multiProvider by viewModel.multiProviderEnabled.collectAsState()
@@ -1635,16 +1636,18 @@ fun SettingsDialog(
                             onCheckedChange = { viewModel.setGuestAutoClearOnSignOut(it) }
                         )
                     }
-                    SettingRow("Gast-/Prompt-Daten jetzt löschen", "Löscht nur temporäre Daten auf diesem Gerät") {
-                        CompactTextActionRow(
-                            actions = listOf(
-                                CompactTextAction(
-                                    label = "Bereinigen",
-                                    onClick = { viewModel.clearGuestPrivateData() },
-                                    color = Color(0xFFE17055)
+                    if (guestCleanupAvailable) {
+                        SettingRow("Gastdaten jetzt löschen", "Löscht nur Daten dieser Gast-Sitzung") {
+                            CompactTextActionRow(
+                                actions = listOf(
+                                    CompactTextAction(
+                                        label = "Bereinigen",
+                                        onClick = { viewModel.clearGuestPrivateData() },
+                                        color = Color(0xFFE17055)
+                                    )
                                 )
                             )
-                        )
+                        }
                     }
                     SettingRow("Lokale Daten löschen", "Setzt nur lokale Einstellungen und Chats zurück") {
                         CompactTextActionRow(

@@ -1,11 +1,13 @@
 package com.example.bamachat.data.local
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.repository.ChatRepository
+import com.example.bamachat.util.LocalDataSanitizer
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -24,6 +26,7 @@ class PostPr7OwnershipInstrumentedTest {
     private lateinit var repository: ChatRepository
     private lateinit var scopeStore: ChatSessionScopeStore
     private lateinit var workspaceStore: ConversationWorkspaceStore
+    private lateinit var prefs: SharedPreferences
 
     @Before
     fun setUp() {
@@ -31,7 +34,7 @@ class PostPr7OwnershipInstrumentedTest {
             .allowMainThreadQueries()
             .build()
         repository = ChatRepository(database.chatDao())
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
         scopeStore = ChatSessionScopeStore(prefs)
         workspaceStore = ConversationWorkspaceStore(prefs)
@@ -100,6 +103,53 @@ class PostPr7OwnershipInstrumentedTest {
         assertEquals(1, database.chatDao().countKnowledgeChunksForScope(accountScope))
         assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(accountScope))
         assertEquals(1, repository.searchKnowledge(accountScope, "retained").size)
+    }
+
+    @Test
+    fun localDataSanitizerDeletesOnlyTargetGuestAndPreservesAccountMetadata() = runBlocking {
+        val targetGuest = ChatOwnerScope.guest("device-cleanup-target")
+        val otherGuest = ChatOwnerScope.guest("device-cleanup-other")
+        val account = ChatOwnerScope.account("device-cleanup-account")
+        seedScopedData(targetGuest, "target")
+        seedScopedData(otherGuest, "other")
+        seedScopedData(account, "account")
+        prefs.edit()
+            .putString("project_workspaces_json", "device-workspace")
+            .putString("active_workspace_id", "device-workspace-id")
+            .putString("ai_provider", "device-provider")
+            .putString("openrouter_api_key", "device-test-key-sentinel")
+            .commit()
+
+        val result = LocalDataSanitizer(context, prefs, database.chatDao())
+            .clearGuestSessionData(targetGuest)
+
+        assertEquals(1, result.deletedConversations)
+        assertEquals(1, result.deletedMessages)
+        assertNull(repository.getConversation("device-target", targetGuest))
+        assertEquals(0, database.chatDao().countKnowledgeChunksForScope(targetGuest))
+        assertEquals(0, database.chatDao().countKnowledgeEdgesForScope(targetGuest))
+        assertNotNull(repository.getConversation("device-other", otherGuest))
+        assertNotNull(repository.getConversation("device-account", account))
+        assertEquals(1, database.chatDao().countKnowledgeChunksForScope(otherGuest))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(otherGuest))
+        assertEquals(1, database.chatDao().countKnowledgeChunksForScope(account))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(account))
+        assertEquals("device-workspace", prefs.getString("project_workspaces_json", null))
+        assertEquals("device-workspace-id", prefs.getString("active_workspace_id", null))
+        assertEquals("device-provider", prefs.getString("ai_provider", null))
+        assertEquals("device-test-key-sentinel", prefs.getString("openrouter_api_key", null))
+    }
+
+    private suspend fun seedScopedData(ownerScope: String, suffix: String) {
+        val conversationId = "device-$suffix"
+        repository.createConversation(conversationId, ownerScope = ownerScope)
+        repository.saveMessage(
+            conversationId,
+            ChatMessage("device-message-$suffix", "device $suffix", true, 10L),
+            ownerScope
+        )
+        repository.saveKnowledgeChunk(ownerScope, "Device $suffix", "device $suffix knowledge", suffix)
+        repository.saveKnowledgeEdge(ownerScope, suffix, "relates", "device-$suffix-target")
     }
 
     private companion object {

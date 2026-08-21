@@ -35,7 +35,7 @@ abstract class ChatDatabase : RoomDatabase() {
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `conversations` (" +
                     "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
-                    "`updatedAt` INTEGER NOT NULL, `personaName` TEXT NOT NULL DEFAULT 'ASSISTANT', " +
+                    "`updatedAt` INTEGER NOT NULL, `personaName` TEXT NOT NULL, " +
                     "PRIMARY KEY(`id`))"
             )
             if (!columnExists(db, "conversations", "personaName")) {
@@ -95,7 +95,7 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `persona_memory` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `personaName` TEXT NOT NULL, " +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personaName` TEXT NOT NULL, " +
                     "`memoryText` TEXT NOT NULL, `sourceMessageId` TEXT, `createdAt` INTEGER NOT NULL, " +
                     "`updatedAt` INTEGER NOT NULL)"
             )
@@ -109,7 +109,7 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `persona_feedback` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `personaName` TEXT NOT NULL, " +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personaName` TEXT NOT NULL, " +
                     "`messageId` TEXT NOT NULL, `helpful` INTEGER NOT NULL, `note` TEXT, " +
                     "`createdAt` INTEGER NOT NULL)"
             )
@@ -123,9 +123,9 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `persona_prompt_versions` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `personaName` TEXT NOT NULL, " +
-                    "`promptText` TEXT NOT NULL, `source` TEXT NOT NULL DEFAULT 'manual_edit', " +
-                    "`createdAt` INTEGER NOT NULL, `isRollbackPoint` INTEGER NOT NULL DEFAULT 0)"
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personaName` TEXT NOT NULL, " +
+                    "`promptText` TEXT NOT NULL, `source` TEXT NOT NULL, " +
+                    "`createdAt` INTEGER NOT NULL, `isRollbackPoint` INTEGER NOT NULL)"
             )
             db.execSQL(
                 "CREATE INDEX IF NOT EXISTS `index_persona_prompt_versions_personaName` " +
@@ -137,8 +137,8 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `user_memory_facts` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `personaName` TEXT NOT NULL, " +
-                    "`factText` TEXT NOT NULL, `confidence` REAL NOT NULL DEFAULT 0.6, " +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personaName` TEXT NOT NULL, " +
+                    "`factText` TEXT NOT NULL, `confidence` REAL NOT NULL, " +
                     "`sourceMessageId` TEXT, `createdAt` INTEGER NOT NULL, " +
                     "`updatedAt` INTEGER NOT NULL)"
             )
@@ -152,9 +152,9 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `knowledge_chunks` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `sourceTitle` TEXT NOT NULL, " +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `sourceTitle` TEXT NOT NULL, " +
                     "`content` TEXT NOT NULL, `keywords` TEXT NOT NULL, " +
-                    "`sourceType` TEXT NOT NULL DEFAULT 'text', `createdAt` INTEGER NOT NULL)"
+                    "`sourceType` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
             )
             db.execSQL(
                 "CREATE INDEX IF NOT EXISTS `index_knowledge_chunks_sourceTitle` " +
@@ -166,9 +166,9 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `knowledge_edges` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `fromConcept` TEXT NOT NULL, " +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `fromConcept` TEXT NOT NULL, " +
                     "`relation` TEXT NOT NULL, `toConcept` TEXT NOT NULL, " +
-                    "`weight` REAL NOT NULL DEFAULT 1.0, `updatedAt` INTEGER NOT NULL)"
+                    "`weight` REAL NOT NULL, `updatedAt` INTEGER NOT NULL)"
             )
             db.execSQL(
                 "CREATE INDEX IF NOT EXISTS `index_knowledge_edges_fromConcept` " +
@@ -184,10 +184,10 @@ abstract class ChatDatabase : RoomDatabase() {
             )
             db.execSQL(
                 "CREATE TABLE IF NOT EXISTS `persona_training_examples` (" +
-                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT, `personaName` TEXT NOT NULL, " +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `personaName` TEXT NOT NULL, " +
                     "`userInput` TEXT NOT NULL, `idealResponse` TEXT NOT NULL, " +
-                    "`source` TEXT NOT NULL DEFAULT 'manual', `createdAt` INTEGER NOT NULL, " +
-                    "`updatedAt` INTEGER NOT NULL, `enabled` INTEGER NOT NULL DEFAULT 1)"
+                    "`source` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                    "`updatedAt` INTEGER NOT NULL, `enabled` INTEGER NOT NULL)"
             )
             db.execSQL(
                 "CREATE INDEX IF NOT EXISTS `index_persona_training_examples_personaName` " +
@@ -310,6 +310,7 @@ abstract class ChatDatabase : RoomDatabase() {
 
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                normalizeConversationPersonaDefault(db)
                 if (!columnExists(db, "knowledge_chunks", "ownerScope")) {
                     db.execSQL(
                         "ALTER TABLE `knowledge_chunks` ADD COLUMN `ownerScope` TEXT NOT NULL " +
@@ -357,6 +358,93 @@ abstract class ChatDatabase : RoomDatabase() {
                         "ON `knowledge_edges` (`ownerScope`, `fromConcept`, `relation`, `toConcept`)"
                 )
             }
+        }
+
+        private fun normalizeConversationPersonaDefault(db: SupportSQLiteDatabase) {
+            if (columnDefaultValue(db, "conversations", "personaName") == null) return
+            db.execSQL("PRAGMA defer_foreign_keys = ON")
+            db.execSQL("DROP TABLE IF EXISTS `chat_messages_fts`")
+            db.execSQL("ALTER TABLE `chat_messages` RENAME TO `chat_messages_persona_default_backup`")
+            db.execSQL("ALTER TABLE `conversations` RENAME TO `conversations_persona_default_backup`")
+            db.execSQL("DROP INDEX IF EXISTS `index_chat_messages_conversationId`")
+            db.execSQL("DROP INDEX IF EXISTS `index_chat_messages_ownerScope`")
+            db.execSQL("DROP INDEX IF EXISTS `index_chat_messages_conversationId_ownerScope`")
+            db.execSQL("DROP INDEX IF EXISTS `index_conversations_ownerScope`")
+            db.execSQL("DROP INDEX IF EXISTS `index_conversations_id_ownerScope`")
+            db.execSQL(
+                "CREATE TABLE `conversations_persona_default_rebuilt` (" +
+                    "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                    "`updatedAt` INTEGER NOT NULL, `personaName` TEXT NOT NULL, " +
+                    "`ownerScope` TEXT NOT NULL DEFAULT '${ChatOwnerScope.LEGACY_UNCLASSIFIED}', " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL(
+                "INSERT INTO `conversations_persona_default_rebuilt` " +
+                    "(`id`, `title`, `createdAt`, `updatedAt`, `personaName`, `ownerScope`) " +
+                    "SELECT `id`, `title`, `createdAt`, `updatedAt`, `personaName`, `ownerScope` " +
+                    "FROM `conversations_persona_default_backup`"
+            )
+            db.execSQL("ALTER TABLE `conversations_persona_default_rebuilt` RENAME TO `conversations`")
+            db.execSQL("CREATE INDEX `index_conversations_ownerScope` ON `conversations` (`ownerScope`)")
+            db.execSQL(
+                "CREATE UNIQUE INDEX `index_conversations_id_ownerScope` " +
+                    "ON `conversations` (`id`, `ownerScope`)"
+            )
+            db.execSQL(
+                "CREATE TABLE `chat_messages_persona_default_rebuilt` (" +
+                    "`id` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `text` TEXT NOT NULL, " +
+                    "`isUser` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, `imageUrl` TEXT, " +
+                    "`sourcesJson` TEXT, `webFetchedAtIso` TEXT, " +
+                    "`ownerScope` TEXT NOT NULL DEFAULT '${ChatOwnerScope.LEGACY_UNCLASSIFIED}', " +
+                    "PRIMARY KEY(`id`), FOREIGN KEY(`conversationId`, `ownerScope`) " +
+                    "REFERENCES `conversations`(`id`, `ownerScope`) " +
+                    "ON UPDATE NO ACTION ON DELETE CASCADE)"
+            )
+            db.execSQL(
+                "INSERT INTO `chat_messages_persona_default_rebuilt` " +
+                    "(`id`, `conversationId`, `text`, `isUser`, `timestamp`, `imageUrl`, `sourcesJson`, " +
+                    "`webFetchedAtIso`, `ownerScope`) " +
+                    "SELECT `id`, `conversationId`, `text`, `isUser`, `timestamp`, `imageUrl`, " +
+                    "`sourcesJson`, `webFetchedAtIso`, `ownerScope` " +
+                    "FROM `chat_messages_persona_default_backup`"
+            )
+            db.execSQL("DROP TABLE `chat_messages_persona_default_backup`")
+            db.execSQL("DROP TABLE `conversations_persona_default_backup`")
+            db.execSQL("ALTER TABLE `chat_messages_persona_default_rebuilt` RENAME TO `chat_messages`")
+            db.execSQL(
+                "CREATE INDEX `index_chat_messages_conversationId` " +
+                    "ON `chat_messages` (`conversationId`)"
+            )
+            db.execSQL("CREATE INDEX `index_chat_messages_ownerScope` ON `chat_messages` (`ownerScope`)")
+            db.execSQL(
+                "CREATE INDEX `index_chat_messages_conversationId_ownerScope` " +
+                    "ON `chat_messages` (`conversationId`, `ownerScope`)"
+            )
+            db.execSQL(
+                "CREATE VIRTUAL TABLE `chat_messages_fts` USING FTS4(" +
+                    "`message_id` TEXT NOT NULL, `conversation_id` TEXT NOT NULL, " +
+                    "`text` TEXT NOT NULL, `is_user` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "INSERT INTO `chat_messages_fts` " +
+                    "(`message_id`, `conversation_id`, `text`, `is_user`, `timestamp`) " +
+                    "SELECT `id`, `conversationId`, `text`, `isUser`, `timestamp` FROM `chat_messages`"
+            )
+        }
+
+        private fun columnDefaultValue(
+            db: SupportSQLiteDatabase,
+            table: String,
+            column: String
+        ): String? = db.query("PRAGMA table_info(`$table`)").use { cursor ->
+            val nameIndex = cursor.getColumnIndexOrThrow("name")
+            val defaultIndex = cursor.getColumnIndexOrThrow("dflt_value")
+            while (cursor.moveToNext()) {
+                if (cursor.getString(nameIndex) == column) {
+                    return@use if (cursor.isNull(defaultIndex)) null else cursor.getString(defaultIndex)
+                }
+            }
+            null
         }
 
         private fun columnExists(

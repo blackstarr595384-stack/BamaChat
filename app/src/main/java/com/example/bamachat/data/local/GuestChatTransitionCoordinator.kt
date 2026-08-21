@@ -75,11 +75,24 @@ class GuestChatTransitionCoordinator @Inject constructor(
     suspend fun completeAuthenticatedTransition(uid: String): AccountTransitionResult =
         transitionMutex.withLock {
             val accountScope = ChatOwnerScope.account(uid)
+            val currentScope = scopeStore.currentScope()
+            val preparedAccountSwitch =
+                scopeStore.transitionPhase() == AccountTransitionPhase.PREPARED ||
+                    scopeStore.pendingAccountUid() == uid.trim()
+            check(
+                !ChatOwnerScope.isAccount(currentScope) ||
+                    currentScope == accountScope ||
+                    preparedAccountSwitch
+            ) {
+                "Der aktive Kontobereich gehört nicht zur authentifizierten UID."
+            }
             if (
                 !scopeStore.isAccountTransitionPending() &&
-                scopeStore.currentScope() == accountScope &&
+                currentScope == accountScope &&
                 repository.legacyConversationCount() == 0 &&
-                repository.legacyMessageCount() == 0
+                repository.legacyMessageCount() == 0 &&
+                repository.legacyKnowledgeChunkCount() == 0 &&
+                repository.legacyKnowledgeEdgeCount() == 0
             ) {
                 return@withLock AccountTransitionResult(
                     accountScope = accountScope,

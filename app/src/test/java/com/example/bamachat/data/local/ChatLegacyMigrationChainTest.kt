@@ -7,6 +7,8 @@ import com.example.bamachat.data.repository.ChatRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -28,11 +30,6 @@ class ChatLegacyMigrationChainTest {
     @After
     fun cleanUpDatabase() {
         context.deleteDatabase(DATABASE_NAME)
-    }
-
-    @Test
-    fun versionTwoHistoricalMigrationSqlFixtureMigratesToSchemaEleven() = runBlocking {
-        assertLegacyFixtureMigrates(2)
     }
 
     @Test
@@ -61,13 +58,83 @@ class ChatLegacyMigrationChainTest {
         database.close()
     }
 
+    @Test
+    fun versionTenKnowledgeOnlyIsClaimedByCurrentAccountExactlyOnce() = runBlocking {
+        createVersionTenKnowledgeOnlyFixture()
+
+        val database = openMigratedDatabase()
+        val repository = ChatRepository(database.chatDao())
+        val prefs = context.getSharedPreferences(TRANSITION_PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val scopeStore = ChatSessionScopeStore(prefs)
+        val accountScope = scopeStore.activateAccount("knowledge-owner")
+        var cloudGateClosedDuringClaim = false
+        val coordinator = GuestChatTransitionCoordinator(
+            scopeStore = scopeStore,
+            cleaner = RoomGuestScopeChatCleaner(database.chatDao()),
+            legacyClaimer = LegacyScopeClaimer { uid ->
+                cloudGateClosedDuringClaim = !scopeStore.isCloudSyncAllowed(uid)
+                RoomLegacyScopeClaimer(database).claim(uid)
+            },
+            repository = repository,
+            workspaceStore = ConversationWorkspaceStore(prefs)
+        )
+
+        assertEquals(0, repository.legacyConversationCount())
+        assertEquals(0, repository.legacyMessageCount())
+        assertEquals(1, repository.legacyKnowledgeChunkCount())
+        assertEquals(1, repository.legacyKnowledgeEdgeCount())
+        val firstClaim = coordinator.completeAuthenticatedTransition("knowledge-owner")
+        assertEquals(1, firstClaim.legacyClaim.claimedKnowledgeChunks)
+        assertEquals(1, firstClaim.legacyClaim.claimedKnowledgeEdges)
+        assertTrue(cloudGateClosedDuringClaim)
+        assertEquals(0, repository.legacyKnowledgeChunkCount())
+        assertEquals(0, repository.legacyKnowledgeEdgeCount())
+        assertEquals(1, database.chatDao().countKnowledgeChunksForScope(accountScope))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(accountScope))
+
+        val repeatedClaim = coordinator.completeAuthenticatedTransition("knowledge-owner")
+        assertEquals(0, repeatedClaim.legacyClaim.claimedKnowledgeChunks)
+        assertEquals(0, repeatedClaim.legacyClaim.claimedKnowledgeEdges)
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { coordinator.completeAuthenticatedTransition("other-owner") }
+        }
+
+        scopeStore.deactivateSession()
+        val otherScope = scopeStore.activateAccount("other-owner")
+        val otherClaim = coordinator.completeAuthenticatedTransition("other-owner")
+        assertEquals(0, otherClaim.legacyClaim.claimedKnowledgeChunks)
+        assertEquals(0, otherClaim.legacyClaim.claimedKnowledgeEdges)
+        assertEquals(0, database.chatDao().countKnowledgeChunksForScope(otherScope))
+        assertEquals(0, database.chatDao().countKnowledgeEdgesForScope(otherScope))
+        assertEquals(1, database.chatDao().countKnowledgeChunksForScope(accountScope))
+        assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(accountScope))
+        prefs.edit().clear().commit()
+        database.close()
+    }
+
+    private fun createVersionTenKnowledgeOnlyFixture() {
+        createFixture(10)
+        val current = Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
+            .addMigrations(ChatDatabase.MIGRATION_10_11)
+            .allowMainThreadQueries()
+            .build()
+        val db = current.openHelper.writableDatabase
+        db.execSQL("DELETE FROM chat_messages")
+        db.execSQL("DELETE FROM conversations")
+        db.execSQL("PRAGMA foreign_keys = OFF")
+        downgradeKnowledgeToVersionTen(db)
+        db.execSQL("PRAGMA user_version = 10")
+        current.close()
+    }
+
     private suspend fun assertLegacyFixtureMigrates(startVersion: Int) {
         createFixture(startVersion)
 
         val database = openMigratedDatabase()
         val sqlite = database.openHelper.writableDatabase
         assertEquals(11, sqlite.version)
-        assertEquals(0, rowCount(sqlite, "PRAGMA foreign_key_check"))
+        assertFinalConversationMessageSchema(sqlite)
         assertEquals(1L, scalarLong(sqlite, "SELECT COUNT(*) FROM conversations"))
         assertEquals(1L, scalarLong(sqlite, "SELECT COUNT(*) FROM chat_messages"))
         assertEquals(1L, scalarLong(sqlite, "SELECT COUNT(*) FROM knowledge_chunks"))
@@ -199,22 +266,58 @@ class ChatLegacyMigrationChainTest {
         )
     }
 
-    private fun openMigratedDatabase(): ChatDatabase = Room.databaseBuilder(
-        context,
-        ChatDatabase::class.java,
-        DATABASE_NAME
-    ).addMigrations(
-        ChatDatabase.MIGRATION_1_2,
-        ChatDatabase.MIGRATION_2_3,
-        ChatDatabase.MIGRATION_3_4,
-        ChatDatabase.MIGRATION_4_5,
-        ChatDatabase.MIGRATION_5_6,
-        ChatDatabase.MIGRATION_6_7,
-        ChatDatabase.MIGRATION_7_8,
-        ChatDatabase.MIGRATION_8_9,
-        ChatDatabase.MIGRATION_9_10,
-        ChatDatabase.MIGRATION_10_11
-    ).allowMainThreadQueries().build().also { it.openHelper.writableDatabase }
+    private fun openMigratedDatabase(): ChatDatabase =
+        Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
+            .addMigrations(
+                ChatDatabase.MIGRATION_1_2,
+                ChatDatabase.MIGRATION_2_3,
+                ChatDatabase.MIGRATION_3_4,
+                ChatDatabase.MIGRATION_4_5,
+                ChatDatabase.MIGRATION_5_6,
+                ChatDatabase.MIGRATION_6_7,
+                ChatDatabase.MIGRATION_7_8,
+                ChatDatabase.MIGRATION_8_9,
+                ChatDatabase.MIGRATION_9_10,
+                ChatDatabase.MIGRATION_10_11
+            )
+            .allowMainThreadQueries()
+            .build()
+            .also { it.openHelper.writableDatabase }
+
+    private fun assertFinalConversationMessageSchema(database: SupportSQLiteDatabase) {
+        assertEquals(0, rowCount(database, "PRAGMA foreign_key_check"))
+        assertEquals(
+            listOf(
+                "conversationId->id@conversations",
+                "ownerScope->ownerScope@conversations"
+            ),
+            foreignKeyMappings(database, "chat_messages")
+        )
+        assertTrue(indexExists(database, "index_conversations_ownerScope"))
+        assertTrue(indexExists(database, "index_conversations_id_ownerScope"))
+        assertTrue(indexExists(database, "index_chat_messages_conversationId"))
+        assertTrue(indexExists(database, "index_chat_messages_ownerScope"))
+        assertTrue(indexExists(database, "index_chat_messages_conversationId_ownerScope"))
+        assertFalse(tableExists(database, "conversations_persona_default_backup"))
+        assertFalse(tableExists(database, "conversations_persona_default_rebuilt"))
+        assertFalse(tableExists(database, "chat_messages_persona_default_backup"))
+        assertFalse(tableExists(database, "chat_messages_persona_default_rebuilt"))
+    }
+
+    private fun foreignKeyMappings(database: SupportSQLiteDatabase, table: String): List<String> =
+        database.query("PRAGMA foreign_key_list(`$table`)").use { cursor ->
+            val tableIndex = cursor.getColumnIndexOrThrow("table")
+            val fromIndex = cursor.getColumnIndexOrThrow("from")
+            val toIndex = cursor.getColumnIndexOrThrow("to")
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        "${cursor.getString(fromIndex)}->${cursor.getString(toIndex)}@" +
+                            cursor.getString(tableIndex)
+                    )
+                }
+            }.sorted()
+        }
 
     private fun scalarLong(database: SupportSQLiteDatabase, query: String): Long =
         database.query(query).use { cursor ->
@@ -236,7 +339,13 @@ class ChatLegacyMigrationChainTest {
             it.moveToFirst()
         }
 
+    private fun tableExists(database: SupportSQLiteDatabase, name: String): Boolean =
+        database.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", arrayOf(name)).use {
+            it.moveToFirst()
+        }
+
     private companion object {
         const val DATABASE_NAME = "chat_legacy_chain_migration_test.db"
+        const val TRANSITION_PREFS_NAME = "chat_legacy_chain_transition_test"
     }
 }

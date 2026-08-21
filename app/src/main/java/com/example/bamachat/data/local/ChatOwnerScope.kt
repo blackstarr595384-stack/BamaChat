@@ -27,15 +27,21 @@ object ChatOwnerScope {
     }
 
     fun isAccount(scope: String): Boolean =
-        scope.startsWith(ACCOUNT_PREFIX) && scope.length > ACCOUNT_PREFIX.length
+        hasValidSuffix(scope, ACCOUNT_PREFIX)
 
     fun isAccountForUid(scope: String, uid: String): Boolean =
         scope == account(uid)
 
     fun isGuest(scope: String): Boolean =
-        scope.startsWith(GUEST_PREFIX) && scope.length > GUEST_PREFIX.length
+        hasValidSuffix(scope, GUEST_PREFIX)
 
     fun isWritable(scope: String): Boolean = isAccount(scope) || isGuest(scope)
+
+    private fun hasValidSuffix(scope: String, prefix: String): Boolean {
+        if (!scope.startsWith(prefix)) return false
+        val suffix = scope.removePrefix(prefix)
+        return suffix.isNotBlank() && suffix == suffix.trim() && suffix.none(Char::isWhitespace)
+    }
 }
 
 enum class AccountTransitionPhase {

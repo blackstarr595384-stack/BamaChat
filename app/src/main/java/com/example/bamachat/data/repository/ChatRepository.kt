@@ -392,6 +392,12 @@ class ChatRepository(private val chatDao: ChatDao) {
     suspend fun legacyMessageCount(): Int =
         chatDao.countMessagesForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED)
 
+    suspend fun legacyKnowledgeChunkCount(): Int =
+        chatDao.countKnowledgeChunksForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED)
+
+    suspend fun legacyKnowledgeEdgeCount(): Int =
+        chatDao.countKnowledgeEdgesForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED)
+
     private fun readableScope(ownerScope: String): String {
         require(ChatOwnerScope.isWritable(ownerScope)) { "Legacy and inactive scopes are not readable chat sessions" }
         return ownerScope
