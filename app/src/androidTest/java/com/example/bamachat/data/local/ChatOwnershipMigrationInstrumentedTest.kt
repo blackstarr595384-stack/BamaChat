@@ -13,6 +13,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,12 +28,20 @@ class ChatOwnershipMigrationInstrumentedTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
 
+    @Before
+    fun setUp() {
+        context.deleteSharedPreferences(TRANSITION_PREFS)
+    }
+
     @After
     fun tearDown() {
-        context.deleteDatabase(TEST_DB)
-        context.deleteDatabase(V2_TEST_DB)
-        context.deleteDatabase(KNOWLEDGE_TEST_DB)
-        context.getSharedPreferences(TRANSITION_PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        try {
+            context.deleteDatabase(TEST_DB)
+            context.deleteDatabase(V2_TEST_DB)
+            context.deleteDatabase(KNOWLEDGE_TEST_DB)
+        } finally {
+            context.deleteSharedPreferences(TRANSITION_PREFS)
+        }
     }
 
     @Test

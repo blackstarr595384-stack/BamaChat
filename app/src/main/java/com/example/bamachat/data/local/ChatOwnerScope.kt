@@ -51,7 +51,8 @@ enum class AccountTransitionPhase {
     GUEST_CLEANUP_COMPLETE,
     LEGACY_CLAIM_COMPLETE,
     WORKSPACE_MIGRATION_COMPLETE,
-    ACCOUNT_ACTIVATED;
+    ACCOUNT_ACTIVATED,
+    CORRUPT;
 
     fun isResumable(): Boolean =
         ordinal in AUTHENTICATED.ordinal..WORKSPACE_MIGRATION_COMPLETE.ordinal
@@ -122,6 +123,9 @@ class ChatSessionScopeStore @Inject constructor(
     fun prepareAccountTransition() {
         val current = currentScope()
         val phase = transitionPhase()
+        if (phase == AccountTransitionPhase.CORRUPT) {
+            throw PendingAccountUidConflictException()
+        }
         if (phase != AccountTransitionPhase.NONE) return
         val committed = prefs.edit()
             .apply {
@@ -278,14 +282,19 @@ class ChatSessionScopeStore @Inject constructor(
     fun pendingAccountUid(): String? =
         prefs.getString(KEY_PENDING_ACCOUNT_UID, null)?.trim()?.takeIf { it.isNotBlank() }
 
-    fun transitionPhase(): AccountTransitionPhase =
-        prefs.getString(KEY_TRANSITION_PHASE, null)
-            ?.let { stored -> runCatching { AccountTransitionPhase.valueOf(stored) }.getOrNull() }
-            ?: if (prefs.getBoolean(KEY_AUTH_TRANSITION_PENDING, false)) {
+    fun transitionPhase(): AccountTransitionPhase {
+        if (!prefs.contains(KEY_TRANSITION_PHASE)) {
+            return if (prefs.getBoolean(KEY_AUTH_TRANSITION_PENDING, false)) {
                 AccountTransitionPhase.PREPARED
             } else {
                 AccountTransitionPhase.NONE
             }
+        }
+        val storedPhase = runCatching { prefs.getString(KEY_TRANSITION_PHASE, null) }.getOrNull()
+        return storedPhase
+            ?.let { stored -> runCatching { AccountTransitionPhase.valueOf(stored) }.getOrNull() }
+            ?: AccountTransitionPhase.CORRUPT
+    }
 
     fun isAccountTransitionPending(): Boolean = transitionPhase() != AccountTransitionPhase.NONE
 

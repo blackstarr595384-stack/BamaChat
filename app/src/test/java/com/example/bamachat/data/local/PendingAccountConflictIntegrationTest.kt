@@ -35,6 +35,7 @@ class PendingAccountConflictIntegrationTest {
     private lateinit var operationGate: AccountCloudOperationGate
     private lateinit var cleaner: CountingCleaner
     private lateinit var claimer: CountingClaimer
+    private lateinit var workspaceStore: ConversationWorkspaceStore
     private lateinit var runner: AccountAuthTransitionRunner
     private lateinit var recovery: PendingAccountConflictRecovery
 
@@ -51,12 +52,13 @@ class PendingAccountConflictIntegrationTest {
         operationGate = AccountCloudOperationGate()
         cleaner = CountingCleaner(RoomGuestScopeChatCleaner(database.chatDao()))
         claimer = CountingClaimer(RoomLegacyScopeClaimer(database))
+        workspaceStore = ConversationWorkspaceStore(prefs)
         val coordinator = GuestChatTransitionCoordinator(
             scopeStore,
             cleaner,
             claimer,
             repository,
-            ConversationWorkspaceStore(prefs),
+            workspaceStore,
             operationGate
         )
         runner = AccountAuthTransitionRunner(scopeStore, coordinator, operationGate)
@@ -128,6 +130,55 @@ class PendingAccountConflictIntegrationTest {
             )
         )
         assertEquals(0, database.chatDao().countConversationsForScope(ChatOwnerScope.account(UID_B)))
+    }
+
+    @Test
+    fun corruptModernPhaseCannotFallbackToLegacyPendingOrMutateAccountState() = runBlocking {
+        val accountA = scopeStore.activateAccount(UID_A)
+        createScopedChat("account-a-corrupt", accountA)
+        createLegacyChat("corrupt")
+        val legacyWorkspaceKey = "conversation_workspace_name_conversation-corrupt"
+        prefs.edit()
+            .putString(legacyWorkspaceKey, "legacy-workspace")
+            .putString("chat_pending_account_uid", UID_B)
+            .putString("chat_account_transition_phase", "CORRUPT_OR_UNKNOWN")
+            .putBoolean("chat_account_transition_pending", true)
+            .commit()
+        val writer = CountingWriter()
+        val gateway = ChatCloudSyncGateway(
+            scopeStore,
+            FakeAuthSession(UID_B),
+            operationGate,
+            writer
+        )
+
+        assertThrows(PendingAccountUidConflictException::class.java) {
+            runBlocking { runner.resumeAuthenticated(UID_B) }
+        }
+
+        val accountB = ChatOwnerScope.account(UID_B)
+        assertEquals(AccountTransitionPhase.CORRUPT, scopeStore.transitionPhase())
+        assertEquals(accountA, scopeStore.currentScope())
+        assertEquals(UID_B, scopeStore.pendingAccountUid())
+        assertEquals(0, cleaner.calls)
+        assertEquals(0, claimer.calls)
+        assertFalse(
+            gateway.pushConversation(
+                UID_B,
+                ConversationEntity("blocked-corrupt", "blocked", 1L, 1L, ownerScope = accountB)
+            )
+        )
+        assertEquals(0, writer.calls)
+        assertNotNull(repository.getConversation("conversation-account-a-corrupt", accountA))
+        assertNotNull(
+            database.chatDao().getConversationByIdAndScope(
+                "conversation-corrupt",
+                ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        assertEquals(0, database.chatDao().countConversationsForScope(accountB))
+        assertEquals("legacy-workspace", prefs.getString(legacyWorkspaceKey, null))
+        assertFalse(prefs.contains(workspaceStore.scopedKey(accountB, "conversation-corrupt")))
     }
 
     @Test

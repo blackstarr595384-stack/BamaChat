@@ -206,6 +206,61 @@ class PostPr7OwnershipInstrumentedTest {
         assertNotNull(repository.getConversation("device-legacy", accountB))
     }
 
+    @Test
+    fun corruptModernPhaseCannotFallbackToLegacyPendingOrMutateScopes() = runBlocking {
+        val accountA = scopeStore.activateAccount("device-corrupt-owner-a")
+        repository.createConversation("device-corrupt-account-a", ownerScope = accountA)
+        database.chatDao().insertConversation(
+            ConversationEntity(
+                id = "device-corrupt-legacy",
+                title = "Legacy",
+                createdAt = 1L,
+                updatedAt = 1L,
+                ownerScope = ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        prefs.edit()
+            .putString("chat_pending_account_uid", "device-corrupt-owner-b")
+            .putString("chat_account_transition_phase", "CORRUPT_OR_UNKNOWN")
+            .putBoolean("chat_account_transition_pending", true)
+            .commit()
+        var cleanerCalls = 0
+        var claimerCalls = 0
+        val coordinator = GuestChatTransitionCoordinator(
+            scopeStore,
+            GuestScopeChatCleaner {
+                cleanerCalls++
+                ScopedChatCleanupResult(emptyList(), 0, 0, 0, 0)
+            },
+            LegacyScopeClaimer {
+                claimerCalls++
+                LegacyScopeClaimResult(emptyList(), 0, 0)
+            },
+            repository,
+            workspaceStore
+        )
+
+        assertThrows(PendingAccountUidConflictException::class.java) {
+            runBlocking { coordinator.completeAuthenticatedTransition("device-corrupt-owner-b") }
+        }
+
+        assertEquals(AccountTransitionPhase.CORRUPT, scopeStore.transitionPhase())
+        assertEquals(accountA, scopeStore.currentScope())
+        assertEquals(0, cleanerCalls)
+        assertEquals(0, claimerCalls)
+        assertNotNull(repository.getConversation("device-corrupt-account-a", accountA))
+        assertNotNull(
+            database.chatDao().getConversationByIdAndScope(
+                "device-corrupt-legacy",
+                ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        assertEquals(
+            0,
+            database.chatDao().countConversationsForScope(ChatOwnerScope.account("device-corrupt-owner-b"))
+        )
+    }
+
     private suspend fun seedScopedData(ownerScope: String, suffix: String) {
         val conversationId = "device-$suffix"
         val messageId = "device-message-$suffix"

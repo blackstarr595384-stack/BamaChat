@@ -6,6 +6,7 @@ import androidx.room.Room
 import com.example.bamachat.data.local.AccountAuthProvider
 import com.example.bamachat.data.local.AccountAuthTransitionException
 import com.example.bamachat.data.local.AccountAuthTransitionRunner
+import com.example.bamachat.data.local.AccountTransitionPhase
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ChatSessionScopeStore
@@ -120,6 +121,26 @@ class AccountAuthTransitionRunnerTest {
         assertEquals(com.example.bamachat.data.local.AccountTransitionPhase.NONE, scopeStore.transitionPhase())
         assertEquals(null, scopeStore.pendingAccountUid())
         assertEquals(0, cleaner.calls)
+    }
+
+    @Test
+    fun missingModernPhaseKeyPreservesLegacyPendingCompatibility() = runBlocking {
+        val guest = createGuestChat("legacy-pending")
+        scopeStore.prepareAccountTransition()
+        prefs.edit()
+            .remove("chat_account_transition_phase")
+            .remove("chat_pending_account_uid")
+            .putBoolean("chat_account_transition_pending", true)
+            .commit()
+
+        assertEquals(AccountTransitionPhase.PREPARED, scopeStore.transitionPhase())
+
+        runner.authenticate(AccountAuthProvider.EMAIL) { "uid-legacy-pending" }
+
+        assertEquals(ChatOwnerScope.account("uid-legacy-pending"), scopeStore.currentScope())
+        assertFalse(scopeStore.isAccountTransitionPending())
+        assertTrue(repository.getMessages("conversation-legacy-pending", guest).first().isEmpty())
+        assertEquals(1, cleaner.calls)
     }
 
     private suspend fun assertProviderSuccess(provider: AccountAuthProvider) {
