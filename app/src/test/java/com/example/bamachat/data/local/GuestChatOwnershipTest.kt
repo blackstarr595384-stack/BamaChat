@@ -149,7 +149,7 @@ class GuestChatOwnershipTest {
     }
 
     @Test
-    fun localDataSanitizerDeletesOnlyRequestedGuestAndPreservesAccountMetadata() = runBlocking {
+    fun localDataSanitizerDeletesTargetGuestDerivedDataAndPreservesOtherScopesAndSettings() = runBlocking {
         val requestedGuest = ChatOwnerScope.guest("sanitizer-target")
         val otherGuest = ChatOwnerScope.guest("sanitizer-other")
         val account = ChatOwnerScope.account("sanitizer-account")
@@ -168,6 +168,7 @@ class GuestChatOwnershipTest {
             .putString("active_workspace_id", "test-workspace-id")
             .putString("ai_provider", "test-provider")
             .putString("openrouter_api_key", "test-api-key-sentinel")
+            .putBoolean("settings.simple_mode_enabled", true)
             .commit()
 
         val result = LocalDataSanitizer(
@@ -178,11 +179,15 @@ class GuestChatOwnershipTest {
 
         assertEquals(1, result.deletedConversations)
         assertEquals(1, result.deletedMessages)
+        assertEquals(3, result.deletedDerivedMemoryAndFeedbackRows)
         assertEquals(1, result.deletedKnowledgeChunks)
         assertEquals(1, result.deletedKnowledgeEdges)
         assertNull(repository.getConversation("sanitizer-target", requestedGuest))
         assertEquals(0, database.chatDao().countKnowledgeChunksForScope(requestedGuest))
         assertEquals(0, database.chatDao().countKnowledgeEdgesForScope(requestedGuest))
+        assertEquals(0L, rawCount("persona_memory", "sourceMessageId", "sanitizer-message-target"))
+        assertEquals(0L, rawCount("persona_feedback", "messageId", "sanitizer-message-target"))
+        assertEquals(0L, rawCount("user_memory_facts", "sourceMessageId", "sanitizer-message-target"))
         assertSanitizerScopePresent(otherGuest, "other")
         assertSanitizerScopePresent(account, "account")
         assertNotNull(database.chatDao().getLatestPromptVersionForPersona("TEST_PERSONA"))
@@ -190,6 +195,7 @@ class GuestChatOwnershipTest {
         assertEquals("test-workspace-id", prefs.getString("active_workspace_id", null))
         assertEquals("test-provider", prefs.getString("ai_provider", null))
         assertEquals("test-api-key-sentinel", prefs.getString("openrouter_api_key", null))
+        assertTrue(prefs.getBoolean("settings.simple_mode_enabled", false))
     }
 
     @Test
@@ -266,6 +272,7 @@ class GuestChatOwnershipTest {
         }
 
         scopeStore.prepareAccountTransition()
+        scopeStore.bindPreparedAccountUid("knowledge-account")
         val result = GuestChatTransitionCoordinator(
             scopeStore,
             RoomGuestScopeChatCleaner(database.chatDao()),
@@ -307,6 +314,7 @@ class GuestChatOwnershipTest {
         val guest = scopeStore.startNewGuestSession()
         seedChat("guest-conversation", "guest-message", "guest body", guest)
         scopeStore.beginAccountTransitionIfGuest()
+        scopeStore.bindPreparedAccountUid("uid-a")
         val coordinator = GuestChatTransitionCoordinator(
             scopeStore = scopeStore,
             cleaner = GuestScopeChatCleaner { error("cleanup failed") },
@@ -331,6 +339,7 @@ class GuestChatOwnershipTest {
     fun successfulTransitionRunsCleanupExactlyOnce() = runBlocking {
         val guest = scopeStore.startNewGuestSession()
         scopeStore.beginAccountTransitionIfGuest()
+        scopeStore.bindPreparedAccountUid("uid-a")
         var calls = 0
         val coordinator = GuestChatTransitionCoordinator(
             scopeStore = scopeStore,
@@ -420,6 +429,7 @@ class GuestChatOwnershipTest {
             )
         )
         scopeStore.prepareAccountTransition()
+        scopeStore.bindPreparedAccountUid("uid-failure")
         val failingCoordinator = GuestChatTransitionCoordinator(
             scopeStore,
             RoomGuestScopeChatCleaner(database.chatDao()),
@@ -480,6 +490,7 @@ class GuestChatOwnershipTest {
             .commit()
 
         scopeStore.beginAccountTransitionIfGuest()
+        scopeStore.bindPreparedAccountUid("uid-a")
         assertFalse(scopeStore.isCloudSyncAllowed("uid-a"))
         val coordinator = GuestChatTransitionCoordinator(
             scopeStore,
@@ -528,15 +539,45 @@ class GuestChatOwnershipTest {
 
     private suspend fun seedSanitizerScope(ownerScope: String, suffix: String) {
         val conversationId = "sanitizer-$suffix"
-        seedChat(conversationId, "sanitizer-message-$suffix", suffix, ownerScope)
+        val messageId = "sanitizer-message-$suffix"
+        seedChat(conversationId, messageId, suffix, ownerScope)
         repository.saveKnowledgeChunk(ownerScope, suffix, "$suffix knowledge", suffix)
         repository.saveKnowledgeEdge(ownerScope, suffix, "relates", "target-$suffix")
+        database.chatDao().insertPersonaMemory(
+            PersonaMemoryEntity(
+                personaName = "PERSONA-$suffix",
+                memoryText = "$suffix memory",
+                sourceMessageId = messageId,
+                createdAt = 1L,
+                updatedAt = 1L
+            )
+        )
+        database.chatDao().upsertPersonaFeedback(
+            PersonaFeedbackEntity(
+                personaName = "PERSONA-$suffix",
+                messageId = messageId,
+                helpful = true,
+                createdAt = 1L
+            )
+        )
+        database.chatDao().insertUserMemoryFact(
+            UserMemoryFactEntity(
+                personaName = "PERSONA-$suffix",
+                factText = "$suffix fact",
+                sourceMessageId = messageId,
+                createdAt = 1L,
+                updatedAt = 1L
+            )
+        )
     }
 
     private suspend fun assertSanitizerScopePresent(ownerScope: String, suffix: String) {
         assertNotNull(repository.getConversation("sanitizer-$suffix", ownerScope))
         assertEquals(1, database.chatDao().countKnowledgeChunksForScope(ownerScope))
         assertEquals(1, database.chatDao().countKnowledgeEdgesForScope(ownerScope))
+        assertEquals(1L, rawCount("persona_memory", "sourceMessageId", "sanitizer-message-$suffix"))
+        assertEquals(1L, rawCount("persona_feedback", "messageId", "sanitizer-message-$suffix"))
+        assertEquals(1L, rawCount("user_memory_facts", "sourceMessageId", "sanitizer-message-$suffix"))
     }
 
     private suspend fun insertLegacyChat(conversationId: String, messageId: String) {

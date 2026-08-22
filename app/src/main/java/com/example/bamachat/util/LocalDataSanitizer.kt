@@ -20,6 +20,10 @@ class LocalDataSanitizer internal constructor(
         chatDao = ChatDatabase.getDatabase(context.applicationContext).chatDao()
     )
 
+    /**
+     * Removes the selected guest's chats, knowledge, and message-derived memory and feedback rows.
+     * Account, workspace, provider, API-key, prompt, and general settings data remain unchanged.
+     */
     suspend fun clearGuestSessionData(ownerScope: String): ScopedChatCleanupResult {
         require(ChatOwnerScope.isGuest(ownerScope)) { "Only a valid guest scope can be cleared" }
         return chatDao.deleteChatDataForScope(ownerScope)

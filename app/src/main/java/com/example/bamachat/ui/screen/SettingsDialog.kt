@@ -1637,7 +1637,12 @@ fun SettingsDialog(
                         )
                     }
                     if (guestCleanupAvailable) {
-                        SettingRow("Gastdaten jetzt löschen", "Löscht nur Daten dieser Gast-Sitzung") {
+                        SettingRow(
+                            "Gastdaten jetzt löschen",
+                            "Löscht Chats, Nachrichten, Wissensdaten sowie daraus abgeleitete Erinnerungs- und " +
+                                "Feedbackdaten der aktuellen Gastsitzung. Konto-, Workspace-, Provider-, " +
+                                "API-Schlüssel- und Einstellungsdaten bleiben erhalten."
+                        ) {
                             CompactTextActionRow(
                                 actions = listOf(
                                     CompactTextAction(

@@ -51,7 +51,10 @@ enum class AccountTransitionPhase {
     GUEST_CLEANUP_COMPLETE,
     LEGACY_CLAIM_COMPLETE,
     WORKSPACE_MIGRATION_COMPLETE,
-    ACCOUNT_ACTIVATED
+    ACCOUNT_ACTIVATED;
+
+    fun isResumable(): Boolean =
+        ordinal in AUTHENTICATED.ordinal..WORKSPACE_MIGRATION_COMPLETE.ordinal
 }
 
 @Singleton
@@ -150,15 +153,40 @@ class ChatSessionScopeStore @Inject constructor(
     }
 
     @Synchronized
+    fun bindPreparedAccountUid(uid: String) {
+        val cleanUid = uid.trim()
+        require(cleanUid.isNotBlank()) { "Firebase UID must not be blank" }
+        check(transitionPhase() == AccountTransitionPhase.PREPARED) {
+            "Die authentifizierte UID darf nur an einen vorbereiteten Übergang gebunden werden."
+        }
+        pendingAccountUid()?.let { existingUid ->
+            if (existingUid != cleanUid) throw PendingAccountUidConflictException()
+            return
+        }
+        check(
+            prefs.edit()
+                .putString(KEY_PENDING_ACCOUNT_UID, cleanUid)
+                .putBoolean(KEY_AUTH_TRANSITION_PENDING, true)
+                .commit()
+        ) { "Authentifizierte UID konnte nicht sicher an den Übergang gebunden werden." }
+    }
+
+    @Synchronized
     fun beginAuthenticatedTransition(uid: String): AccountTransitionPhase {
         val cleanUid = uid.trim()
         require(cleanUid.isNotBlank()) { "Firebase UID must not be blank" }
         val currentPhase = transitionPhase()
         val existingUid = pendingAccountUid()
+        if (currentPhase == AccountTransitionPhase.NONE && existingUid != null) {
+            throw PendingAccountUidConflictException()
+        }
         if (existingUid != null) {
             if (existingUid != cleanUid) throw PendingAccountUidConflictException()
         }
-        if (currentPhase.ordinal >= AccountTransitionPhase.AUTHENTICATED.ordinal) return currentPhase
+        if (currentPhase.ordinal >= AccountTransitionPhase.AUTHENTICATED.ordinal) {
+            check(currentPhase.isResumable()) { "Der gespeicherte Kontoübergang ist nicht resumierbar." }
+            return currentPhase
+        }
 
         val editor = prefs.edit()
             .putString(KEY_PENDING_ACCOUNT_UID, cleanUid)

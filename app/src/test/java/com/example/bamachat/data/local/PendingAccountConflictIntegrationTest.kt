@@ -87,6 +87,71 @@ class PendingAccountConflictIntegrationTest {
     }
 
     @Test
+    fun staleMatchingPendingUidAtNoneCannotSwitchForeignAccountOrClaimLegacy() = runBlocking {
+        val accountA = scopeStore.activateAccount(UID_A)
+        createScopedChat("account-a", accountA)
+        createLegacyChat("stale")
+        prefs.edit()
+            .putString("chat_pending_account_uid", UID_B)
+            .putString("chat_account_transition_phase", AccountTransitionPhase.NONE.name)
+            .putBoolean("chat_account_transition_pending", false)
+            .commit()
+        val writer = CountingWriter()
+        val gateway = ChatCloudSyncGateway(
+            scopeStore,
+            FakeAuthSession(UID_B),
+            operationGate,
+            writer
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { runner.resumeAuthenticated(UID_B) }
+        }
+
+        assertEquals(accountA, scopeStore.currentScope())
+        assertEquals(AccountTransitionPhase.NONE, scopeStore.transitionPhase())
+        assertEquals(UID_B, scopeStore.pendingAccountUid())
+        assertEquals(0, cleaner.calls)
+        assertEquals(0, claimer.calls)
+        assertFalse(
+            gateway.pushConversation(
+                UID_B,
+                ConversationEntity("blocked", "blocked", 1L, 1L, ownerScope = ChatOwnerScope.account(UID_B))
+            )
+        )
+        assertEquals(0, writer.calls)
+        assertNotNull(repository.getConversation("conversation-account-a", accountA))
+        assertNotNull(
+            database.chatDao().getConversationByIdAndScope(
+                "conversation-stale",
+                ChatOwnerScope.LEGACY_UNCLASSIFIED
+            )
+        )
+        assertEquals(0, database.chatDao().countConversationsForScope(ChatOwnerScope.account(UID_B)))
+    }
+
+    @Test
+    fun preparedMatchingUidAllowsAccountSwitchWithoutClaimingExistingAccountData() = runBlocking {
+        val accountA = scopeStore.activateAccount(UID_A)
+        createScopedChat("preserved-a", accountA)
+        createLegacyChat("prepared")
+        scopeStore.prepareAccountTransition()
+        scopeStore.bindPreparedAccountUid(UID_B)
+
+        runner.resumeAuthenticated(UID_B)
+
+        val accountB = ChatOwnerScope.account(UID_B)
+        assertEquals(accountB, scopeStore.currentScope())
+        assertFalse(scopeStore.isAccountTransitionPending())
+        assertEquals(0, cleaner.calls)
+        assertEquals(1, claimer.calls)
+        assertNotNull(repository.getConversation("conversation-preserved-a", accountA))
+        assertNotNull(repository.getConversation("conversation-prepared", accountB))
+        assertEquals(1, database.chatDao().countConversationsForScope(accountA))
+        assertEquals(1, database.chatDao().countConversationsForScope(accountB))
+    }
+
+    @Test
     fun pendingAndDifferentFirebaseUidSignsOutBeforeResetAndPreservesData() = runBlocking {
         val guest = createGuestChat("conflict")
         createLegacyChat("legacy")
@@ -213,6 +278,15 @@ class PendingAccountConflictIntegrationTest {
                 1L,
                 ownerScope = ChatOwnerScope.LEGACY_UNCLASSIFIED
             )
+        )
+    }
+
+    private suspend fun createScopedChat(suffix: String, ownerScope: String) {
+        repository.createConversation("conversation-$suffix", ownerScope = ownerScope)
+        repository.saveMessage(
+            "conversation-$suffix",
+            ChatMessage("message-$suffix", "test", true, 1L),
+            ownerScope
         )
     }
 

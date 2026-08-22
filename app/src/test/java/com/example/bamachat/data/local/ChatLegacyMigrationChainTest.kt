@@ -33,7 +33,7 @@ class ChatLegacyMigrationChainTest {
     }
 
     @Test
-    fun authenticVersionSevenFixtureMigratesToSchemaEleven() = runBlocking {
+    fun reconstructedVersionSevenFixtureMigratesToSchemaEleven() = runBlocking {
         assertLegacyFixtureMigrates(7)
     }
 

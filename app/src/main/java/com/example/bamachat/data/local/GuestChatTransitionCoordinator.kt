@@ -74,17 +74,25 @@ class GuestChatTransitionCoordinator @Inject constructor(
 
     suspend fun completeAuthenticatedTransition(uid: String): AccountTransitionResult =
         transitionMutex.withLock {
-            val accountScope = ChatOwnerScope.account(uid)
+            val cleanUid = uid.trim()
+            val accountScope = ChatOwnerScope.account(cleanUid)
             val currentScope = scopeStore.currentScope()
-            val preparedAccountSwitch =
-                scopeStore.transitionPhase() == AccountTransitionPhase.PREPARED ||
-                    scopeStore.pendingAccountUid() == uid.trim()
-            check(
-                !ChatOwnerScope.isAccount(currentScope) ||
-                    currentScope == accountScope ||
-                    preparedAccountSwitch
+            val transitionPhase = scopeStore.transitionPhase()
+            val pendingAccountUid = scopeStore.pendingAccountUid()
+            val sameAccountWithoutTransition =
+                transitionPhase == AccountTransitionPhase.NONE &&
+                    pendingAccountUid == null &&
+                    currentScope == accountScope
+            val preparedForAuthenticatedUid =
+                transitionPhase == AccountTransitionPhase.PREPARED && pendingAccountUid == cleanUid
+            val resumableForAuthenticatedUid =
+                transitionPhase.isResumable() && pendingAccountUid == cleanUid
+            if (
+                !sameAccountWithoutTransition &&
+                !preparedForAuthenticatedUid &&
+                !resumableForAuthenticatedUid
             ) {
-                "Der aktive Kontobereich gehört nicht zur authentifizierten UID."
+                throw PendingAccountUidConflictException()
             }
             if (
                 !scopeStore.isAccountTransitionPending() &&
@@ -101,7 +109,7 @@ class GuestChatTransitionCoordinator @Inject constructor(
                 )
             }
             cloudOperationGate.withTransitionStart {
-                scopeStore.beginAuthenticatedTransition(uid)
+                scopeStore.beginAuthenticatedTransition(cleanUid)
             }
 
             var cleanup: ScopedChatCleanupResult? = null
@@ -111,14 +119,14 @@ class GuestChatTransitionCoordinator @Inject constructor(
                     cleanup = cleaner.clear(pendingGuestScope)
                     workspaceStore.removeAllForScope(pendingGuestScope)
                 }
-                scopeStore.markTransitionPhase(uid, AccountTransitionPhase.GUEST_CLEANUP_COMPLETE)
+                scopeStore.markTransitionPhase(cleanUid, AccountTransitionPhase.GUEST_CLEANUP_COMPLETE)
             }
 
             val legacyClaim = if (
                 scopeStore.transitionPhase().ordinal < AccountTransitionPhase.LEGACY_CLAIM_COMPLETE.ordinal
             ) {
-                legacyClaimer.claim(uid).also {
-                    scopeStore.markTransitionPhase(uid, AccountTransitionPhase.LEGACY_CLAIM_COMPLETE)
+                legacyClaimer.claim(cleanUid).also {
+                    scopeStore.markTransitionPhase(cleanUid, AccountTransitionPhase.LEGACY_CLAIM_COMPLETE)
                 }
             } else {
                 LegacyScopeClaimResult(emptyList(), 0, 0)
@@ -126,10 +134,10 @@ class GuestChatTransitionCoordinator @Inject constructor(
 
             if (scopeStore.transitionPhase().ordinal < AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE.ordinal) {
                 workspaceStore.migrateUnscopedBindings(repository.getAllConversationsForWorkspaceMigration())
-                scopeStore.markTransitionPhase(uid, AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE)
+                scopeStore.markTransitionPhase(cleanUid, AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE)
             }
 
-            scopeStore.completeAccountTransition(uid)
+            scopeStore.completeAccountTransition(cleanUid)
             AccountTransitionResult(
                 accountScope = accountScope,
                 cleanup = cleanup,

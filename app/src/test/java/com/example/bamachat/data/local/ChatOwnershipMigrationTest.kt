@@ -31,7 +31,7 @@ class ChatOwnershipMigrationTest {
     }
 
     @Test
-    fun roomMigratesRealVersionNineDatabaseAndLegacyClaimSurvivesReopen() = runBlocking {
+    fun roomMigratesReconstructedVersionNineDatabaseAndLegacyClaimSurvivesReopen() = runBlocking {
         createCompleteVersionNineDatabase()
 
         val migrated = openVersionElevenDatabase()

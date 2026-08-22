@@ -41,6 +41,35 @@ class PendingAccountUidConflictRecoveryTest {
     }
 
     @Test
+    fun preparedUidBindingPersistsExactUidWithoutAdvancingPhase() {
+        store.prepareAccountTransition()
+
+        store.bindPreparedAccountUid("uid-a")
+        store.bindPreparedAccountUid("uid-a")
+
+        assertEquals(AccountTransitionPhase.PREPARED, store.transitionPhase())
+        assertEquals("uid-a", store.pendingAccountUid())
+        assertTrue(store.isAccountTransitionPending())
+    }
+
+    @Test
+    fun stalePendingUidAtNoneCannotBeginAuthenticatedTransition() {
+        prefs.edit()
+            .putString("chat_pending_account_uid", "uid-b")
+            .putString("chat_account_transition_phase", AccountTransitionPhase.NONE.name)
+            .putBoolean("chat_account_transition_pending", false)
+            .commit()
+
+        assertThrows(PendingAccountUidConflictException::class.java) {
+            store.beginAuthenticatedTransition("uid-b")
+        }
+
+        assertEquals(AccountTransitionPhase.NONE, store.transitionPhase())
+        assertEquals("uid-b", store.pendingAccountUid())
+        assertFalse(store.isAccountTransitionPending())
+    }
+
+    @Test
     fun pendingAccountAndDifferentFirebaseAccountStayBlockedWithoutMutation() {
         val guest = store.startNewGuestSession()
         store.prepareAccountTransition()

@@ -18,12 +18,13 @@ data class PersonaFeedbackStats(
     val unhelpfulCount: Int
 )
 
+/** Counts rows removed only for one validated guest scope, including data derived from its messages. */
 data class ScopedChatCleanupResult(
     val conversationIds: List<String>,
     val deletedMessages: Int,
     val deletedConversations: Int,
     val deletedFtsRows: Int,
-    val deletedLinkedReferences: Int,
+    val deletedDerivedMemoryAndFeedbackRows: Int,
     val deletedKnowledgeChunks: Int = 0,
     val deletedKnowledgeEdges: Int = 0
 )
@@ -293,7 +294,7 @@ interface ChatDao {
     suspend fun deleteChatDataForScope(ownerScope: String): ScopedChatCleanupResult {
         require(ChatOwnerScope.isGuest(ownerScope)) { "Only guest scopes can be selectively cleared" }
         val conversationIds = getConversationIdsForScope(ownerScope)
-        val deletedLinkedReferences =
+        val deletedDerivedMemoryAndFeedbackRows =
             deletePersonaMemoryForMessageScope(ownerScope) +
                 deletePersonaFeedbackForMessageScope(ownerScope) +
                 deleteUserMemoryFactsForMessageScope(ownerScope)
@@ -307,7 +308,7 @@ interface ChatDao {
             deletedMessages = deletedMessages,
             deletedConversations = deletedConversations,
             deletedFtsRows = deletedFtsRows,
-            deletedLinkedReferences = deletedLinkedReferences,
+            deletedDerivedMemoryAndFeedbackRows = deletedDerivedMemoryAndFeedbackRows,
             deletedKnowledgeChunks = deletedKnowledgeChunks,
             deletedKnowledgeEdges = deletedKnowledgeEdges
         )

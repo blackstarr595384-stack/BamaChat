@@ -11,8 +11,10 @@ import com.example.bamachat.data.local.ChatOwnerScope
 import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.data.local.ConversationWorkspaceStore
 import com.example.bamachat.data.local.GuestChatTransitionCoordinator
+import com.example.bamachat.data.local.GuestScopeChatCleaner
 import com.example.bamachat.data.local.RoomGuestScopeChatCleaner
 import com.example.bamachat.data.local.RoomLegacyScopeClaimer
+import com.example.bamachat.data.local.ScopedChatCleanupResult
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.repository.ChatRepository
 import kotlinx.coroutines.flow.first
@@ -37,6 +39,7 @@ class AccountAuthTransitionRunnerTest {
     private lateinit var repository: ChatRepository
     private lateinit var prefs: SharedPreferences
     private lateinit var scopeStore: ChatSessionScopeStore
+    private lateinit var cleaner: CountingCleaner
     private lateinit var runner: AccountAuthTransitionRunner
 
     @Before
@@ -49,7 +52,8 @@ class AccountAuthTransitionRunnerTest {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
         scopeStore = ChatSessionScopeStore(prefs)
-        runner = createRunner(scopeStore)
+        cleaner = CountingCleaner(RoomGuestScopeChatCleaner(database.chatDao()))
+        runner = createRunner(scopeStore, cleaner)
     }
 
     @After
@@ -104,6 +108,20 @@ class AccountAuthTransitionRunnerTest {
         assertTrue(repository.getMessages("conversation-restart", guest).first().isEmpty())
     }
 
+    @Test
+    fun processResumeRejectsForeignActiveAccountWithoutPersistedTransition() = runBlocking {
+        val accountA = scopeStore.activateAccount("uid-a")
+
+        assertThrows(com.example.bamachat.data.local.PendingAccountUidConflictException::class.java) {
+            runBlocking { runner.prepareAuthenticatedProcessResume("uid-b") }
+        }
+
+        assertEquals(accountA, scopeStore.currentScope())
+        assertEquals(com.example.bamachat.data.local.AccountTransitionPhase.NONE, scopeStore.transitionPhase())
+        assertEquals(null, scopeStore.pendingAccountUid())
+        assertEquals(0, cleaner.calls)
+    }
+
     private suspend fun assertProviderSuccess(provider: AccountAuthProvider) {
         val guest = createGuestChat(provider.name.lowercase())
         val result = runner.authenticate(provider) { "uid-${provider.name.lowercase()}" }
@@ -111,6 +129,7 @@ class AccountAuthTransitionRunnerTest {
         assertEquals(ChatOwnerScope.account("uid-${provider.name.lowercase()}"), result.accountScope)
         assertEquals(1, result.cleanup?.deletedConversations)
         assertTrue(repository.getMessages("conversation-${provider.name.lowercase()}", guest).first().isEmpty())
+        assertEquals(1, cleaner.calls)
         assertFalse(scopeStore.isAccountTransitionPending())
         assertTrue(scopeStore.isCloudSyncAllowed("uid-${provider.name.lowercase()}"))
     }
@@ -127,6 +146,7 @@ class AccountAuthTransitionRunnerTest {
         assertFalse(scopeStore.isAccountTransitionPending())
         assertNotNull(repository.getConversation("conversation-failure-$suffix", guest))
         assertEquals(1, repository.getMessages("conversation-failure-$suffix", guest).first().size)
+        assertEquals(0, cleaner.calls)
     }
 
     private suspend fun createGuestChat(suffix: String): String {
@@ -140,15 +160,29 @@ class AccountAuthTransitionRunnerTest {
         return guest
     }
 
-    private fun createRunner(store: ChatSessionScopeStore): AccountAuthTransitionRunner {
+    private fun createRunner(
+        store: ChatSessionScopeStore,
+        guestCleaner: GuestScopeChatCleaner = cleaner
+    ): AccountAuthTransitionRunner {
         val coordinator = GuestChatTransitionCoordinator(
             store,
-            RoomGuestScopeChatCleaner(database.chatDao()),
+            guestCleaner,
             RoomLegacyScopeClaimer(database),
             repository,
             ConversationWorkspaceStore(prefs)
         )
         return AccountAuthTransitionRunner(store, coordinator)
+    }
+
+    private class CountingCleaner(
+        private val delegate: GuestScopeChatCleaner
+    ) : GuestScopeChatCleaner {
+        var calls = 0
+
+        override suspend fun clear(ownerScope: String): ScopedChatCleanupResult {
+            calls++
+            return delegate.clear(ownerScope)
+        }
     }
 
     private companion object {
