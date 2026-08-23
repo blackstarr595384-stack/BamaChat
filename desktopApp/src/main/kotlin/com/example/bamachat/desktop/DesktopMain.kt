@@ -69,7 +69,16 @@ import com.example.bamachat.shared.core.PromptDrafts
 import com.example.bamachat.shared.core.QuickActionInterpreter
 import com.example.bamachat.shared.core.QuickActionSuggestion
 import com.example.bamachat.shared.core.WorkspaceTextToolkit
+import com.example.bamachat.shared.core.ai.AiStreamCompleted
+import com.example.bamachat.shared.core.ai.AiStreamDelta
+import com.example.bamachat.shared.core.ai.AiStreamError
+import com.example.bamachat.shared.core.ai.AiStreamFinished
+import com.example.bamachat.shared.core.ai.AiStreamStarted
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 private enum class DesktopSection {
@@ -441,6 +450,8 @@ private fun DesktopChatWorkspace(
     var prompt by remember { mutableStateOf("") }
     var selectedQuickAction by remember { mutableStateOf(QuickActionSuggestion.AUTO) }
     var isSending by remember { mutableStateOf(false) }
+    var activeRequestJob by remember { mutableStateOf<Job?>(null) }
+    var streamingText by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
     val draftHistory = remember { mutableStateListOf<PromptDraft>() }
     val quickActionSuggestion = remember(prompt) { QuickActionInterpreter.suggest(prompt) }
@@ -524,7 +535,7 @@ private fun DesktopChatWorkspace(
                         .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (chatHistory.isEmpty()) {
+                    if (chatHistory.isEmpty() && streamingText.isEmpty()) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -595,6 +606,24 @@ private fun DesktopChatWorkspace(
                                 }
                             }
                         }
+                        if (streamingText.isNotEmpty()) {
+                            Surface(
+                                color = Color(0xFF1E3256),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = "Assistant · Streaming",
+                                        style = MaterialTheme.typography.caption,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White.copy(alpha = 0.8f)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(text = streamingText, color = Color.White)
+                                }
+                            }
+                        }
                     }
                 }
                 VerticalScrollbar(
@@ -652,13 +681,23 @@ private fun DesktopChatWorkspace(
                     .defaultMinSize(minHeight = 48.dp)
             )
             if (isSending) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .height(24.dp)
-                        .width(24.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .height(24.dp)
+                            .width(24.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Button(
+                        onClick = {
+                            onStatusChange("Streaming wird abgebrochen ...")
+                            activeRequestJob?.cancel()
+                        }
+                    ) {
+                        Text("Abbrechen")
+                    }
+                }
             } else {
                 Button(
                     enabled = prompt.isNotBlank(),
@@ -688,8 +727,9 @@ private fun DesktopChatWorkspace(
                         }
 
                         isSending = true
+                        streamingText = ""
                         onStatusChange("Sende Anfrage an ${settings.provider.label()} ...")
-                        coroutineScope.launch {
+                        val requestJob = coroutineScope.launch(start = CoroutineStart.LAZY) {
                             try {
                                 val runtimeDecision = ExtensionRuntimeOrchestrator.buildRuntimeContext(
                                     userText = userText,
@@ -697,22 +737,42 @@ private fun DesktopChatWorkspace(
                                     activeExtensions = activeExtensions,
                                     templateTitles = DESKTOP_TEMPLATE_TITLES
                                 )
-                                val reply = gateway.requestAssistantReply(
+                                gateway.streamAssistantReply(
                                     settings = settings,
                                     chatHistory = requestHistory,
                                     quickAction = selectedQuickAction,
                                     runtimeDecision = runtimeDecision
-                                )
-                                val assistantMessage = AiChatMessage(
-                                    role = AiChatRole.ASSISTANT,
-                                    text = reply
-                                )
-                                if (onAppendMessage(assistantMessage).isFailure) {
-                                    localError = "Die Antwort konnte nicht lokal gespeichert werden."
-                                    onStatusChange("Lokales Speichern fehlgeschlagen.")
-                                } else {
-                                    onStatusChange("Antwort erhalten (${settings.provider.label()}).")
+                                ).collect { event ->
+                                    when (event) {
+                                        is AiStreamStarted -> onStatusChange(
+                                            "Empfange Antwort von ${settings.provider.label()} ..."
+                                        )
+                                        is AiStreamDelta -> streamingText += event.text
+                                        is AiStreamCompleted -> {
+                                            val assistantMessage = event.response.message
+                                            if (onAppendMessage(assistantMessage).isFailure) {
+                                                localError =
+                                                    "Die Antwort konnte nicht lokal gespeichert werden."
+                                                onStatusChange("Lokales Speichern fehlgeschlagen.")
+                                            } else {
+                                                onStatusChange(
+                                                    "Antwort erhalten (${settings.provider.label()})."
+                                                )
+                                            }
+                                            streamingText = ""
+                                        }
+                                        is AiStreamError -> {
+                                            streamingText = ""
+                                            localError = event.message
+                                            onStatusChange("Streaming-Anfrage fehlgeschlagen.")
+                                        }
+                                        is AiStreamFinished -> Unit
+                                    }
                                 }
+                            } catch (_: CancellationException) {
+                                streamingText = ""
+                                localError = null
+                                onStatusChange("Streaming abgebrochen.")
                             } catch (t: Throwable) {
                                 val (userMessage, statusMessage) = when (t) {
                                     is DesktopMissingApiKeyException ->
@@ -732,8 +792,11 @@ private fun DesktopChatWorkspace(
                                 onStatusChange(statusMessage)
                             } finally {
                                 isSending = false
+                                activeRequestJob = null
                             }
                         }
+                        activeRequestJob = requestJob
+                        requestJob.start()
                     }
                 ) {
                     Text("Senden")

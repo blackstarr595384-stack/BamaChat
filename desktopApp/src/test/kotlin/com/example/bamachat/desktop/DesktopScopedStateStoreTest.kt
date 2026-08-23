@@ -38,6 +38,129 @@ class DesktopScopedStateStoreTest {
         }
 
     @Test
+    fun settingsDefaultWithoutOverrideRemainsUnderUserHome() =
+        withTemporaryDataDirectory { temporaryRoot ->
+            val userHome = temporaryRoot.resolve("production-home").toAbsolutePath().normalize()
+
+            assertEquals(
+                userHome.resolve(".bamachat-desktop"),
+                DesktopDataDirectoryResolver.resolveSettingsDirectory(
+                    environment = emptyMap(),
+                    userHome = userHome.toString()
+                )
+            )
+        }
+
+    @Test
+    fun absoluteSettingsOverrideIsNormalizedAndIndependentFromDataOverride() =
+        withTemporaryDataDirectory { temporaryRoot ->
+            val settingsDirectory = temporaryRoot.resolve("settings-root")
+            val environment = mapOf(
+                DesktopDataDirectoryResolver.SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE to
+                    settingsDirectory.resolve("nested").resolve("..").toString(),
+                DesktopDataDirectoryResolver.OVERRIDE_ENVIRONMENT_VARIABLE to
+                    temporaryRoot.resolve("data-root").toString()
+            )
+
+            assertEquals(
+                settingsDirectory.toAbsolutePath().normalize(),
+                DesktopDataDirectoryResolver.resolveSettingsDirectory(
+                    environment = environment,
+                    userHome = temporaryRoot.resolve("unused-home").toString()
+                )
+            )
+            assertEquals(
+                temporaryRoot.resolve("data-root").toAbsolutePath().normalize(),
+                DesktopDataDirectoryResolver.resolve(
+                    environment = environment,
+                    userHome = temporaryRoot.resolve("unused-home").toString()
+                )
+            )
+        }
+
+    @Test
+    fun relativeSettingsOverrideIsRejectedClearly() {
+        val failure = assertFailsWith<IllegalArgumentException> {
+            DesktopDataDirectoryResolver.resolveSettingsDirectory(
+                environment = mapOf(
+                    DesktopDataDirectoryResolver.SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE to
+                        "relative/settings"
+                ),
+                userHome = "C:\\unused-home"
+            )
+        }
+
+        assertTrue(
+            failure.message.orEmpty().contains(
+                DesktopDataDirectoryResolver.SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE
+            )
+        )
+    }
+
+    @Test
+    fun settingsOverrideRejectsExistingFile() =
+        withTemporaryDataDirectory { temporaryRoot ->
+            val regularFile = temporaryRoot.resolve("not-a-directory")
+            Files.writeString(regularFile, "fixture")
+
+            val failure = assertFailsWith<IllegalArgumentException> {
+                DesktopDataDirectoryResolver.resolveSettingsDirectory(
+                    environment = mapOf(
+                        DesktopDataDirectoryResolver.SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE to
+                            regularFile.toString()
+                    ),
+                    userHome = temporaryRoot.resolve("unused-home").toString()
+                )
+            }
+
+            assertTrue(failure.message.orEmpty().contains("Verzeichnis"))
+        }
+
+    @Test
+    fun settingsOverrideKeepsProductionDirectoryUntouched() =
+        withTemporaryDataDirectory { temporaryRoot ->
+            val fakeUserHome = temporaryRoot.resolve("production-home")
+            val productionDirectory = fakeUserHome.resolve(".bamachat-desktop")
+            val productionSentinel = productionDirectory.resolve("settings.properties")
+            Files.createDirectories(productionDirectory)
+            Files.writeString(productionSentinel, "unchanged-production-fixture")
+            val productionBytes = Files.readAllBytes(productionSentinel)
+            val overrideDirectory = temporaryRoot.resolve("isolated-settings")
+            val resolved = DesktopDataDirectoryResolver.resolveSettingsDirectory(
+                environment = mapOf(
+                    DesktopDataDirectoryResolver.SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE to
+                        overrideDirectory.toString()
+                ),
+                userHome = fakeUserHome.toString()
+            )
+            val cipher = DesktopCredentialCipher(
+                settingsDirectory = resolved,
+                platformDetector = DesktopPlatformDetector { false }
+            )
+            val repository = DesktopSettingsRepository(
+                settingsDirectory = resolved,
+                credentialCipher = cipher
+            )
+
+            repository.save(
+                DesktopUserSettings(
+                    provider = DesktopProvider.OPENROUTER,
+                    openRouterApiKey = "isolated-test-secret",
+                    openRouterModel = "fixture-model",
+                    firebaseApiKey = "public-fixture-config",
+                    firebaseProjectId = "fixture-project",
+                    googleOAuthClientId = "fixture-client"
+                )
+            )
+
+            assertEquals(overrideDirectory.toAbsolutePath().normalize(), resolved)
+            assertTrue(Files.isRegularFile(overrideDirectory.resolve("settings.properties")))
+            assertTrue(Files.isRegularFile(overrideDirectory.resolve("session_salt.bin")))
+            assertTrue(productionBytes.contentEquals(Files.readAllBytes(productionSentinel)))
+            assertEquals(1L, Files.list(productionDirectory).use { it.count() })
+        }
+
+    @Test
     fun emptyFirstStartReturnsEmptyStateWithoutCreatingAFile() = withTemporaryDataDirectory { dataDirectory ->
         val store = DesktopScopedStateStore(dataDirectory = dataDirectory)
         val ownerScope = DesktopOwnerScope.guest()

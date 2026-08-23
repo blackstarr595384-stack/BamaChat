@@ -7,6 +7,7 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
@@ -89,6 +90,7 @@ internal value class DesktopOwnerScope private constructor(val id: String) {
 
 internal object DesktopDataDirectoryResolver {
     const val OVERRIDE_ENVIRONMENT_VARIABLE = "BAMACHAT_DESKTOP_DATA_DIR"
+    const val SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE = "BAMACHAT_DESKTOP_SETTINGS_DIR"
 
     fun resolve(
         environment: Map<String, String> = System.getenv(),
@@ -121,6 +123,12 @@ internal object DesktopDataDirectoryResolver {
         environment: Map<String, String> = System.getenv(),
         userHome: String = System.getProperty("user.home").orEmpty()
     ): Path {
+        environment[SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE]?.let { overridePath ->
+            return requireAbsoluteOverride(
+                rawPath = overridePath,
+                source = SETTINGS_OVERRIDE_ENVIRONMENT_VARIABLE
+            )
+        }
         environment[OVERRIDE_ENVIRONMENT_VARIABLE]
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
@@ -129,6 +137,21 @@ internal object DesktopDataDirectoryResolver {
                     .resolve("settings")
             }
         return requireAbsolute(Path.of(userHome), "user.home").resolve(".bamachat-desktop")
+    }
+
+    private fun requireAbsoluteOverride(rawPath: String, source: String): Path {
+        val trimmed = rawPath.trim()
+        require(trimmed.isNotEmpty()) { "$source darf nicht leer sein." }
+        val path = try {
+            Path.of(trimmed)
+        } catch (_: InvalidPathException) {
+            throw IllegalArgumentException("$source enthält einen ungültigen Pfad.")
+        }
+        val normalized = requireAbsolute(path, source)
+        require(!Files.exists(normalized) || Files.isDirectory(normalized)) {
+            "$source muss auf ein Verzeichnis zeigen."
+        }
+        return normalized
     }
 
     private fun requireAbsolute(path: Path, source: String): Path {
