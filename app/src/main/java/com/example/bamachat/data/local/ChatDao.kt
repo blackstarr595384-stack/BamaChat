@@ -18,18 +18,23 @@ data class PersonaFeedbackStats(
     val unhelpfulCount: Int
 )
 
+/** Counts rows removed only for one validated guest scope, including data derived from its messages. */
 data class ScopedChatCleanupResult(
     val conversationIds: List<String>,
     val deletedMessages: Int,
     val deletedConversations: Int,
     val deletedFtsRows: Int,
-    val deletedLinkedReferences: Int
+    val deletedDerivedMemoryAndFeedbackRows: Int,
+    val deletedKnowledgeChunks: Int = 0,
+    val deletedKnowledgeEdges: Int = 0
 )
 
 data class LegacyScopeClaimResult(
     val conversationIds: List<String>,
     val claimedConversations: Int,
-    val claimedMessages: Int
+    val claimedMessages: Int,
+    val claimedKnowledgeChunks: Int = 0,
+    val claimedKnowledgeEdges: Int = 0
 )
 
 @Dao
@@ -195,6 +200,47 @@ interface ChatDao {
     @Query("UPDATE conversations SET ownerScope = :accountScope WHERE ownerScope = :legacyScope")
     suspend fun claimLegacyConversations(accountScope: String, legacyScope: String): Int
 
+    @Query("UPDATE knowledge_chunks SET ownerScope = :accountScope WHERE ownerScope = :legacyScope")
+    suspend fun claimLegacyKnowledgeChunks(accountScope: String, legacyScope: String): Int
+
+    @Query("UPDATE knowledge_edges SET ownerScope = :accountScope WHERE ownerScope = :legacyScope")
+    suspend fun claimLegacyKnowledgeEdges(accountScope: String, legacyScope: String): Int
+
+    @Query(
+        "UPDATE knowledge_edges SET " +
+            "weight = MAX(weight, COALESCE((" +
+            "SELECT legacy.weight FROM knowledge_edges AS legacy " +
+            "WHERE legacy.ownerScope = :legacyScope " +
+            "AND legacy.fromConcept = knowledge_edges.fromConcept " +
+            "AND legacy.relation = knowledge_edges.relation " +
+            "AND legacy.toConcept = knowledge_edges.toConcept LIMIT 1" +
+            "), weight)), " +
+            "updatedAt = MAX(updatedAt, COALESCE((" +
+            "SELECT legacy.updatedAt FROM knowledge_edges AS legacy " +
+            "WHERE legacy.ownerScope = :legacyScope " +
+            "AND legacy.fromConcept = knowledge_edges.fromConcept " +
+            "AND legacy.relation = knowledge_edges.relation " +
+            "AND legacy.toConcept = knowledge_edges.toConcept LIMIT 1" +
+            "), updatedAt)) " +
+            "WHERE ownerScope = :accountScope AND EXISTS (" +
+            "SELECT 1 FROM knowledge_edges AS legacy " +
+            "WHERE legacy.ownerScope = :legacyScope " +
+            "AND legacy.fromConcept = knowledge_edges.fromConcept " +
+            "AND legacy.relation = knowledge_edges.relation " +
+            "AND legacy.toConcept = knowledge_edges.toConcept)"
+    )
+    suspend fun mergeDuplicateLegacyKnowledgeEdges(accountScope: String, legacyScope: String): Int
+
+    @Query(
+        "DELETE FROM knowledge_edges WHERE ownerScope = :legacyScope AND EXISTS (" +
+            "SELECT 1 FROM knowledge_edges AS account " +
+            "WHERE account.ownerScope = :accountScope " +
+            "AND account.fromConcept = knowledge_edges.fromConcept " +
+            "AND account.relation = knowledge_edges.relation " +
+            "AND account.toConcept = knowledge_edges.toConcept)"
+    )
+    suspend fun deleteDuplicateLegacyKnowledgeEdges(accountScope: String, legacyScope: String): Int
+
     @Transaction
     suspend fun restoreScopedConversation(
         conversation: ConversationEntity,
@@ -238,14 +284,22 @@ interface ChatDao {
     @Query("DELETE FROM user_memory_facts WHERE sourceMessageId IN (SELECT id FROM chat_messages WHERE ownerScope = :ownerScope)")
     suspend fun deleteUserMemoryFactsForMessageScope(ownerScope: String): Int
 
+    @Query("DELETE FROM knowledge_chunks WHERE ownerScope = :ownerScope")
+    suspend fun deleteKnowledgeChunksForScope(ownerScope: String): Int
+
+    @Query("DELETE FROM knowledge_edges WHERE ownerScope = :ownerScope")
+    suspend fun deleteKnowledgeEdgesForScope(ownerScope: String): Int
+
     @Transaction
     suspend fun deleteChatDataForScope(ownerScope: String): ScopedChatCleanupResult {
         require(ChatOwnerScope.isGuest(ownerScope)) { "Only guest scopes can be selectively cleared" }
         val conversationIds = getConversationIdsForScope(ownerScope)
-        val deletedLinkedReferences =
+        val deletedDerivedMemoryAndFeedbackRows =
             deletePersonaMemoryForMessageScope(ownerScope) +
                 deletePersonaFeedbackForMessageScope(ownerScope) +
                 deleteUserMemoryFactsForMessageScope(ownerScope)
+        val deletedKnowledgeChunks = deleteKnowledgeChunksForScope(ownerScope)
+        val deletedKnowledgeEdges = deleteKnowledgeEdgesForScope(ownerScope)
         val deletedFtsRows = deleteMessageFtsForScope(ownerScope)
         val deletedMessages = deleteMessagesForScope(ownerScope)
         val deletedConversations = deleteConversationsForScope(ownerScope)
@@ -254,7 +308,9 @@ interface ChatDao {
             deletedMessages = deletedMessages,
             deletedConversations = deletedConversations,
             deletedFtsRows = deletedFtsRows,
-            deletedLinkedReferences = deletedLinkedReferences
+            deletedDerivedMemoryAndFeedbackRows = deletedDerivedMemoryAndFeedbackRows,
+            deletedKnowledgeChunks = deletedKnowledgeChunks,
+            deletedKnowledgeEdges = deletedKnowledgeEdges
         )
     }
 
@@ -358,17 +414,28 @@ interface ChatDao {
 
     @Query(
         "SELECT * FROM knowledge_chunks " +
-            "WHERE lower(content) LIKE :query OR lower(keywords) LIKE :query OR lower(sourceTitle) LIKE :query " +
+            "WHERE ownerScope = :ownerScope AND (" +
+            "lower(content) LIKE :query OR lower(keywords) LIKE :query OR lower(sourceTitle) LIKE :query) " +
             "ORDER BY createdAt DESC LIMIT :limit"
     )
-    suspend fun searchKnowledgeChunks(query: String, limit: Int): List<KnowledgeChunkEntity>
+    suspend fun searchKnowledgeChunks(
+        ownerScope: String,
+        query: String,
+        limit: Int
+    ): List<KnowledgeChunkEntity>
 
     // ===== Knowledge Graph =====
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertKnowledgeEdge(edge: KnowledgeEdgeEntity)
 
-    @Query("SELECT * FROM knowledge_edges ORDER BY updatedAt DESC LIMIT :limit")
-    suspend fun getKnowledgeEdges(limit: Int): List<KnowledgeEdgeEntity>
+    @Query("SELECT * FROM knowledge_edges WHERE ownerScope = :ownerScope ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun getKnowledgeEdges(ownerScope: String, limit: Int): List<KnowledgeEdgeEntity>
+
+    @Query("SELECT COUNT(*) FROM knowledge_chunks WHERE ownerScope = :ownerScope")
+    suspend fun countKnowledgeChunksForScope(ownerScope: String): Int
+
+    @Query("SELECT COUNT(*) FROM knowledge_edges WHERE ownerScope = :ownerScope")
+    suspend fun countKnowledgeEdgesForScope(ownerScope: String): Int
 
     // ===== Persona Training (Feature 5) =====
     @Insert(onConflict = OnConflictStrategy.REPLACE)

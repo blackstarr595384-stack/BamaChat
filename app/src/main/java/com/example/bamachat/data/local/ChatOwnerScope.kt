@@ -27,15 +27,21 @@ object ChatOwnerScope {
     }
 
     fun isAccount(scope: String): Boolean =
-        scope.startsWith(ACCOUNT_PREFIX) && scope.length > ACCOUNT_PREFIX.length
+        hasValidSuffix(scope, ACCOUNT_PREFIX)
 
     fun isAccountForUid(scope: String, uid: String): Boolean =
         scope == account(uid)
 
     fun isGuest(scope: String): Boolean =
-        scope.startsWith(GUEST_PREFIX) && scope.length > GUEST_PREFIX.length
+        hasValidSuffix(scope, GUEST_PREFIX)
 
     fun isWritable(scope: String): Boolean = isAccount(scope) || isGuest(scope)
+
+    private fun hasValidSuffix(scope: String, prefix: String): Boolean {
+        if (!scope.startsWith(prefix)) return false
+        val suffix = scope.removePrefix(prefix)
+        return suffix.isNotBlank() && suffix == suffix.trim() && suffix.none(Char::isWhitespace)
+    }
 }
 
 enum class AccountTransitionPhase {
@@ -45,7 +51,11 @@ enum class AccountTransitionPhase {
     GUEST_CLEANUP_COMPLETE,
     LEGACY_CLAIM_COMPLETE,
     WORKSPACE_MIGRATION_COMPLETE,
-    ACCOUNT_ACTIVATED
+    ACCOUNT_ACTIVATED,
+    CORRUPT;
+
+    fun isResumable(): Boolean =
+        ordinal in AUTHENTICATED.ordinal..WORKSPACE_MIGRATION_COMPLETE.ordinal
 }
 
 @Singleton
@@ -84,7 +94,10 @@ class ChatSessionScopeStore @Inject constructor(
 
     @Synchronized
     fun startNewGuestSession(): String {
-        val scope = ChatOwnerScope.guest(UUID.randomUUID().toString())
+        check(transitionPhase().ordinal <= AccountTransitionPhase.PREPARED.ordinal) {
+            "Ein bestätigter Kontoübergang darf nicht durch eine Gast-Sitzung ersetzt werden."
+        }
+        val scope = storedGuestScope() ?: ChatOwnerScope.guest(UUID.randomUUID().toString())
         val committed = prefs.edit()
             .putString(KEY_GUEST_SCOPE, scope)
             .putString(KEY_ACTIVE_SCOPE, scope)
@@ -110,6 +123,9 @@ class ChatSessionScopeStore @Inject constructor(
     fun prepareAccountTransition() {
         val current = currentScope()
         val phase = transitionPhase()
+        if (phase == AccountTransitionPhase.CORRUPT) {
+            throw PendingAccountUidConflictException()
+        }
         if (phase != AccountTransitionPhase.NONE) return
         val committed = prefs.edit()
             .apply {
@@ -141,15 +157,40 @@ class ChatSessionScopeStore @Inject constructor(
     }
 
     @Synchronized
+    fun bindPreparedAccountUid(uid: String) {
+        val cleanUid = uid.trim()
+        require(cleanUid.isNotBlank()) { "Firebase UID must not be blank" }
+        check(transitionPhase() == AccountTransitionPhase.PREPARED) {
+            "Die authentifizierte UID darf nur an einen vorbereiteten Übergang gebunden werden."
+        }
+        pendingAccountUid()?.let { existingUid ->
+            if (existingUid != cleanUid) throw PendingAccountUidConflictException()
+            return
+        }
+        check(
+            prefs.edit()
+                .putString(KEY_PENDING_ACCOUNT_UID, cleanUid)
+                .putBoolean(KEY_AUTH_TRANSITION_PENDING, true)
+                .commit()
+        ) { "Authentifizierte UID konnte nicht sicher an den Übergang gebunden werden." }
+    }
+
+    @Synchronized
     fun beginAuthenticatedTransition(uid: String): AccountTransitionPhase {
         val cleanUid = uid.trim()
         require(cleanUid.isNotBlank()) { "Firebase UID must not be blank" }
         val currentPhase = transitionPhase()
         val existingUid = pendingAccountUid()
+        if (currentPhase == AccountTransitionPhase.NONE && existingUid != null) {
+            throw PendingAccountUidConflictException()
+        }
         if (existingUid != null) {
             if (existingUid != cleanUid) throw PendingAccountUidConflictException()
         }
-        if (currentPhase.ordinal >= AccountTransitionPhase.AUTHENTICATED.ordinal) return currentPhase
+        if (currentPhase.ordinal >= AccountTransitionPhase.AUTHENTICATED.ordinal) {
+            check(currentPhase.isResumable()) { "Der gespeicherte Kontoübergang ist nicht resumierbar." }
+            return currentPhase
+        }
 
         val editor = prefs.edit()
             .putString(KEY_PENDING_ACCOUNT_UID, cleanUid)
@@ -241,14 +282,19 @@ class ChatSessionScopeStore @Inject constructor(
     fun pendingAccountUid(): String? =
         prefs.getString(KEY_PENDING_ACCOUNT_UID, null)?.trim()?.takeIf { it.isNotBlank() }
 
-    fun transitionPhase(): AccountTransitionPhase =
-        prefs.getString(KEY_TRANSITION_PHASE, null)
-            ?.let { stored -> runCatching { AccountTransitionPhase.valueOf(stored) }.getOrNull() }
-            ?: if (prefs.getBoolean(KEY_AUTH_TRANSITION_PENDING, false)) {
+    fun transitionPhase(): AccountTransitionPhase {
+        if (!prefs.contains(KEY_TRANSITION_PHASE)) {
+            return if (prefs.getBoolean(KEY_AUTH_TRANSITION_PENDING, false)) {
                 AccountTransitionPhase.PREPARED
             } else {
                 AccountTransitionPhase.NONE
             }
+        }
+        val storedPhase = runCatching { prefs.getString(KEY_TRANSITION_PHASE, null) }.getOrNull()
+        return storedPhase
+            ?.let { stored -> runCatching { AccountTransitionPhase.valueOf(stored) }.getOrNull() }
+            ?: AccountTransitionPhase.CORRUPT
+    }
 
     fun isAccountTransitionPending(): Boolean = transitionPhase() != AccountTransitionPhase.NONE
 

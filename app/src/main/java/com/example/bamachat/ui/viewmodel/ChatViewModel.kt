@@ -824,10 +824,11 @@ class ChatViewModel @Inject constructor(
             scheduleMessageSync(convId, userMessage)
 
             knowledgeService.extractAndSaveFacts(trimmedText, "GLOBAL", userMessage.id)
-            knowledgeService.extractAndSaveEdges(trimmedText)
+            val ownerScope = conversationService.writableOwnerScope()
+            knowledgeService.extractAndSaveEdges(trimmedText, ownerScope)
 
             val personaName = personaViewModel.selectedPersona.value.name
-            val knowledgeContext = knowledgeService.retrieveRelevantContext(trimmedText, personaName)
+            val knowledgeContext = knowledgeService.retrieveRelevantContext(trimmedText, personaName, ownerScope)
 
             try {
                 val runtimeContext = chatEngine.buildRuntimeContext(trimmedText)
@@ -968,7 +969,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val groqKey = SecureSettingsStore.getString(appContext, prefs, "groq_api_key")
-                val result = mediaService.importMultimodal(uri, groqKey)
+                val result = mediaService.importMultimodal(uri, conversationService.writableOwnerScope(), groqKey)
                 when {
                     result == "image" -> sendMessageWithImage("Analysiere dieses Bild.", uri)
                     result?.startsWith("document_imported:") == true -> {
@@ -1588,6 +1589,8 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _errorActionLabel.value = null
         _isErrorRetryable.value = false
     }
+
+    fun currentOwnerScope(): String = conversationService.currentOwnerScope()
 
     private suspend fun runCustomProviderChat(
         convId: String,

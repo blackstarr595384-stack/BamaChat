@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator
 import com.example.bamachat.data.local.ChatDatabase
+import com.example.bamachat.data.local.ChatOwnerScope
+import com.example.bamachat.data.local.ChatSessionScopeStore
 import com.example.bamachat.ui.theme.AppDesignSystem
 import com.example.bamachat.ui.theme.AppDesignPreset
 import com.example.bamachat.util.AgentPresetLibrary
@@ -30,8 +32,11 @@ import com.example.bamachat.voice.RealtimeVoice
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.util.concurrent.TimeUnit
@@ -39,7 +44,8 @@ import java.util.concurrent.TimeUnit
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     application: Application,
-    private val chatSyncCoordinator: AndroidChatSyncCoordinator
+    private val chatSyncCoordinator: AndroidChatSyncCoordinator,
+    private val chatSessionScopeStore: ChatSessionScopeStore
 ) : AndroidViewModel(application) {
     companion object {
         private const val KEY_CLOUD_PERSONA_LAST_SYNC_AT = "cloud_persona_last_sync_at"
@@ -105,6 +111,13 @@ class SettingsViewModel @Inject constructor(
     private val appContext = application.applicationContext
     private val chatDao = ChatDatabase.getDatabase(application).chatDao()
     private val dataSanitizer = LocalDataSanitizer(application.applicationContext)
+    val guestCleanupAvailable: StateFlow<Boolean> = chatSessionScopeStore.activeScope
+        .map(ChatOwnerScope::isGuest)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000L),
+            initialValue = ChatOwnerScope.isGuest(chatSessionScopeStore.currentScope())
+        )
     private val billingManager = PlayBillingManager(
         context = application.applicationContext,
         onSubscriptionTierChanged = { tier ->
@@ -386,11 +399,6 @@ class SettingsViewModel @Inject constructor(
         prefs.getFloat("ui_surface_opacity", 0.85f)
     )
     val uiSurfaceOpacity: StateFlow<Float> = _uiSurfaceOpacity.asStateFlow()
-
-    private val _guestAutoClearOnAccountSignIn = MutableStateFlow(
-        prefs.getBoolean("guest_auto_clear_on_account_signin", true)
-    )
-    val guestAutoClearOnAccountSignIn: StateFlow<Boolean> = _guestAutoClearOnAccountSignIn.asStateFlow()
 
     private val _guestAutoClearOnSignOut = MutableStateFlow(
         prefs.getBoolean("guest_auto_clear_on_signout", true)
@@ -1155,11 +1163,6 @@ class SettingsViewModel @Inject constructor(
         setDisplayPreset(DisplaySettingsPresets.STANDARD)
     }
 
-    fun setGuestAutoClearOnAccountSignIn(enabled: Boolean) {
-        _guestAutoClearOnAccountSignIn.value = enabled
-        prefs.edit().putBoolean("guest_auto_clear_on_account_signin", enabled).apply()
-    }
-
     fun setGuestAutoClearOnSignOut(enabled: Boolean) {
         _guestAutoClearOnSignOut.value = enabled
         prefs.edit().putBoolean("guest_auto_clear_on_signout", enabled).apply()
@@ -1501,7 +1504,9 @@ $tools
 
     fun clearGuestPrivateData() {
         viewModelScope.launch {
-            dataSanitizer.clearGuestSessionData(clearApiKeys = false)
+            val ownerScope = chatSessionScopeStore.currentScope()
+            if (!ChatOwnerScope.isGuest(ownerScope)) return@launch
+            dataSanitizer.clearGuestSessionData(ownerScope)
         }
     }
 

@@ -34,11 +34,24 @@ class RoomLegacyScopeClaimer @Inject constructor(
         val dao = database.chatDao()
         val conversationIds = dao.getConversationIdsForScope(legacyScope)
         database.openHelper.writableDatabase.execSQL("PRAGMA defer_foreign_keys = ON")
+        val claimedKnowledgeChunks = dao.claimLegacyKnowledgeChunks(accountScope, legacyScope)
+        val claimedKnowledgeEdges = dao.countKnowledgeEdgesForScope(legacyScope)
+        dao.mergeDuplicateLegacyKnowledgeEdges(accountScope, legacyScope)
+        dao.deleteDuplicateLegacyKnowledgeEdges(accountScope, legacyScope)
+        dao.claimLegacyKnowledgeEdges(accountScope, legacyScope)
         val claimedMessages = dao.claimLegacyMessages(accountScope, legacyScope)
         val claimedConversations = dao.claimLegacyConversations(accountScope, legacyScope)
         check(dao.countMessagesForScope(legacyScope) == 0) { "Legacy messages remain after claim" }
         check(dao.countConversationsForScope(legacyScope) == 0) { "Legacy conversations remain after claim" }
-        LegacyScopeClaimResult(conversationIds, claimedConversations, claimedMessages)
+        check(dao.countKnowledgeChunksForScope(legacyScope) == 0) { "Legacy knowledge chunks remain after claim" }
+        check(dao.countKnowledgeEdgesForScope(legacyScope) == 0) { "Legacy knowledge edges remain after claim" }
+        LegacyScopeClaimResult(
+            conversationIds,
+            claimedConversations,
+            claimedMessages,
+            claimedKnowledgeChunks,
+            claimedKnowledgeEdges
+        )
     }
 }
 
@@ -61,12 +74,33 @@ class GuestChatTransitionCoordinator @Inject constructor(
 
     suspend fun completeAuthenticatedTransition(uid: String): AccountTransitionResult =
         transitionMutex.withLock {
-            val accountScope = ChatOwnerScope.account(uid)
+            val cleanUid = uid.trim()
+            val accountScope = ChatOwnerScope.account(cleanUid)
+            val currentScope = scopeStore.currentScope()
+            val transitionPhase = scopeStore.transitionPhase()
+            val pendingAccountUid = scopeStore.pendingAccountUid()
+            val sameAccountWithoutTransition =
+                transitionPhase == AccountTransitionPhase.NONE &&
+                    pendingAccountUid == null &&
+                    currentScope == accountScope
+            val preparedForAuthenticatedUid =
+                transitionPhase == AccountTransitionPhase.PREPARED && pendingAccountUid == cleanUid
+            val resumableForAuthenticatedUid =
+                transitionPhase.isResumable() && pendingAccountUid == cleanUid
+            if (
+                !sameAccountWithoutTransition &&
+                !preparedForAuthenticatedUid &&
+                !resumableForAuthenticatedUid
+            ) {
+                throw PendingAccountUidConflictException()
+            }
             if (
                 !scopeStore.isAccountTransitionPending() &&
-                scopeStore.currentScope() == accountScope &&
+                currentScope == accountScope &&
                 repository.legacyConversationCount() == 0 &&
-                repository.legacyMessageCount() == 0
+                repository.legacyMessageCount() == 0 &&
+                repository.legacyKnowledgeChunkCount() == 0 &&
+                repository.legacyKnowledgeEdgeCount() == 0
             ) {
                 return@withLock AccountTransitionResult(
                     accountScope = accountScope,
@@ -75,7 +109,7 @@ class GuestChatTransitionCoordinator @Inject constructor(
                 )
             }
             cloudOperationGate.withTransitionStart {
-                scopeStore.beginAuthenticatedTransition(uid)
+                scopeStore.beginAuthenticatedTransition(cleanUid)
             }
 
             var cleanup: ScopedChatCleanupResult? = null
@@ -85,14 +119,14 @@ class GuestChatTransitionCoordinator @Inject constructor(
                     cleanup = cleaner.clear(pendingGuestScope)
                     workspaceStore.removeAllForScope(pendingGuestScope)
                 }
-                scopeStore.markTransitionPhase(uid, AccountTransitionPhase.GUEST_CLEANUP_COMPLETE)
+                scopeStore.markTransitionPhase(cleanUid, AccountTransitionPhase.GUEST_CLEANUP_COMPLETE)
             }
 
             val legacyClaim = if (
                 scopeStore.transitionPhase().ordinal < AccountTransitionPhase.LEGACY_CLAIM_COMPLETE.ordinal
             ) {
-                legacyClaimer.claim(uid).also {
-                    scopeStore.markTransitionPhase(uid, AccountTransitionPhase.LEGACY_CLAIM_COMPLETE)
+                legacyClaimer.claim(cleanUid).also {
+                    scopeStore.markTransitionPhase(cleanUid, AccountTransitionPhase.LEGACY_CLAIM_COMPLETE)
                 }
             } else {
                 LegacyScopeClaimResult(emptyList(), 0, 0)
@@ -100,10 +134,10 @@ class GuestChatTransitionCoordinator @Inject constructor(
 
             if (scopeStore.transitionPhase().ordinal < AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE.ordinal) {
                 workspaceStore.migrateUnscopedBindings(repository.getAllConversationsForWorkspaceMigration())
-                scopeStore.markTransitionPhase(uid, AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE)
+                scopeStore.markTransitionPhase(cleanUid, AccountTransitionPhase.WORKSPACE_MIGRATION_COMPLETE)
             }
 
-            scopeStore.completeAccountTransition(uid)
+            scopeStore.completeAccountTransition(cleanUid)
             AccountTransitionResult(
                 accountScope = accountScope,
                 cleanup = cleanup,

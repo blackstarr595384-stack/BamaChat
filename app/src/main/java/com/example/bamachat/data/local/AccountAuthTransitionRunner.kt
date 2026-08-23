@@ -30,6 +30,9 @@ class AccountAuthTransitionRunner @Inject constructor(
             val uid = authenticate().trim().also {
                 require(it.isNotBlank()) { "Authentifizierung lieferte keine Firebase UID." }
             }
+            cloudOperationGate.withTransitionStart {
+                scopeStore.bindPreparedAccountUid(uid)
+            }
             coordinator.completeAuthenticatedTransition(uid)
         } catch (error: Throwable) {
             if (scopeStore.canCancelAccountTransition()) {
@@ -45,8 +48,19 @@ class AccountAuthTransitionRunner @Inject constructor(
 
     suspend fun prepareAuthenticatedProcessResume(uid: String) {
         cloudOperationGate.withTransitionStart {
-            scopeStore.prepareAccountTransition()
-            scopeStore.beginAuthenticatedTransition(uid)
+            val cleanUid = uid.trim()
+            require(cleanUid.isNotBlank()) { "Authentifizierung lieferte keine Firebase UID." }
+            val phase = scopeStore.transitionPhase()
+            val pendingUid = scopeStore.pendingAccountUid()
+            when {
+                phase == AccountTransitionPhase.NONE &&
+                    pendingUid == null &&
+                    ChatOwnerScope.isAccountForUid(scopeStore.currentScope(), cleanUid) -> Unit
+                phase == AccountTransitionPhase.PREPARED && pendingUid == cleanUid ->
+                    scopeStore.beginAuthenticatedTransition(cleanUid)
+                phase.isResumable() && pendingUid == cleanUid -> Unit
+                else -> throw PendingAccountUidConflictException()
+            }
         }
     }
 }

@@ -143,6 +143,10 @@ service cloud.firestore {
           allow read, write: if isOwner(uid);
         }
       }
+
+      match /chat_backups/{backupId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     match /user_memory/{uid}/entries/{entryId} {

@@ -31,10 +31,10 @@ class ChatOwnershipMigrationTest {
     }
 
     @Test
-    fun roomMigratesRealVersionNineDatabaseAndLegacyClaimSurvivesReopen() = runBlocking {
+    fun roomMigratesReconstructedVersionNineDatabaseAndLegacyClaimSurvivesReopen() = runBlocking {
         createCompleteVersionNineDatabase()
 
-        val migrated = openVersionTenDatabase()
+        val migrated = openVersionElevenDatabase()
         val sqlite = migrated.openHelper.writableDatabase
         assertEquals(0, rowCount(sqlite, "PRAGMA foreign_key_check"))
         assertTrue(indexExists(sqlite, "index_conversations_ownerScope"))
@@ -46,7 +46,7 @@ class ChatOwnershipMigrationTest {
         assertLegacyRowsAndFts(sqlite)
         migrated.close()
 
-        val reopened = openVersionTenDatabase()
+        val reopened = openVersionElevenDatabase()
         assertLegacyRowsAndFts(reopened.openHelper.writableDatabase)
         val claim = RoomLegacyScopeClaimer(reopened).claim("uid-migration")
         val accountScope = ChatOwnerScope.account("uid-migration")
@@ -59,7 +59,7 @@ class ChatOwnershipMigrationTest {
         assertEquals(1, ChatRepository(reopened.chatDao()).searchMessages("legacy", accountScope).size)
         reopened.close()
 
-        val claimedReopen = openVersionTenDatabase()
+        val claimedReopen = openVersionElevenDatabase()
         assertEquals(0, claimedReopen.chatDao().countConversationsForScope(ChatOwnerScope.LEGACY_UNCLASSIFIED))
         assertEquals(1, claimedReopen.chatDao().countConversationsForScope(accountScope))
         assertEquals(0, rowCount(claimedReopen.openHelper.writableDatabase, "PRAGMA foreign_key_check"))
@@ -113,9 +113,9 @@ class ChatOwnershipMigrationTest {
         current.close()
     }
 
-    private fun openVersionTenDatabase(): ChatDatabase =
+    private fun openVersionElevenDatabase(): ChatDatabase =
         Room.databaseBuilder(context, ChatDatabase::class.java, DATABASE_NAME)
-            .addMigrations(ChatDatabase.MIGRATION_9_10)
+            .addMigrations(ChatDatabase.MIGRATION_9_10, ChatDatabase.MIGRATION_10_11)
             .allowMainThreadQueries()
             .build()
             .also { it.openHelper.writableDatabase }

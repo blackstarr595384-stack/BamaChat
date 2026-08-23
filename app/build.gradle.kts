@@ -157,6 +157,10 @@ android {
 
 }
 
+tasks.matching { it.name == "kspReleaseKotlin" }.configureEach {
+    mustRunAfter("kspDebugKotlin")
+}
+
 dependencies {
     // Play In-App Review
     implementation("com.google.android.play:review-ktx:2.0.2")

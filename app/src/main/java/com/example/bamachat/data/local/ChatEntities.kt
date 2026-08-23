@@ -108,7 +108,11 @@ data class UserMemoryFactEntity(
 
 @Entity(
     tableName = "knowledge_chunks",
-    indices = [Index(value = ["sourceTitle"]), Index(value = ["createdAt"])]
+    indices = [
+        Index(value = ["ownerScope"]),
+        Index(value = ["ownerScope", "sourceTitle"]),
+        Index(value = ["ownerScope", "createdAt"])
+    ]
 )
 data class KnowledgeChunkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -116,15 +120,18 @@ data class KnowledgeChunkEntity(
     val content: String,
     val keywords: String,
     val sourceType: String = "text",
-    val createdAt: Long
+    val createdAt: Long,
+    @ColumnInfo(defaultValue = "'legacy:unclassified'")
+    val ownerScope: String
 )
 
 @Entity(
     tableName = "knowledge_edges",
     indices = [
-        Index(value = ["fromConcept"]),
-        Index(value = ["toConcept"]),
-        Index(value = ["fromConcept", "relation", "toConcept"], unique = true)
+        Index(value = ["ownerScope"]),
+        Index(value = ["ownerScope", "fromConcept"]),
+        Index(value = ["ownerScope", "toConcept"]),
+        Index(value = ["ownerScope", "fromConcept", "relation", "toConcept"], unique = true)
     ]
 )
 data class KnowledgeEdgeEntity(
@@ -133,7 +140,9 @@ data class KnowledgeEdgeEntity(
     val relation: String,
     val toConcept: String,
     val weight: Float = 1.0f,
-    val updatedAt: Long
+    val updatedAt: Long,
+    @ColumnInfo(defaultValue = "'legacy:unclassified'")
+    val ownerScope: String
 )
 
 @Entity(
