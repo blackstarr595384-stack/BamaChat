@@ -78,7 +78,7 @@ object DesktopSettingsStore {
     private const val KEY_AUTH_TOKEN_EXPIRY_EPOCH_MS = "auth_token_expiry_epoch_ms"
     private const val KEY_ENCRYPT_CLOUD_SESSION = "encrypt_cloud_session"
 
-    private val baseDir = File(System.getProperty("user.home"), ".bamachat-desktop")
+    private val baseDir = DesktopDataDirectoryResolver.resolveSettingsDirectory().toFile()
     private val settingsFile = File(baseDir, "settings.properties")
 
     fun load(): DesktopUserSettings {

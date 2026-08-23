@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -112,22 +113,74 @@ fun main() = application {
 
 @Composable
 private fun DesktopRoot() {
+    val initialSettings = remember { DesktopSettingsStore.load() }
     var activeSection by remember { mutableStateOf(DesktopSection.CHAT) }
-    var settings by remember { mutableStateOf(DesktopSettingsStore.load()) }
-    var appStatus by remember { mutableStateOf("Desktop bereit.") }
-    var workspaceNotes by remember { mutableStateOf("") }
+    var settings by remember { mutableStateOf(initialSettings) }
+    val localStateSession = remember {
+        DesktopScopedStateSession(initialAuthenticatedUid = initialSettings.authUid)
+    }
+    var localState by remember { mutableStateOf(localStateSession.currentState) }
+    var appStatus by remember {
+        mutableStateOf(
+            if (localStateSession.lastLoadRecoveryCopyCreated) {
+                "Beschädigter lokaler Zustand wurde als Recovery-Kopie gesichert."
+            } else {
+                "Desktop bereit."
+            }
+        )
+    }
     val cloudGateway = remember { DesktopCloudSyncGateway() }
 
     fun persistSettings(
         updated: DesktopUserSettings,
         successMessage: String = "Einstellungen gespeichert."
     ) {
+        val saveFailure = runCatching { DesktopSettingsStore.save(updated) }.exceptionOrNull()
+        if (saveFailure != null) {
+            appStatus = "Speichern fehlgeschlagen: ${saveFailure.message ?: "Unbekannter Fehler"}"
+            return
+        }
+
+        val ownerSwitch = when {
+            updated.authUid == settings.authUid -> null
+            updated.authUid.isBlank() -> localStateSession.switchToGuest()
+            else -> localStateSession.switchToAuthenticatedOwner(updated.authUid)
+        }
+        if (ownerSwitch is DesktopOwnerSwitchResult.Rejected) {
+            appStatus = "Kontowechsel abgelehnt; lokaler Zustand bleibt unverändert."
+            return
+        }
+        if (ownerSwitch is DesktopOwnerSwitchResult.Activated) {
+            localState = ownerSwitch.state
+        }
         settings = updated
-        val saveResult = runCatching { DesktopSettingsStore.save(updated) }
-        appStatus = saveResult.fold(
-            onSuccess = { successMessage },
-            onFailure = { "Speichern fehlgeschlagen: ${it.message ?: "Unbekannter Fehler"}" }
+        appStatus = if (
+            ownerSwitch is DesktopOwnerSwitchResult.Activated &&
+            ownerSwitch.recoveryCopyCreated
+        ) {
+            "Beschädigter lokaler Zustand wurde als Recovery-Kopie gesichert."
+        } else {
+            successMessage
+        }
+    }
+
+    fun appendLocalMessage(message: AiChatMessage): Result<Unit> = runCatching {
+        localState = localStateSession.appendMessage(
+            role = message.role.toDesktopLocalRole(),
+            text = message.text
         )
+    }.map { Unit }
+
+    fun clearLocalConversation(): Result<Unit> = runCatching {
+        localState = localStateSession.clearActiveConversation()
+    }.map { Unit }
+
+    fun updateLocalWorkspaceNotes(notes: String) {
+        runCatching {
+            localState = localStateSession.updateWorkspaceNotes(notes)
+        }.onFailure {
+            appStatus = "Lokale Workspace-Notizen konnten nicht gespeichert werden."
+        }
     }
 
     LaunchedEffect(
@@ -189,20 +242,30 @@ private fun DesktopRoot() {
                 color = Color(0xFF17233A)
             ) {
                 when (activeSection) {
-                    DesktopSection.CHAT -> DesktopChatWorkspace(
-                        settings = settings,
-                        onRequestOpenSettings = { activeSection = DesktopSection.SETTINGS },
-                        onStatusChange = { appStatus = it }
-                    )
-                    DesktopSection.WORKSPACE -> DesktopNotesWorkspace(
-                        settings = settings,
-                        notes = workspaceNotes,
-                        onNotesChange = { workspaceNotes = it },
-                        onSettingsChange = { updated, statusMessage ->
-                            persistSettings(updated, statusMessage)
-                        },
-                        onStatusChange = { appStatus = it }
-                    )
+                    DesktopSection.CHAT -> key(localState.ownerScopeId) {
+                        DesktopChatWorkspace(
+                            settings = settings,
+                            chatHistory = localState.activeConversation()
+                                ?.messages
+                                .orEmpty()
+                                .map { it.toAiChatMessage() },
+                            onAppendMessage = ::appendLocalMessage,
+                            onClearConversation = ::clearLocalConversation,
+                            onRequestOpenSettings = { activeSection = DesktopSection.SETTINGS },
+                            onStatusChange = { appStatus = it }
+                        )
+                    }
+                    DesktopSection.WORKSPACE -> key(localState.ownerScopeId) {
+                        DesktopNotesWorkspace(
+                            settings = settings,
+                            notes = localState.workspace.notes,
+                            onNotesChange = ::updateLocalWorkspaceNotes,
+                            onSettingsChange = { updated, statusMessage ->
+                                persistSettings(updated, statusMessage)
+                            },
+                            onStatusChange = { appStatus = it }
+                        )
+                    }
                     DesktopSection.SETTINGS -> DesktopSettingsView(
                         settings = settings,
                         onSave = { updated ->
@@ -367,6 +430,9 @@ private fun SidebarButton(
 @Composable
 private fun DesktopChatWorkspace(
     settings: DesktopUserSettings,
+    chatHistory: List<AiChatMessage>,
+    onAppendMessage: (AiChatMessage) -> Result<Unit>,
+    onClearConversation: () -> Result<Unit>,
     onRequestOpenSettings: () -> Unit,
     onStatusChange: (String) -> Unit
 ) {
@@ -377,7 +443,6 @@ private fun DesktopChatWorkspace(
     var isSending by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     val draftHistory = remember { mutableStateListOf<PromptDraft>() }
-    val chatHistory = remember { mutableStateListOf<AiChatMessage>() }
     val quickActionSuggestion = remember(prompt) { QuickActionInterpreter.suggest(prompt) }
     val activeExtensions = remember(settings.enabledExtensionIds) {
         DesktopExtensionCatalog.all
@@ -603,10 +668,17 @@ private fun DesktopChatWorkspace(
 
                         localError = null
                         prompt = ""
-                        chatHistory += AiChatMessage(
+                        val userMessage = AiChatMessage(
                             role = AiChatRole.USER,
                             text = userText
                         )
+                        if (onAppendMessage(userMessage).isFailure) {
+                            prompt = userText
+                            localError = "Die Nachricht konnte nicht lokal gespeichert werden."
+                            onStatusChange("Lokales Speichern fehlgeschlagen.")
+                            return@Button
+                        }
+                        val requestHistory = chatHistory + userMessage
 
                         val newDraft = PromptDrafts.createOrNull(userText)
                         if (newDraft != null) {
@@ -627,15 +699,20 @@ private fun DesktopChatWorkspace(
                                 )
                                 val reply = gateway.requestAssistantReply(
                                     settings = settings,
-                                    chatHistory = chatHistory.toList(),
+                                    chatHistory = requestHistory,
                                     quickAction = selectedQuickAction,
                                     runtimeDecision = runtimeDecision
                                 )
-                                chatHistory += AiChatMessage(
+                                val assistantMessage = AiChatMessage(
                                     role = AiChatRole.ASSISTANT,
                                     text = reply
                                 )
-                                onStatusChange("Antwort erhalten (${settings.provider.label()}).")
+                                if (onAppendMessage(assistantMessage).isFailure) {
+                                    localError = "Die Antwort konnte nicht lokal gespeichert werden."
+                                    onStatusChange("Lokales Speichern fehlgeschlagen.")
+                                } else {
+                                    onStatusChange("Antwort erhalten (${settings.provider.label()}).")
+                                }
                             } catch (t: Throwable) {
                                 val (userMessage, statusMessage) = when (t) {
                                     is DesktopMissingApiKeyException ->
@@ -682,9 +759,13 @@ private fun DesktopChatWorkspace(
             Button(
                 enabled = chatHistory.isNotEmpty() && !isSending,
                 onClick = {
-                    chatHistory.clear()
-                    localError = null
-                    onStatusChange("Chatverlauf geloescht.")
+                    if (onClearConversation().isSuccess) {
+                        localError = null
+                        onStatusChange("Chatverlauf geloescht.")
+                    } else {
+                        localError = "Der Chatverlauf konnte nicht lokal aktualisiert werden."
+                        onStatusChange("Lokales Speichern fehlgeschlagen.")
+                    }
                 }
             ) {
                 Text("Chat leeren")
@@ -1337,3 +1418,14 @@ private fun AiChatRole.label(): String = when (this) {
     AiChatRole.USER -> "User"
     AiChatRole.ASSISTANT -> "Assistant"
 }
+
+private fun AiChatRole.toDesktopLocalRole(): DesktopLocalMessageRole = when (this) {
+    AiChatRole.SYSTEM -> DesktopLocalMessageRole.SYSTEM
+    AiChatRole.USER -> DesktopLocalMessageRole.USER
+    AiChatRole.ASSISTANT -> DesktopLocalMessageRole.ASSISTANT
+}
+
+private fun DesktopLocalMessage.toAiChatMessage(): AiChatMessage = AiChatMessage(
+    role = AiChatRole.valueOf(role),
+    text = text
+)

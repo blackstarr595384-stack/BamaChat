@@ -64,6 +64,8 @@ Desktop-Client relevante Klassen:
 - `desktop/DesktopMain.kt` (Shell + Chat/Workspace/Settings Screens)
 - `desktop/DesktopChatGateway.kt` (OpenRouter/Ollama HTTP-Calls)
 - `desktop/DesktopSettingsStore.kt` (persistente Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`)
+- `desktop/DesktopLocalStateStore.kt` (versionierte, atomare Chat-/Workspace-Persistenz pro Owner-Scope)
+- `desktop/DesktopScopedStateSession.kt` (aktive Gast-/Account-Scope-Session ohne automatische Datenvermischung)
 - `desktop/DesktopCredentialCipher.kt` (optionale AES-GCM Verschluesselung von Session-Tokens)
 - `desktop/DesktopExtensionCatalog.kt` (Desktop-seitige Extension-Auswahl fuer Runtime-Kontext)
 - `desktop/DesktopFirebaseConfig.kt` (Default-Resolver aus `app/google-services.json`)
@@ -165,6 +167,13 @@ Desktop Packaging-Hardening (Stage 6):
 - `desktopApp/build.gradle.kts` setzt explizite Runtime-Module (`java.net.http`, `jdk.httpserver`, `jdk.crypto.ec`, `jdk.unsupported`, `java.naming`), um NoClassDefFoundError in installierten Builds zu vermeiden.
 - MSI ist auf `perUserInstall = true` + Startmenue-Gruppe (`BamaChat`) konfiguriert, damit Installation/Update ohne Admin-Rechte moeglich ist.
 - `upgradeUuid` ist fixiert fuer konsistente Upgrades innerhalb der per-user Linie.
+
+Desktop Local Persistence (Stage 7):
+- Chatverlauf und Workspace-Notizen liegen unter `%LOCALAPPDATA%/BamaChat/data`; ohne geeigneten Windows-Pfad wird `%USERPROFILE%/.bamachat-desktop/data` verwendet. `BAMACHAT_DESKTOP_DATA_DIR` setzt ausschließlich fuer Tests und Smoke-Laeufe ein separates Datenverzeichnis und isoliert dabei auch Desktop-Settings im Unterordner `settings`.
+- Gastdaten nutzen einen stabilen lokalen Scope. Angemeldete Konten erhalten ausschließlich einen aus der erfolgreich authentifizierten UID abgeleiteten SHA-256-Scope; rohe UID und E-Mail stehen weder im Dateinamen noch im Zustandsdokument.
+- Scope-Wechsel laden nur den Ziel-Scope. Gast- und Kontodaten werden weder geloescht noch automatisch zusammengefuehrt; fehlgeschlagene Anmeldungen wechseln den aktiven Scope nicht.
+- Das JSON-Format besitzt eine `schemaVersion` und wird per temporaerer Datei mit anschließendem atomarem Replace/Move geschrieben. Beschädigte oder inkompatible Dateien werden als eindeutig benannte Recovery-Kopie im selben Ordner bewahrt; die App startet fuer diesen Scope leer weiter.
+- API-Schluessel, Firebase-/OAuth-Konfiguration und Cloud-Session-Tokens bleiben getrennt in `DesktopSettingsStore` beziehungsweise `DesktopCredentialCipher` und werden nicht in der Chat-/Workspace-Zustandsdatei gespeichert.
 
 ## AndroidTest APK bauen
 ```powershell

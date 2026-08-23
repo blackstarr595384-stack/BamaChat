@@ -14,7 +14,7 @@ object DesktopCredentialCipher {
     private const val GCM_IV_BYTES = 12
     private const val GCM_TAG_BITS = 128
 
-    private val baseDir = File(System.getProperty("user.home"), ".bamachat-desktop")
+    private val baseDir = DesktopDataDirectoryResolver.resolveSettingsDirectory().toFile()
     private val saltFile = File(baseDir, "session_salt.bin")
 
     fun isEncrypted(value: String): Boolean = value.startsWith(ENCRYPTED_PREFIX)
