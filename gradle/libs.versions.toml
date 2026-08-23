@@ -29,6 +29,7 @@ mlkit-language-id = "17.0.6"
 mlkit-text-recognition = "16.0.1"
 mlkit-smart-reply = "17.0.4"
 jsoup = "1.18.3"
+jna = "5.19.1"
 pdfbox-android = "2.0.27.0"
 bouncycastle = "1.84"
 play-services-location = "21.3.0"
@@ -86,6 +87,7 @@ mlkit-language-id = { module = "com.google.mlkit:language-id", version.ref = "ml
 mlkit-text-recognition = { module = "com.google.mlkit:text-recognition", version.ref = "mlkit-text-recognition" }
 mlkit-smart-reply = { module = "com.google.mlkit:smart-reply", version.ref = "mlkit-smart-reply" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
 pdfbox-android = { module = "com.tom-roush:pdfbox-android", version.ref = "pdfbox-android" }
 bouncycastle-bcprov = { module = "org.bouncycastle:bcprov-jdk15to18", version.ref = "bouncycastle" }
 bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk15to18", version.ref = "bouncycastle" }

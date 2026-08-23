@@ -1,9 +1,14 @@
 package com.example.bamachat.desktop
 
 import com.example.bamachat.shared.core.ExtensionRuntimeOrchestrator
-import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.Properties
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 enum class DesktopProvider {
     OPENROUTER,
@@ -61,141 +66,172 @@ val DEFAULT_ENABLED_EXTENSION_IDS: Set<String> = setOf(
 )
 
 object DesktopSettingsStore {
-    private const val KEY_PROVIDER = "provider"
-    private const val KEY_OPENROUTER_KEY = "openrouter_api_key"
-    private const val KEY_OPENROUTER_MODEL = "openrouter_model"
-    private const val KEY_OLLAMA_BASE_URL = "ollama_base_url"
-    private const val KEY_OLLAMA_MODEL = "ollama_model"
-    private const val KEY_ENABLED_EXTENSION_IDS = "enabled_extension_ids"
-    private const val KEY_FIREBASE_API_KEY = "firebase_api_key"
-    private const val KEY_FIREBASE_PROJECT_ID = "firebase_project_id"
-    private const val KEY_GOOGLE_OAUTH_CLIENT_ID = "google_oauth_client_id"
-    private const val KEY_GOOGLE_OAUTH_CLIENT_SECRET = "google_oauth_client_secret"
-    private const val KEY_AUTH_EMAIL = "auth_email"
-    private const val KEY_AUTH_UID = "auth_uid"
-    private const val KEY_AUTH_ID_TOKEN = "auth_id_token"
-    private const val KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token"
-    private const val KEY_AUTH_TOKEN_EXPIRY_EPOCH_MS = "auth_token_expiry_epoch_ms"
-    private const val KEY_ENCRYPT_CLOUD_SESSION = "encrypt_cloud_session"
+    private val repository by lazy {
+        DesktopSettingsRepository(
+            settingsDirectory = DesktopDataDirectoryResolver.resolveSettingsDirectory()
+        )
+    }
 
-    private val baseDir = DesktopDataDirectoryResolver.resolveSettingsDirectory().toFile()
-    private val settingsFile = File(baseDir, "settings.properties")
+    fun load(): DesktopUserSettings = repository.load()
 
-    fun load(): DesktopUserSettings {
-        if (!settingsFile.exists()) return DesktopUserSettings()
+    @Throws(IOException::class)
+    fun save(settings: DesktopUserSettings) = repository.save(settings)
+}
+
+internal class DesktopSettingsRepository(
+    settingsDirectory: Path,
+    private val credentialCipher: DesktopCredentialCipher =
+        DesktopCredentialCipher(settingsDirectory),
+    private val atomicWriter: DesktopAtomicStateWriter = DesktopAtomicStateWriter(),
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val recoveryId: () -> String = { UUID.randomUUID().toString() }
+) {
+    private val settingsDirectory = settingsDirectory.toAbsolutePath().normalize()
+    private val settingsFile = this.settingsDirectory.resolve(SETTINGS_FILE_NAME)
+    private val lock = directoryLocks.computeIfAbsent(this.settingsDirectory.toString()) { Any() }
+
+    fun load(): DesktopUserSettings = synchronized(lock) {
+        if (!Files.isRegularFile(settingsFile)) return@synchronized DesktopUserSettings()
         val properties = Properties()
-        return runCatching {
-            settingsFile.inputStream().use { properties.load(it) }
-            val extensionIds = properties
-                .getProperty(KEY_ENABLED_EXTENSION_IDS)
-                .orEmpty()
-                .split(",")
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .toSet()
-            val encryptCloudSession = properties
-                .getProperty(KEY_ENCRYPT_CLOUD_SESSION)
-                ?.trim()
-                ?.toBooleanStrictOrNull()
-                ?: false
-            val authIdToken = decodeStoredToken(
-                storedValue = properties.getProperty(KEY_AUTH_ID_TOKEN).orEmpty().trim()
-            )
-            val authRefreshToken = decodeStoredToken(
-                storedValue = properties.getProperty(KEY_AUTH_REFRESH_TOKEN).orEmpty().trim()
-            )
-            DesktopUserSettings(
-                provider = DesktopProvider.from(properties.getProperty(KEY_PROVIDER)),
-                openRouterApiKey = properties.getProperty(KEY_OPENROUTER_KEY).orEmpty().trim(),
-                openRouterModel = properties.getProperty(KEY_OPENROUTER_MODEL)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: DEFAULT_OPENROUTER_MODEL,
-                ollamaBaseUrl = properties.getProperty(KEY_OLLAMA_BASE_URL)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: DEFAULT_OLLAMA_BASE_URL,
-                ollamaModel = properties.getProperty(KEY_OLLAMA_MODEL)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: DEFAULT_OLLAMA_MODEL,
-                enabledExtensionIds = extensionIds.ifEmpty { DEFAULT_ENABLED_EXTENSION_IDS },
-                firebaseApiKey = properties.getProperty(KEY_FIREBASE_API_KEY)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: DesktopFirebaseConfig.defaultApiKey(),
-                firebaseProjectId = properties.getProperty(KEY_FIREBASE_PROJECT_ID)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: DesktopFirebaseConfig.defaultProjectId(),
-                googleOAuthClientId = properties.getProperty(KEY_GOOGLE_OAUTH_CLIENT_ID)
-                    ?.takeIf { it.isNotBlank() }
-                    ?: DesktopFirebaseConfig.defaultGoogleOAuthClientId(),
-                googleOAuthClientSecret = properties.getProperty(KEY_GOOGLE_OAUTH_CLIENT_SECRET)
-                    .orEmpty()
-                    .trim(),
-                authEmail = properties.getProperty(KEY_AUTH_EMAIL).orEmpty().trim(),
-                authUid = properties.getProperty(KEY_AUTH_UID).orEmpty().trim(),
-                authIdToken = authIdToken,
-                authRefreshToken = authRefreshToken,
-                authTokenExpiryEpochMs = properties
-                    .getProperty(KEY_AUTH_TOKEN_EXPIRY_EPOCH_MS)
-                    ?.toLongOrNull()
-                    ?: 0L,
-                encryptCloudSession = encryptCloudSession
-            ).sanitizeLoadedSession()
-        }.getOrElse { DesktopUserSettings() }
+        try {
+            Files.newInputStream(settingsFile).use { input -> properties.load(input) }
+            val secretResults = SECRET_KEYS.associateWith { key ->
+                credentialCipher.read(properties.getProperty(key).orEmpty().trim())
+            }
+            val loadedSettings = settingsFrom(properties, secretResults).sanitizeLoadedSession()
+            if (secretResults.values.any { it.requiresMigration() }) {
+                try {
+                    migrateSecrets(properties, secretResults)
+                } catch (_: Exception) {
+                }
+            }
+            loadedSettings
+        } catch (_: Exception) {
+            DesktopUserSettings()
+        }
     }
 
     @Throws(IOException::class)
-    fun save(settings: DesktopUserSettings) {
-        if (!baseDir.exists()) {
-            baseDir.mkdirs()
-        }
-        val authIdTokenToStore = encodeTokenForSave(
-            plainText = settings.authIdToken.trim(),
-            encryptionEnabled = settings.encryptCloudSession
-        )
-        val authRefreshTokenToStore = encodeTokenForSave(
-            plainText = settings.authRefreshToken.trim(),
-            encryptionEnabled = settings.encryptCloudSession
-        )
+    fun save(settings: DesktopUserSettings) = synchronized(lock) {
         val properties = Properties().apply {
             setProperty(KEY_PROVIDER, settings.provider.name)
-            setProperty(KEY_OPENROUTER_KEY, settings.openRouterApiKey.trim())
+            setProperty(KEY_OPENROUTER_KEY, protect(settings.openRouterApiKey))
             setProperty(KEY_OPENROUTER_MODEL, settings.openRouterModel.trim())
             setProperty(KEY_OLLAMA_BASE_URL, settings.ollamaBaseUrl.trim())
             setProperty(KEY_OLLAMA_MODEL, settings.ollamaModel.trim())
             setProperty(KEY_FIREBASE_API_KEY, settings.firebaseApiKey.trim())
             setProperty(KEY_FIREBASE_PROJECT_ID, settings.firebaseProjectId.trim())
             setProperty(KEY_GOOGLE_OAUTH_CLIENT_ID, settings.googleOAuthClientId.trim())
-            setProperty(KEY_GOOGLE_OAUTH_CLIENT_SECRET, settings.googleOAuthClientSecret.trim())
+            setProperty(KEY_GOOGLE_OAUTH_CLIENT_SECRET, protect(settings.googleOAuthClientSecret))
             setProperty(
                 KEY_ENABLED_EXTENSION_IDS,
                 settings.enabledExtensionIds.sorted().joinToString(",")
             )
             setProperty(KEY_AUTH_EMAIL, settings.authEmail.trim())
             setProperty(KEY_AUTH_UID, settings.authUid.trim())
-            setProperty(KEY_AUTH_ID_TOKEN, authIdTokenToStore)
-            setProperty(KEY_AUTH_REFRESH_TOKEN, authRefreshTokenToStore)
+            setProperty(KEY_AUTH_ID_TOKEN, protect(settings.authIdToken))
+            setProperty(KEY_AUTH_REFRESH_TOKEN, protect(settings.authRefreshToken))
             setProperty(KEY_AUTH_TOKEN_EXPIRY_EPOCH_MS, settings.authTokenExpiryEpochMs.toString())
             setProperty(KEY_ENCRYPT_CLOUD_SESSION, settings.encryptCloudSession.toString())
         }
-        settingsFile.outputStream().use { output ->
+        writeProperties(properties)
+    }
+
+    private fun settingsFrom(
+        properties: Properties,
+        secretResults: Map<String, DesktopSecretReadResult>
+    ): DesktopUserSettings {
+        val extensionIds = properties
+            .getProperty(KEY_ENABLED_EXTENSION_IDS)
+            .orEmpty()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+        return DesktopUserSettings(
+            provider = DesktopProvider.from(properties.getProperty(KEY_PROVIDER)),
+            openRouterApiKey = secretResults.plainText(KEY_OPENROUTER_KEY),
+            openRouterModel = properties.getProperty(KEY_OPENROUTER_MODEL)
+                ?.takeIf(String::isNotBlank)
+                ?: DEFAULT_OPENROUTER_MODEL,
+            ollamaBaseUrl = properties.getProperty(KEY_OLLAMA_BASE_URL)
+                ?.takeIf(String::isNotBlank)
+                ?: DEFAULT_OLLAMA_BASE_URL,
+            ollamaModel = properties.getProperty(KEY_OLLAMA_MODEL)
+                ?.takeIf(String::isNotBlank)
+                ?: DEFAULT_OLLAMA_MODEL,
+            enabledExtensionIds = extensionIds.ifEmpty { DEFAULT_ENABLED_EXTENSION_IDS },
+            firebaseApiKey = properties.getProperty(KEY_FIREBASE_API_KEY)
+                ?.takeIf(String::isNotBlank)
+                ?: DesktopFirebaseConfig.defaultApiKey(),
+            firebaseProjectId = properties.getProperty(KEY_FIREBASE_PROJECT_ID)
+                ?.takeIf(String::isNotBlank)
+                ?: DesktopFirebaseConfig.defaultProjectId(),
+            googleOAuthClientId = properties.getProperty(KEY_GOOGLE_OAUTH_CLIENT_ID)
+                ?.takeIf(String::isNotBlank)
+                ?: DesktopFirebaseConfig.defaultGoogleOAuthClientId(),
+            googleOAuthClientSecret = secretResults.plainText(KEY_GOOGLE_OAUTH_CLIENT_SECRET),
+            authEmail = properties.getProperty(KEY_AUTH_EMAIL).orEmpty().trim(),
+            authUid = properties.getProperty(KEY_AUTH_UID).orEmpty().trim(),
+            authIdToken = secretResults.plainText(KEY_AUTH_ID_TOKEN),
+            authRefreshToken = secretResults.plainText(KEY_AUTH_REFRESH_TOKEN),
+            authTokenExpiryEpochMs = properties
+                .getProperty(KEY_AUTH_TOKEN_EXPIRY_EPOCH_MS)
+                ?.toLongOrNull()
+                ?: 0L,
+            encryptCloudSession = properties
+                .getProperty(KEY_ENCRYPT_CLOUD_SESSION)
+                ?.trim()
+                ?.toBooleanStrictOrNull()
+                ?: false
+        )
+    }
+
+    private fun migrateSecrets(
+        originalProperties: Properties,
+        secretResults: Map<String, DesktopSecretReadResult>
+    ) {
+        preserveMigrationRecoveryCopy()
+        val migratedProperties = Properties().apply { putAll(originalProperties) }
+        secretResults.forEach { (key, result) ->
+            if (result is DesktopSecretReadResult.Available && result.requiresMigration) {
+                migratedProperties.setProperty(key, credentialCipher.protect(result.plainText))
+            }
+        }
+        writeProperties(migratedProperties)
+    }
+
+    private fun preserveMigrationRecoveryCopy(): Path {
+        Files.createDirectories(settingsDirectory)
+        val safeRecoveryId = recoveryId()
+            .replace(Regex("[^A-Za-z0-9._-]"), "-")
+            .ifBlank { "migration" }
+        val recoveryFile = settingsDirectory.resolve(
+            "$SETTINGS_FILE_NAME.recovery-${clock()}-$safeRecoveryId"
+        )
+        return Files.copy(settingsFile, recoveryFile, StandardCopyOption.COPY_ATTRIBUTES)
+    }
+
+    private fun writeProperties(properties: Properties) {
+        val bytes = ByteArrayOutputStream().use { output ->
             properties.store(output, "BamaChat Desktop settings")
+            output.toByteArray()
+        }
+        try {
+            atomicWriter.write(settingsFile, bytes)
+        } finally {
+            bytes.fill(0)
         }
     }
 
-    private fun encodeTokenForSave(plainText: String, encryptionEnabled: Boolean): String {
-        if (!encryptionEnabled || plainText.isBlank()) return plainText
-        return DesktopCredentialCipher.encrypt(plainText)
+    private fun protect(value: String): String = credentialCipher.protect(value.trim())
+
+    private fun Map<String, DesktopSecretReadResult>.plainText(key: String): String {
+        return (get(key) as? DesktopSecretReadResult.Available)?.plainText.orEmpty()
     }
 
-    private fun decodeStoredToken(storedValue: String): String {
-        if (storedValue.isBlank()) return storedValue
-        if (!DesktopCredentialCipher.isEncrypted(storedValue)) {
-            return storedValue
-        }
-        return runCatching {
-            DesktopCredentialCipher.decrypt(storedValue)
-        }.getOrElse {
-            ""
-        }
+    private fun DesktopSecretReadResult.requiresMigration(): Boolean {
+        return this is DesktopSecretReadResult.Available && requiresMigration
     }
 
     private fun DesktopUserSettings.sanitizeLoadedSession(): DesktopUserSettings {
@@ -209,5 +245,32 @@ object DesktopSettingsStore {
             authIdToken.isNotBlank() &&
             authRefreshToken.isNotBlank()
         return if (hasCompleteSession) this else clearCloudSession()
+    }
+
+    private companion object {
+        const val SETTINGS_FILE_NAME = "settings.properties"
+        const val KEY_PROVIDER = "provider"
+        const val KEY_OPENROUTER_KEY = "openrouter_api_key"
+        const val KEY_OPENROUTER_MODEL = "openrouter_model"
+        const val KEY_OLLAMA_BASE_URL = "ollama_base_url"
+        const val KEY_OLLAMA_MODEL = "ollama_model"
+        const val KEY_ENABLED_EXTENSION_IDS = "enabled_extension_ids"
+        const val KEY_FIREBASE_API_KEY = "firebase_api_key"
+        const val KEY_FIREBASE_PROJECT_ID = "firebase_project_id"
+        const val KEY_GOOGLE_OAUTH_CLIENT_ID = "google_oauth_client_id"
+        const val KEY_GOOGLE_OAUTH_CLIENT_SECRET = "google_oauth_client_secret"
+        const val KEY_AUTH_EMAIL = "auth_email"
+        const val KEY_AUTH_UID = "auth_uid"
+        const val KEY_AUTH_ID_TOKEN = "auth_id_token"
+        const val KEY_AUTH_REFRESH_TOKEN = "auth_refresh_token"
+        const val KEY_AUTH_TOKEN_EXPIRY_EPOCH_MS = "auth_token_expiry_epoch_ms"
+        const val KEY_ENCRYPT_CLOUD_SESSION = "encrypt_cloud_session"
+        val SECRET_KEYS = listOf(
+            KEY_OPENROUTER_KEY,
+            KEY_GOOGLE_OAUTH_CLIENT_SECRET,
+            KEY_AUTH_ID_TOKEN,
+            KEY_AUTH_REFRESH_TOKEN
+        )
+        val directoryLocks = ConcurrentHashMap<String, Any>()
     }
 }

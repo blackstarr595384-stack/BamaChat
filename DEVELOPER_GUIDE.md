@@ -63,10 +63,10 @@ Aktuelle Shared-Core-Bausteine:
 Desktop-Client relevante Klassen:
 - `desktop/DesktopMain.kt` (Shell + Chat/Workspace/Settings Screens)
 - `desktop/DesktopChatGateway.kt` (OpenRouter/Ollama HTTP-Calls)
-- `desktop/DesktopSettingsStore.kt` (persistente Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`)
+- `desktop/DesktopSettingsStore.kt` (atomare Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`; mit Test-Override unter `<BAMACHAT_DESKTOP_DATA_DIR>/settings`)
 - `desktop/DesktopLocalStateStore.kt` (versionierte, atomare Chat-/Workspace-Persistenz pro Owner-Scope)
 - `desktop/DesktopScopedStateSession.kt` (aktive Gast-/Account-Scope-Session ohne automatische Datenvermischung)
-- `desktop/DesktopCredentialCipher.kt` (optionale AES-GCM Verschluesselung von Session-Tokens)
+- `desktop/DesktopCredentialCipher.kt` (Windows-DPAPI im Current-User-Scope plus AES-GCM-Legacy-Leser/Fallback)
 - `desktop/DesktopExtensionCatalog.kt` (Desktop-seitige Extension-Auswahl fuer Runtime-Kontext)
 - `desktop/DesktopFirebaseConfig.kt` (Default-Resolver aus `app/google-services.json`)
 - `desktop/DesktopCloudSyncGateway.kt` (Firebase Auth REST + Firestore Workspace-Sync)
@@ -159,7 +159,9 @@ Desktop Google-Login (Stage 4):
 - Bei Nutzung eines Web-OAuth-Clients kann ein `client_secret` im Desktop-Settings-Screen erforderlich sein.
 
 Desktop Session-Hardening (Stage 5):
-- Optional verschluesselte lokale Session-Speicherung (`encrypt_cloud_session`) via `DesktopCredentialCipher` (AES-GCM, Salt unter `%USERPROFILE%/.bamachat-desktop/session_salt.bin`).
+- OpenRouter-API-Key, optionales Google-OAuth-Client-Secret sowie Firebase-ID-/Refresh-Token werden unter Windows immer mit DPAPI im Current-User-Scope und dem Formatpräfix `dpapi:v1:` gespeichert. Der Legacy-Schalter `encrypt_cloud_session` steuert diesen Schutz nicht mehr; öffentliche Firebase-/OAuth-Konfiguration bleibt bewusst unverschlüsselt.
+- Bestehende `enc:v1:`-AES-GCM- und unterstützte Klartextwerte werden einmalig gelesen und atomar in das aktuelle Schutzformat migriert. Vor dem Replace bleibt die ursprüngliche `settings.properties` als eindeutig bezeichnete Recovery-Kopie im selben Settings-Verzeichnis erhalten; beschädigte oder fremde DPAPI-Werte werden nicht als Klartext interpretiert und stehen bis zur erneuten Eingabe beziehungsweise Anmeldung nicht zur Verfügung.
+- Nicht-Windows-Desktop-Builds verwenden einen klar gekennzeichneten `aesgcm:v1:`-Fallback mit `session_salt.bin`. `BAMACHAT_DESKTOP_DATA_DIR` isoliert bei Tests und Smoke-Läufen sowohl Settings als auch Cipher-Dateien vollständig unter dem temporären Override-Verzeichnis.
 - Auto-Refresh der Firebase Session im Desktop-Root vor Ablauf.
 - Einheitliche `CloudSessionExpiredException` fuer Refresh-/401-Faelle mit Auto-Logout-Pfad in der UI.
 

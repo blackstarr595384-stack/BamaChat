@@ -15,6 +15,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.materialIconsExtended)
     implementation(libs.google.gson)
+    implementation(libs.jna.platform)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
     testImplementation(kotlin("test"))

@@ -981,7 +981,6 @@ private fun DesktopSettingsView(
     var firebaseProjectId by remember(settings) { mutableStateOf(settings.firebaseProjectId) }
     var googleOAuthClientId by remember(settings) { mutableStateOf(settings.googleOAuthClientId) }
     var googleOAuthClientSecret by remember(settings) { mutableStateOf(settings.googleOAuthClientSecret) }
-    var encryptCloudSession by remember(settings) { mutableStateOf(settings.encryptCloudSession) }
     var loginEmail by remember(settings) { mutableStateOf(settings.authEmail) }
     var loginPassword by remember { mutableStateOf("") }
     var enabledExtensionIds by remember(settings) {
@@ -1108,19 +1107,12 @@ private fun DesktopSettingsView(
                         visualTransformation = PasswordVisualTransformation(),
                         colors = desktopFieldColors()
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Checkbox(
-                            checked = encryptCloudSession,
-                            onCheckedChange = { encryptCloudSession = it }
-                        )
-                        Text(
-                            "Cloud-Session lokal verschluesseln (ID/Refresh-Token)",
-                            color = Color.White.copy(alpha = 0.84f)
-                        )
-                    }
+                    Text(
+                        "Lokale Zugangsdaten werden unter Windows automatisch mit DPAPI " +
+                            "für den aktuellen Benutzer geschützt.",
+                        color = Color.White.copy(alpha = 0.84f),
+                        style = MaterialTheme.typography.caption
+                    )
                 }
             }
 
@@ -1179,7 +1171,7 @@ private fun DesktopSettingsView(
                                 authIdToken = settings.authIdToken,
                                 authRefreshToken = settings.authRefreshToken,
                                 authTokenExpiryEpochMs = settings.authTokenExpiryEpochMs,
-                                encryptCloudSession = encryptCloudSession
+                                encryptCloudSession = settings.encryptCloudSession
                             )
                         )
                     }
@@ -1197,7 +1189,6 @@ private fun DesktopSettingsView(
                         firebaseProjectId = DesktopUserSettings().firebaseProjectId
                         googleOAuthClientId = DesktopUserSettings().googleOAuthClientId
                         googleOAuthClientSecret = DesktopUserSettings().googleOAuthClientSecret
-                        encryptCloudSession = DesktopUserSettings().encryptCloudSession
                         enabledExtensionIds = DesktopUserSettings().enabledExtensionIds
                     }
                 ) {
@@ -1243,8 +1234,7 @@ private fun DesktopSettingsView(
                                     firebaseApiKey = firebaseApiKey.trim(),
                                     firebaseProjectId = firebaseProjectId.trim(),
                                     googleOAuthClientId = googleOAuthClientId.trim(),
-                                    googleOAuthClientSecret = googleOAuthClientSecret.trim(),
-                                    encryptCloudSession = encryptCloudSession
+                                    googleOAuthClientSecret = googleOAuthClientSecret.trim()
                                 )
                                 coroutineScope.launch {
                                     try {
@@ -1274,8 +1264,7 @@ private fun DesktopSettingsView(
                                     firebaseApiKey = firebaseApiKey.trim(),
                                     firebaseProjectId = firebaseProjectId.trim(),
                                     googleOAuthClientId = googleOAuthClientId.trim(),
-                                    googleOAuthClientSecret = googleOAuthClientSecret.trim(),
-                                    encryptCloudSession = encryptCloudSession
+                                    googleOAuthClientSecret = googleOAuthClientSecret.trim()
                                 )
                                 coroutineScope.launch {
                                     try {
@@ -1305,8 +1294,7 @@ private fun DesktopSettingsView(
                                     firebaseApiKey = firebaseApiKey.trim(),
                                     firebaseProjectId = firebaseProjectId.trim(),
                                     googleOAuthClientId = googleOAuthClientId.trim(),
-                                    googleOAuthClientSecret = googleOAuthClientSecret.trim(),
-                                    encryptCloudSession = encryptCloudSession
+                                    googleOAuthClientSecret = googleOAuthClientSecret.trim()
                                 )
                                 coroutineScope.launch {
                                     try {
