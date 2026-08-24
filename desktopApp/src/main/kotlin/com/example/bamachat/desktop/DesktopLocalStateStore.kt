@@ -6,6 +6,7 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
@@ -241,7 +242,7 @@ internal class DesktopScopedStateStore(
         } catch (_: Exception) {
             DesktopLocalStateLoadResult(
                 state = DesktopLocalState.empty(ownerScope),
-                recoveryCopyCreated = preserveRecoveryCopy(stateFile)
+                recoveryCopyCreated = quarantineCorruptStateFile(stateFile)
             )
         }
     }
@@ -291,16 +292,48 @@ internal class DesktopScopedStateStore(
         state.activeConversationId == null || state.activeConversationId in conversationIds
     }.getOrDefault(false)
 
-    private fun preserveRecoveryCopy(stateFile: Path): Boolean {
-        if (!Files.isRegularFile(stateFile)) return false
-        return runCatching {
+    private fun quarantineCorruptStateFile(stateFile: Path): Boolean {
+        val normalizedStateFile = stateFile.toAbsolutePath().normalize()
+        if (normalizedStateFile.parent != dataDirectory || !Files.isRegularFile(normalizedStateFile)) {
+            return false
+        }
+        return try {
             Files.createDirectories(dataDirectory)
-            val recoveryFile = dataDirectory.resolve(
-                "${stateFile.fileName}.recovery-${clock()}-${recoveryId()}.json"
-            )
-            Files.copy(stateFile, recoveryFile)
-            true
-        }.getOrDefault(false)
+            val safeRecoveryId = recoveryId()
+                .replace(Regex("[^A-Za-z0-9._-]"), "-")
+                .ifBlank { "recovery" }
+            val recoveryBaseName =
+                "${normalizedStateFile.fileName}.recovery-${clock()}-$safeRecoveryId"
+            var collisionIndex = 0
+            while (collisionIndex < Int.MAX_VALUE) {
+                val collisionSuffix = if (collisionIndex == 0) "" else "-$collisionIndex"
+                val recoveryFile = dataDirectory
+                    .resolve("$recoveryBaseName$collisionSuffix.json")
+                    .normalize()
+                if (recoveryFile.parent != dataDirectory) return false
+                if (Files.exists(recoveryFile)) {
+                    collisionIndex++
+                    continue
+                }
+                try {
+                    moveWithoutOverwrite(normalizedStateFile, recoveryFile)
+                    return true
+                } catch (_: FileAlreadyExistsException) {
+                    collisionIndex++
+                }
+            }
+            false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun moveWithoutOverwrite(source: Path, target: Path) {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(source, target)
+        }
     }
 
     companion object {

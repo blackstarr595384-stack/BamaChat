@@ -4,6 +4,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
@@ -289,29 +290,81 @@ class DesktopScopedStateStoreTest {
     }
 
     @Test
-    fun corruptFileCreatesRecoveryCopyAndStartsEmpty() = withTemporaryDataDirectory { dataDirectory ->
-        val store = DesktopScopedStateStore(
-            dataDirectory = dataDirectory,
-            clock = { 4_000L },
-            recoveryId = { "recovery-id" }
-        )
-        val ownerScope = DesktopOwnerScope.guest()
-        val corruptText = "{not-valid-json"
-        Files.createDirectories(dataDirectory)
-        Files.writeString(store.stateFile(ownerScope), corruptText, Charsets.UTF_8)
+    fun corruptFileIsQuarantinedOnceAndValidStateCanBeStoredAfterward() =
+        withTemporaryDataDirectory { dataDirectory ->
+            val store = DesktopScopedStateStore(
+                dataDirectory = dataDirectory,
+                clock = { 4_000L },
+                recoveryId = { "recovery-id" }
+            )
+            val ownerScope = DesktopOwnerScope.guest()
+            val stateFile = store.stateFile(ownerScope)
+            val corruptBytes = "{not-valid-json".toByteArray(Charsets.UTF_8)
+            Files.createDirectories(dataDirectory)
+            Files.write(stateFile, corruptBytes)
 
-        val result = store.load(ownerScope)
+            val firstLoad = store.load(ownerScope)
 
-        assertEquals(DesktopLocalState.empty(ownerScope), result.state)
-        assertTrue(result.recoveryCopyCreated)
-        assertEquals(corruptText, Files.readString(store.stateFile(ownerScope), Charsets.UTF_8))
-        val recoveryFiles = Files.list(dataDirectory).use { paths ->
-            paths.filter { it.fileName.toString().contains(".recovery-4000-recovery-id.json") }
-                .toList()
+            assertEquals(DesktopLocalState.empty(ownerScope), firstLoad.state)
+            assertTrue(firstLoad.recoveryCopyCreated)
+            assertFalse(Files.exists(stateFile))
+            val firstRecoveryFiles = recoveryFiles(dataDirectory, stateFile)
+            assertEquals(1, firstRecoveryFiles.size)
+            val recoveryFile = firstRecoveryFiles.single()
+            assertContentEquals(corruptBytes, Files.readAllBytes(recoveryFile))
+
+            val secondLoad = store.load(ownerScope)
+
+            assertEquals(DesktopLocalState.empty(ownerScope), secondLoad.state)
+            assertFalse(secondLoad.recoveryCopyCreated)
+            assertEquals(firstRecoveryFiles, recoveryFiles(dataDirectory, stateFile))
+            assertContentEquals(corruptBytes, Files.readAllBytes(recoveryFile))
+
+            val validState = DesktopLocalState.empty(ownerScope).copy(
+                workspace = DesktopLocalWorkspace("Neuer gültiger Zustand", 5_000L)
+            )
+            store.save(ownerScope, validState)
+
+            val validLoad = store.load(ownerScope)
+
+            assertEquals(validState, validLoad.state)
+            assertFalse(validLoad.recoveryCopyCreated)
+            assertTrue(Files.isRegularFile(stateFile))
+            assertEquals(firstRecoveryFiles, recoveryFiles(dataDirectory, stateFile))
+            assertContentEquals(corruptBytes, Files.readAllBytes(recoveryFile))
         }
-        assertEquals(1, recoveryFiles.size)
-        assertEquals(corruptText, Files.readString(recoveryFiles.single(), Charsets.UTF_8))
-    }
+
+    @Test
+    fun corruptFileRecoveryUsesDeterministicSuffixWithoutOverwritingCollision() =
+        withTemporaryDataDirectory { dataDirectory ->
+            val store = DesktopScopedStateStore(
+                dataDirectory = dataDirectory,
+                clock = { 6_000L },
+                recoveryId = { "collision/id" }
+            )
+            val ownerScope = DesktopOwnerScope.guest()
+            val stateFile = store.stateFile(ownerScope)
+            val corruptBytes = "{still-not-json".toByteArray(Charsets.UTF_8)
+            val existingRecovery = dataDirectory.resolve(
+                "${stateFile.fileName}.recovery-6000-collision-id.json"
+            )
+            val existingBytes = "existing-recovery".toByteArray(Charsets.UTF_8)
+            Files.createDirectories(dataDirectory)
+            Files.write(existingRecovery, existingBytes)
+            Files.write(stateFile, corruptBytes)
+
+            val result = store.load(ownerScope)
+
+            val suffixedRecovery = dataDirectory.resolve(
+                "${stateFile.fileName}.recovery-6000-collision-id-1.json"
+            )
+            assertEquals(DesktopLocalState.empty(ownerScope), result.state)
+            assertTrue(result.recoveryCopyCreated)
+            assertFalse(Files.exists(stateFile))
+            assertContentEquals(existingBytes, Files.readAllBytes(existingRecovery))
+            assertContentEquals(corruptBytes, Files.readAllBytes(suffixedRecovery))
+            assertEquals(2, recoveryFiles(dataDirectory, stateFile).size)
+        }
 
     @Test
     fun failedAtomicReplacePreservesLastValidState() = withTemporaryDataDirectory { dataDirectory ->
@@ -395,6 +448,14 @@ class DesktopScopedStateStoreTest {
             block(dataDirectory)
         } finally {
             dataDirectory.toFile().deleteRecursively()
+        }
+    }
+
+    private fun recoveryFiles(dataDirectory: Path, stateFile: Path): List<Path> {
+        return Files.list(dataDirectory).use { paths ->
+            paths.filter { path ->
+                path.fileName.toString().startsWith("${stateFile.fileName}.recovery-")
+            }.sorted().toList()
         }
     }
 
