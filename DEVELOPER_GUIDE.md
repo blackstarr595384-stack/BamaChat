@@ -139,6 +139,7 @@ Details und Prüfablauf:
 .\gradlew.bat :desktopApp:build
 .\gradlew.bat :desktopApp:run
 .\gradlew.bat :desktopApp:packageMsi
+.\gradlew.bat :desktopApp:packageStoreMsix
 .\gradlew.bat :sharedCore:test
 powershell -ExecutionPolicy Bypass -File .\scripts\start-bamachat-desktop.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\desktop-launch-smoke-test.ps1
@@ -170,6 +171,10 @@ Desktop Packaging-Hardening (Stage 6):
 - `desktopApp/build.gradle.kts` setzt explizite Runtime-Module (`java.net.http`, `jdk.httpserver`, `jdk.crypto.ec`, `jdk.unsupported`, `java.naming`), um NoClassDefFoundError in installierten Builds zu vermeiden.
 - MSI ist auf `perUserInstall = true` + Startmenue-Gruppe (`BamaChat`) konfiguriert, damit Installation/Update ohne Admin-Rechte moeglich ist.
 - `upgradeUuid` ist fixiert fuer konsistente Upgrades innerhalb der per-user Linie.
+- `:desktopApp:packageStoreMsix` erzeugt unter Windows aus dem Compose-App-Image ein ungezeichnetes Store-Paket unter `desktopApp/build/compose/binaries/main/msix/BamaFlow_<A.B.C.0>_x64.msix`; MSI- und EXE-Installer werden nicht eingebettet. Die Desktop-Version `A.B.C` wird nur bei drei gueltigen numerischen Komponenten in das MSIX-Schema `A.B.C.0` ueberfuehrt.
+- Die Partner-Center-Identitaet lautet `MamadouDianBald.BamaFlow`, Publisher `CN=2279D882-BC23-4831-AA4E-D384F8EFCD9A` und Publisher-Anzeigename `Mamadou Dian Baldé`. Die Store-ID `9P61V47KR1Z8` dient ausschließlich der Dokumentation und ist keine Package Identity.
+- Die quadratischen MSIX-PNG-Assets werden deterministisch aus `desktopApp/src/main/resources/bamachat.ico` erzeugt und zusammen mit Manifest, Executable, Capability sowie dem Ausschluss lokaler Settings, Zustandsdateien, Secrets, Zertifikate und Installer nach dem Entpacken erneut geprüft.
+- `desktopApp/scripts/test-store-msix-local.ps1` signiert ausschließlich eine temporaere Paketkopie mit einem kurzlebigen CurrentUser-Testzertifikat, installiert sie ohne App-Start und entfernt danach exakt das Testpaket, das Zertifikat und alle temporaeren Dateien. Die ungezeichnete Store-Ausgabe bleibt unverändert.
 
 Desktop Local Persistence (Stage 7):
 - Chatverlauf und Workspace-Notizen liegen unter `%LOCALAPPDATA%/BamaChat/data`; ohne geeigneten Windows-Pfad wird `%USERPROFILE%/.bamachat-desktop/data` verwendet. `BAMACHAT_DESKTOP_DATA_DIR` setzt ausschließlich fuer Tests und Smoke-Laeufe ein separates Datenverzeichnis. Wenn kein eigener Settings-Override gesetzt ist, bleiben Desktop-Settings kompatibel im Unterordner `settings` dieses Overrides.
