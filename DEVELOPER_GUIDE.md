@@ -62,9 +62,12 @@ Aktuelle Shared-Core-Bausteine:
 
 Desktop-Client relevante Klassen:
 - `desktop/DesktopMain.kt` (Shell + Chat/Workspace/Settings Screens)
-- `desktop/DesktopChatGateway.kt` (OpenRouter/Ollama HTTP-Calls)
-- `desktop/DesktopSettingsStore.kt` (persistente Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`)
-- `desktop/DesktopCredentialCipher.kt` (optionale AES-GCM Verschluesselung von Session-Tokens)
+- `desktop/DesktopChatGateway.kt` (OpenRouter/Ollama HTTP-Calls inklusive SSE-/NDJSON-Streaming)
+- `desktop/DesktopChatHttpTransport.kt` (injizierbarer, abbrechbarer HTTP-Transport fuer Desktop-Chat)
+- `desktop/DesktopSettingsStore.kt` (atomare Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`; isolierbar per `BAMACHAT_DESKTOP_SETTINGS_DIR`)
+- `desktop/DesktopLocalStateStore.kt` (versionierte, atomare Chat-/Workspace-Persistenz pro Owner-Scope)
+- `desktop/DesktopScopedStateSession.kt` (aktive Gast-/Account-Scope-Session ohne automatische Datenvermischung)
+- `desktop/DesktopCredentialCipher.kt` (Windows-DPAPI im Current-User-Scope plus AES-GCM-Legacy-Leser/Fallback)
 - `desktop/DesktopExtensionCatalog.kt` (Desktop-seitige Extension-Auswahl fuer Runtime-Kontext)
 - `desktop/DesktopFirebaseConfig.kt` (Default-Resolver aus `app/google-services.json`)
 - `desktop/DesktopCloudSyncGateway.kt` (Firebase Auth REST + Firestore Workspace-Sync)
@@ -136,6 +139,7 @@ Details und Prüfablauf:
 .\gradlew.bat :desktopApp:build
 .\gradlew.bat :desktopApp:run
 .\gradlew.bat :desktopApp:packageMsi
+.\gradlew.bat :desktopApp:packageStoreMsix
 .\gradlew.bat :sharedCore:test
 powershell -ExecutionPolicy Bypass -File .\scripts\start-bamachat-desktop.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\desktop-launch-smoke-test.ps1
@@ -157,7 +161,9 @@ Desktop Google-Login (Stage 4):
 - Bei Nutzung eines Web-OAuth-Clients kann ein `client_secret` im Desktop-Settings-Screen erforderlich sein.
 
 Desktop Session-Hardening (Stage 5):
-- Optional verschluesselte lokale Session-Speicherung (`encrypt_cloud_session`) via `DesktopCredentialCipher` (AES-GCM, Salt unter `%USERPROFILE%/.bamachat-desktop/session_salt.bin`).
+- OpenRouter-API-Key, optionales Google-OAuth-Client-Secret sowie Firebase-ID-/Refresh-Token werden unter Windows immer mit DPAPI im Current-User-Scope und dem Formatpräfix `dpapi:v1:` gespeichert. Der Legacy-Schalter `encrypt_cloud_session` steuert diesen Schutz nicht mehr; öffentliche Firebase-/OAuth-Konfiguration bleibt bewusst unverschlüsselt.
+- Bestehende `enc:v1:`-AES-GCM- und unterstützte Klartextwerte werden einmalig gelesen und atomar in das aktuelle Schutzformat migriert. Vor dem Replace bleibt die ursprüngliche `settings.properties` als eindeutig bezeichnete Recovery-Kopie im selben Settings-Verzeichnis erhalten; beschädigte oder fremde DPAPI-Werte werden nicht als Klartext interpretiert und stehen bis zur erneuten Eingabe beziehungsweise Anmeldung nicht zur Verfügung.
+- Nicht-Windows-Desktop-Builds verwenden einen klar gekennzeichneten `aesgcm:v1:`-Fallback mit `session_salt.bin`. `BAMACHAT_DESKTOP_SETTINGS_DIR` setzt fuer Tests und Smoke-Laeufe ein absolutes, eigenstaendiges Settings-Verzeichnis; dort bleiben `settings.properties`, Recovery-Kopien und Legacy-Salt vollständig isoliert. Ohne diesen Override bleibt der Produktionspfad unverändert. Der bestehende `BAMACHAT_DESKTOP_DATA_DIR`-Fallback auf dessen Unterordner `settings` bleibt kompatibel.
 - Auto-Refresh der Firebase Session im Desktop-Root vor Ablauf.
 - Einheitliche `CloudSessionExpiredException` fuer Refresh-/401-Faelle mit Auto-Logout-Pfad in der UI.
 
@@ -165,6 +171,22 @@ Desktop Packaging-Hardening (Stage 6):
 - `desktopApp/build.gradle.kts` setzt explizite Runtime-Module (`java.net.http`, `jdk.httpserver`, `jdk.crypto.ec`, `jdk.unsupported`, `java.naming`), um NoClassDefFoundError in installierten Builds zu vermeiden.
 - MSI ist auf `perUserInstall = true` + Startmenue-Gruppe (`BamaChat`) konfiguriert, damit Installation/Update ohne Admin-Rechte moeglich ist.
 - `upgradeUuid` ist fixiert fuer konsistente Upgrades innerhalb der per-user Linie.
+- `:desktopApp:packageStoreMsix` erzeugt unter Windows aus dem Compose-App-Image ein ungezeichnetes Store-Paket unter `desktopApp/build/compose/binaries/main/msix/BamaFlow_<A.B.C.0>_x64.msix`; MSI- und EXE-Installer werden nicht eingebettet. Die Desktop-Version `A.B.C` wird nur bei drei gueltigen numerischen Komponenten in das MSIX-Schema `A.B.C.0` ueberfuehrt.
+- Die Partner-Center-Identitaet lautet `MamadouDianBald.BamaFlow`, Publisher `CN=2279D882-BC23-4831-AA4E-D384F8EFCD9A` und Publisher-Anzeigename `Mamadou Dian Baldé`. Die Store-ID `9P61V47KR1Z8` dient ausschließlich der Dokumentation und ist keine Package Identity.
+- Die quadratischen MSIX-PNG-Assets werden deterministisch aus `desktopApp/src/main/resources/bamachat.ico` erzeugt und zusammen mit Manifest, Executable, Capability sowie dem Ausschluss lokaler Settings, Zustandsdateien, Secrets, Zertifikate und Installer nach dem Entpacken erneut geprüft.
+- `desktopApp/scripts/test-store-msix-local.ps1` signiert ausschließlich eine temporaere Paketkopie mit einem kurzlebigen CurrentUser-Testzertifikat, installiert sie ohne App-Start und entfernt danach exakt das Testpaket, das Zertifikat und alle temporaeren Dateien. Die ungezeichnete Store-Ausgabe bleibt unverändert.
+
+Desktop Local Persistence (Stage 7):
+- Chatverlauf und Workspace-Notizen liegen unter `%LOCALAPPDATA%/BamaChat/data`; ohne geeigneten Windows-Pfad wird `%USERPROFILE%/.bamachat-desktop/data` verwendet. `BAMACHAT_DESKTOP_DATA_DIR` setzt ausschließlich fuer Tests und Smoke-Laeufe ein separates Datenverzeichnis. Wenn kein eigener Settings-Override gesetzt ist, bleiben Desktop-Settings kompatibel im Unterordner `settings` dieses Overrides.
+- Gastdaten nutzen einen stabilen lokalen Scope. Angemeldete Konten erhalten ausschließlich einen aus der erfolgreich authentifizierten UID abgeleiteten SHA-256-Scope; rohe UID und E-Mail stehen weder im Dateinamen noch im Zustandsdokument.
+- Scope-Wechsel laden nur den Ziel-Scope. Gast- und Kontodaten werden weder geloescht noch automatisch zusammengefuehrt; fehlgeschlagene Anmeldungen wechseln den aktiven Scope nicht.
+- Das JSON-Format besitzt eine `schemaVersion` und wird per temporaerer Datei mit anschließendem atomarem Replace/Move geschrieben. Beschädigte oder inkompatible Dateien werden als eindeutig benannte Recovery-Kopie im selben Ordner bewahrt; die App startet fuer diesen Scope leer weiter.
+- API-Schluessel, Firebase-/OAuth-Konfiguration und Cloud-Session-Tokens bleiben getrennt in `DesktopSettingsStore` beziehungsweise `DesktopCredentialCipher` und werden nicht in der Chat-/Workspace-Zustandsdatei gespeichert.
+
+Desktop Streaming (Stage 8):
+- OpenRouter liefert inkrementelle Textfragmente als SSE-`data:`-Events bis `[DONE]`; Ollama liefert NDJSON-Zeilen bis `done: true`. Leere Keepalive-Zeilen werden ignoriert und unvollständige oder fehlerhafte Frames kontrolliert beendet.
+- Ein einzelner Retry ist nur bei temporaeren I/O-Fehlern sowie HTTP 408, 429 und 5xx erlaubt, solange noch kein Textfragment ausgegeben wurde. Nach dem ersten Fragment wird nie automatisch erneut gesendet; 400, 401, 403, Konfigurationsfehler und Cancellation werden nicht wiederholt.
+- Der Desktop-Chat zeigt eingehende Fragmente unmittelbar an und kann genau den aktiven Streaming-Job abbrechen. Der bestehende nicht-streamende Gateway-Pfad bleibt fuer direkte Aufrufer erhalten.
 
 ## AndroidTest APK bauen
 ```powershell

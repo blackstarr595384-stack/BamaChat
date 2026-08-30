@@ -1,0 +1,13 @@
+{
+  "identityName": "MamadouDianBald.BamaFlow",
+  "publisher": "CN=2279D882-BC23-4831-AA4E-D384F8EFCD9A",
+  "publisherDisplayName": "Mamadou Dian Baldé",
+  "displayName": "BamaFlow",
+  "applicationId": "BamaFlow",
+  "architecture": "x64",
+  "storeId": "9P61V47KR1Z8",
+  "executable": "BamaChatDesktop.exe",
+  "targetDeviceFamily": "Windows.Desktop",
+  "minimumWindowsVersion": "10.0.17763.0",
+  "maximumWindowsVersionTested": "10.0.26100.0"
+}
