@@ -227,7 +227,7 @@ dependencies {
     }
 
     // Jsoup for Link Previews
-    implementation("org.jsoup:jsoup:1.18.3")
+    implementation(libs.jsoup)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("org.bouncycastle:bcprov-jdk15to18:$bouncyCastleVersion")
     implementation("org.bouncycastle:bcpkix-jdk15to18:$bouncyCastleVersion")
