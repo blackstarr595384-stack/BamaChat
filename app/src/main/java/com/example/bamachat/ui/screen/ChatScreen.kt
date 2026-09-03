@@ -1,30 +1,29 @@
 ﻿package com.example.bamachat.ui.screen
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.os.Bundle
 import android.content.pm.PackageManager
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
+import android.provider.Settings
 import android.widget.Toast
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,9 +48,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -69,11 +71,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.app.ActivityCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.component.ChatBubble
-import com.example.bamachat.ui.component.BamaChatBottomNav
 import com.example.bamachat.ui.component.ChatDesignPreset
 import com.example.bamachat.ui.component.ChatDesignTokens
 import com.example.bamachat.ui.component.ChatDrawer
@@ -81,111 +86,36 @@ import com.example.bamachat.ui.component.ChatInputBar
 import com.example.bamachat.ui.component.EmptyChatState
 import com.example.bamachat.ui.component.PremiumPaywallDialog
 import com.example.bamachat.ui.component.TypingIndicator
+import com.example.bamachat.ui.component.ToolCallsDisplay
+import com.example.bamachat.ui.component.voice.VoiceRuntimeDisclosure
+import com.example.bamachat.ui.component.voice.VoiceStartConfirmationDialog
 import com.example.bamachat.ui.component.compactLabel
 import com.example.bamachat.ui.component.designTokensFor
-import com.example.bamachat.ui.component.sanitizeForSpeech
-import com.example.bamachat.ui.component.splitSpeechChunks
+import com.example.bamachat.ui.screen.PersonaMood
+import com.example.bamachat.ui.screen.moodForPersona
 import com.example.bamachat.ui.theme.AppDesignSystem
+import com.example.bamachat.ui.theme.NeonCyan
+import com.example.bamachat.ui.theme.NeonGreen
+import com.example.bamachat.ui.theme.NeonPink
+import com.example.bamachat.ui.theme.NeonPurple
+import com.example.bamachat.ui.voice.VoiceRuntimePresentation
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.ui.viewmodel.MonetizationViewModel
 import com.example.bamachat.ui.viewmodel.ToolCallProgress
-import com.example.bamachat.ui.viewmodel.ToolCallStatus
-import com.example.bamachat.util.CloudVoiceManager
+import com.example.bamachat.voice.VoiceSessionState
+import com.example.bamachat.voice.VoiceSessionUiState
+import com.example.bamachat.voice.VoiceMode
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import coil.compose.AsyncImage
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 import java.io.File
 
-private data class PersonaMood(
-    val gradientTop: Color,
-    val gradientBottom: Color,
-    val cardSurface: Color,
-    val userBubbleStart: Color,
-    val userBubbleEnd: Color,
-    val accent: Color
-)
-
-private fun moodForPersona(
-    persona: ChatViewModel.Persona,
-    baseAccent: Color,
-    sentiment: String
-): PersonaMood {
-    val accent = when (sentiment) {
-        "positive" -> Color(0xFF0FB57A)
-        "negative" -> Color(0xFFE8505B)
-        else -> baseAccent
-    }
-    return when (persona) {
-        ChatViewModel.Persona.DEVELOPER -> PersonaMood(
-            gradientTop = Color(0xFF0F1424),
-            gradientBottom = Color(0xFF131A2B),
-            cardSurface = Color(0xFF1A2236),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF3D7DFF),
-            accent = Color(0xFF4CC9FF)
-        )
-        ChatViewModel.Persona.TEACHER -> PersonaMood(
-            gradientTop = Color(0xFF1C1522),
-            gradientBottom = Color(0xFF221A2B),
-            cardSurface = Color(0xFF2C2038),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF9F6DFF),
-            accent = Color(0xFFE6C15A)
-        )
-        ChatViewModel.Persona.CHEF -> PersonaMood(
-            gradientTop = Color(0xFF2A1612),
-            gradientBottom = Color(0xFF2F1D15),
-            cardSurface = Color(0xFF3A261C),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFFE27A3D),
-            accent = Color(0xFFFFB157)
-        )
-        ChatViewModel.Persona.FITNESS -> PersonaMood(
-            gradientTop = Color(0xFF101B16),
-            gradientBottom = Color(0xFF13231B),
-            cardSurface = Color(0xFF1D3127),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF37C887),
-            accent = Color(0xFF6FE5B1)
-        )
-        ChatViewModel.Persona.TRANSLATOR -> PersonaMood(
-            gradientTop = Color(0xFF101D26),
-            gradientBottom = Color(0xFF142530),
-            cardSurface = Color(0xFF1E3442),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF41A1FF),
-            accent = Color(0xFF79C8FF)
-        )
-        ChatViewModel.Persona.THERAPIST -> PersonaMood(
-            gradientTop = Color(0xFF121E1B),
-            gradientBottom = Color(0xFF152721),
-            cardSurface = Color(0xFF22372F),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF57BFA2),
-            accent = Color(0xFF9ADCCB)
-        )
-        ChatViewModel.Persona.CUSTOM -> PersonaMood(
-            gradientTop = Color(0xFF1A1623),
-            gradientBottom = Color(0xFF1D1B2B),
-            cardSurface = Color(0xFF2B2440),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF7E6DFF),
-            accent = Color(0xFFBAA8FF)
-        )
-        else -> PersonaMood(
-            gradientTop = Color(0xFF10151F),
-            gradientBottom = Color(0xFF161B26),
-            cardSurface = Color(0xFF202838),
-            userBubbleStart = accent,
-            userBubbleEnd = Color(0xFF4E7BFF),
-            accent = Color(0xFF82A6FF)
-        )
-    }
-}
 
 private fun createChatCameraCaptureUri(context: android.content.Context): Pair<File, Uri>? {
     return runCatching {
@@ -204,11 +134,15 @@ private fun createChatCameraCaptureUri(context: android.content.Context): Pair<F
 fun ChatScreen(
     viewModel: ChatViewModel,
     settingsViewModel: SettingsViewModel,
+    voiceViewModel: BamaVoiceViewModel,
     onBottomNavRoute: (String) -> Unit = {},
     onOpenMiniApps: () -> Unit = {},
     onOpenAgentHub: () -> Unit = {},
     onOpenComposeLab: () -> Unit = {},
-    onSearchClick: () -> Unit = {}
+    onOpenWorkspace: () -> Unit = {},
+    onSearchClick: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenChatProviderSelection: () -> Unit = {}
 ) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
@@ -217,6 +151,8 @@ fun ChatScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val isStreaming by viewModel.isStreaming.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    val providerFallbackMessage by viewModel.providerFallbackMessage.collectAsStateWithLifecycle()
+    val chatProviderStatus by viewModel.chatProviderStatus.collectAsStateWithLifecycle()
     val errorActionLabel by viewModel.errorActionLabel.collectAsStateWithLifecycle()
     val isErrorRetryable by viewModel.isErrorRetryable.collectAsStateWithLifecycle()
     val hasOlderMessages by viewModel.hasOlderMessages.collectAsStateWithLifecycle()
@@ -231,31 +167,12 @@ fun ChatScreen(
     val isBiometricEnabled by settingsViewModel.isBiometricEnabled.collectAsStateWithLifecycle()
     val primaryColorInt by settingsViewModel.primaryColorInt.collectAsStateWithLifecycle()
     val fontSize by settingsViewModel.fontSize.collectAsStateWithLifecycle()
-    val aiProvider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
-    val multiProviderEnabled by settingsViewModel.multiProviderEnabled.collectAsStateWithLifecycle()
-    val openRouterApiKey by settingsViewModel.openRouterApiKey.collectAsStateWithLifecycle()
-    val groqApiKey by settingsViewModel.groqApiKey.collectAsStateWithLifecycle()
-    val cerebrasApiKey by settingsViewModel.cerebrasApiKey.collectAsStateWithLifecycle()
-    val togetherApiKey by settingsViewModel.togetherApiKey.collectAsStateWithLifecycle()
-    val openCodeApiKey by settingsViewModel.openCodeApiKey.collectAsStateWithLifecycle()
-    val openCodeEndpoint by settingsViewModel.openCodeEndpoint.collectAsStateWithLifecycle()
-    val ttsEnabled by settingsViewModel.ttsEnabled.collectAsStateWithLifecycle()
-    val ttsSpeed by settingsViewModel.ttsSpeed.collectAsStateWithLifecycle()
-    val ttsPitch by settingsViewModel.ttsPitch.collectAsStateWithLifecycle()
-    val ttsVoiceStyle by settingsViewModel.ttsVoiceStyle.collectAsStateWithLifecycle()
-    val ttsProVoiceEnabled by settingsViewModel.ttsProVoiceEnabled.collectAsStateWithLifecycle()
-    val cloudVoiceEnabled by settingsViewModel.cloudVoiceEnabled.collectAsStateWithLifecycle()
-    val cloudVoiceProvider by settingsViewModel.cloudVoiceProvider.collectAsStateWithLifecycle()
-    val elevenLabsApiKey by settingsViewModel.elevenLabsApiKey.collectAsStateWithLifecycle()
-    val elevenLabsVoiceId by settingsViewModel.elevenLabsVoiceId.collectAsStateWithLifecycle()
-    val elevenLabsModelId by settingsViewModel.elevenLabsModelId.collectAsStateWithLifecycle()
-    val piperEndpoint by settingsViewModel.piperEndpoint.collectAsStateWithLifecycle()
-    val piperVoiceName by settingsViewModel.piperVoiceName.collectAsStateWithLifecycle()
     val voicePushToTalkEnabled by settingsViewModel.voicePushToTalkEnabled.collectAsStateWithLifecycle()
-    val voiceChatMode by settingsViewModel.voiceChatMode.collectAsStateWithLifecycle()
     val automationQuickActionsEnabled by settingsViewModel.automationQuickActionsEnabled.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
     val workspaceChatFilterEnabled by settingsViewModel.workspaceChatFilterEnabled.collectAsStateWithLifecycle()
+    val chatWorkspaceId by viewModel.chatWorkspaceId.collectAsStateWithLifecycle()
+    val chatWorkspaceName by viewModel.chatWorkspaceName.collectAsStateWithLifecycle()
     val autoSendVoice by settingsViewModel.autoSendVoice.collectAsStateWithLifecycle()
     val showTimestamps by settingsViewModel.showTimestamps.collectAsStateWithLifecycle()
     val liveSourcesVisible by settingsViewModel.showLiveSources.collectAsStateWithLifecycle()
@@ -267,8 +184,9 @@ fun ChatScreen(
     val uiCornerRoundnessScale by settingsViewModel.uiCornerRoundnessScale.collectAsStateWithLifecycle()
     val uiShadowIntensityScale by settingsViewModel.uiShadowIntensityScale.collectAsStateWithLifecycle()
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsStateWithLifecycle()
-    val language by settingsViewModel.language.collectAsStateWithLifecycle()
     val isPremiumActive by settingsViewModel.isPremiumActive.collectAsStateWithLifecycle()
+    val voiceUiState by voiceViewModel.uiState.collectAsStateWithLifecycle()
+    val liveRuntimePresentation = VoiceRuntimePresentation.resolve()
 
     var inputText by rememberSaveable { mutableStateOf("") }
     // P0-2: persist the selected image URI across recreation. We store the URI's
@@ -279,10 +197,9 @@ fun ChatScreen(
             restore = { stored -> if (stored.isBlank()) null else Uri.parse(stored) }
         )
     ) { mutableStateOf<Uri?>(null) }
-    val listState = rememberLazyListState()
+    val listState = key(currentConvId) { rememberLazyListState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
 
     val imagePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
@@ -321,13 +238,24 @@ fun ChatScreen(
             Toast.makeText(context, "Kamera-Berechtigung wurde abgelehnt.", Toast.LENGTH_SHORT).show()
         }
     }
-    var showSettingsDialog by remember { mutableStateOf(false) }
     var showPersonaDialog by remember { mutableStateOf(false) }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val snackbarHostState = remember { SnackbarHostState() }
 
+    LaunchedEffect(providerFallbackMessage) {
+        providerFallbackMessage?.let { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                withDismissAction = true,
+                duration = SnackbarDuration.Indefinite
+            )
+            viewModel.dismissProviderFallbackStatus()
+        }
+    }
+
     LaunchedEffect(errorMessage, isErrorRetryable, errorActionLabel) {
         errorMessage?.let {
+            snackbarHostState.currentSnackbarData?.dismiss()
             val result = snackbarHostState.showSnackbar(
                 message = it,
                 actionLabel = if (isErrorRetryable) (errorActionLabel ?: "Erneut") else null,
@@ -335,7 +263,9 @@ fun ChatScreen(
                 duration = SnackbarDuration.Long
             )
             if (result == SnackbarResult.ActionPerformed && isErrorRetryable) {
-                viewModel.retryLastFailedMessage()
+                if (viewModel.retryLastFailedMessage()) {
+                    voiceViewModel.markTextMessageAccepted()
+                }
             }
             viewModel.dismissError()
         }
@@ -358,524 +288,260 @@ fun ChatScreen(
         return
     }
 
-    // TTS
-    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
-    var isTtsReady by remember { mutableStateOf(false) }
-    var activeSpeechMessageId by remember { mutableStateOf<String?>(null) }
-    var isSpeechPlaybackActive by remember { mutableStateOf(false) }
-    val stopActiveDictation = remember { mutableStateOf<() -> Unit>({}) }
-    val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
-    val cloudVoiceRequested = ttsProVoiceEnabled && cloudVoiceEnabled
-    val selectedCloudVoiceProvider = remember(cloudVoiceProvider) {
-        CloudVoiceManager.Provider.fromStorage(cloudVoiceProvider)
-    }
-    val cloudVoiceConfig = remember(
-        cloudVoiceRequested,
-        cloudVoiceProvider,
-        elevenLabsApiKey,
-        elevenLabsVoiceId,
-        elevenLabsModelId,
-        piperEndpoint,
-        piperVoiceName
-    ) {
-        if (!cloudVoiceRequested) {
-            null
-        } else {
-            CloudVoiceManager.resolveCloudVoiceConfig(
-                providerValue = cloudVoiceProvider,
-                elevenLabsApiKey = elevenLabsApiKey,
-                elevenLabsVoiceId = elevenLabsVoiceId,
-                elevenLabsModelId = elevenLabsModelId,
-                piperEndpoint = piperEndpoint,
-                piperVoiceName = piperVoiceName
-            )
-        }
-    }
-    val ttsLocale = remember(language) {
-        when (language) {
-            "en" -> Locale.ENGLISH
-            "fr" -> Locale.FRENCH
-            "es" -> Locale("es")
-            "tr" -> Locale("tr")
-            "ar" -> Locale("ar")
-            else -> Locale.GERMAN
-        }
-    }
-    DisposableEffect(Unit) {
-        lateinit var ttsInstance: TextToSpeech
-        ttsInstance = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                ttsInstance.language = ttsLocale
-                ttsInstance.setSpeechRate(ttsSpeed)
-                ttsInstance.setPitch(ttsPitch)
-                isTtsReady = true
-            } else {
-                isTtsReady = false
-            }
-        }
-        tts = ttsInstance
-        onDispose {
-            isTtsReady = false
-            ttsInstance.stop()
-            ttsInstance.shutdown()
-            cloudVoiceManager.release()
-        }
-    }
-    LaunchedEffect(ttsSpeed, ttsPitch, ttsLocale) {
-        tts?.language = ttsLocale
-        tts?.setSpeechRate(ttsSpeed)
-        tts?.setPitch(ttsPitch)
-    }
-    val speakWithLocalTts: (String) -> Unit = localSpeak@{ speakText ->
-        val engine = tts ?: return@localSpeak
-        val maxChunkChars = if (useClearVoiceStyle) 170 else 220
-        val pauseMs = if (useClearVoiceStyle) 80L else 140L
-        val chunks = splitSpeechChunks(speakText, maxChunkChars = maxChunkChars)
-        if (chunks.isEmpty()) return@localSpeak
-        runCatching { engine.stop() }
-        chunks.forEachIndexed { index, chunk ->
-            val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-            engine.speak(
-                chunk,
-                queueMode,
-                null,
-                "bamachat_tts_${System.currentTimeMillis()}_$index"
-            )
-            if (index < chunks.lastIndex) {
-                engine.playSilentUtterance(
-                    pauseMs,
-                    TextToSpeech.QUEUE_ADD,
-                    "bamachat_tts_pause_$index"
-                )
-            }
-        }
-    }
-    val monitorSpeechPlayback: (String?) -> Unit = monitor@{ messageId ->
-        if (messageId == null) return@monitor
-        scope.launch {
-            var observedPlayback = false
-            var startWaitedMs = 0L
-
-            while (activeSpeechMessageId == messageId && startWaitedMs < 1500L) {
-                val speakingNow = tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()
-                if (speakingNow) {
-                    observedPlayback = true
-                    break
-                }
-                delay(80)
-                startWaitedMs += 80L
-            }
-
-            var idleChecks = 0
-            while (activeSpeechMessageId == messageId) {
-                val speakingNow = tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()
-                if (speakingNow) {
-                    observedPlayback = true
-                    idleChecks = 0
-                } else if (observedPlayback) {
-                    idleChecks += 1
-                    if (idleChecks >= 2) break
-                } else {
-                    break
-                }
-                delay(140)
-            }
-
-            if (activeSpeechMessageId == messageId) {
-                activeSpeechMessageId = null
-                isSpeechPlaybackActive = false
-            }
-        }
-    }
-    val stopSpeechPlayback: () -> Unit = {
-        activeSpeechMessageId = null
-        isSpeechPlaybackActive = false
-        runCatching { tts?.stop() }
-        scope.launch { runCatching { cloudVoiceManager.stop() } }
-    }
-    val speakMessage: (String?, String, Boolean) -> Unit = { messageId, text, userInitiated ->
-        val speakText = sanitizeForSpeech(text)
-        scope.launch {
-            stopActiveDictation.value.invoke()
-            if (messageId != null) {
-                activeSpeechMessageId = messageId
-                isSpeechPlaybackActive = true
-            }
-            if (cloudVoiceRequested) {
-                val config = cloudVoiceConfig
-                if (config == null) {
-                    if (activeSpeechMessageId == messageId) {
-                        activeSpeechMessageId = null
-                        isSpeechPlaybackActive = false
-                    }
-                    if (userInitiated) {
-                        Toast.makeText(
-                            context,
-                            "${selectedCloudVoiceProvider.displayName} ist aktiviert, aber die Konfiguration ist unvollständig.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                    return@launch
-                }
-                val cloudOk = runCatching {
-                    cloudVoiceManager.speak(
-                        text = speakText,
-                        config = config,
-                        voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
-                    )
-                }.getOrDefault(false)
-
-                // P0-3 fix: user may have pressed Stop while we were awaiting the
-                // ElevenLabs HTTP fetch. If activeSpeechMessageId no longer matches,
-                // the playback must be aborted instead of starting after-the-fact.
-                if (cloudOk && activeSpeechMessageId != messageId) {
-                    runCatching { cloudVoiceManager.stop() }
-                    return@launch
-                }
-
-                if (cloudOk) {
-                    monitorSpeechPlayback(messageId)
-                    return@launch
-                }
-
-                if (activeSpeechMessageId == messageId) {
-                    activeSpeechMessageId = null
-                    isSpeechPlaybackActive = false
-                }
-
-                if (userInitiated) {
-                    Toast.makeText(
-                        context,
-                        cloudVoiceManager.lastErrorMessage() ?: "ElevenLabs konnte nicht gestartet werden. Android-Stimme wird nicht genutzt.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-
-                return@launch
-            }
-            if (ttsEnabled && isTtsReady && tts != null) {
-                speakWithLocalTts(speakText)
-                monitorSpeechPlayback(messageId)
-                return@launch
-            }
-            if (activeSpeechMessageId == messageId) {
-                activeSpeechMessageId = null
-                isSpeechPlaybackActive = false
-            }
-            if (userInitiated) {
-                Toast.makeText(
-                    context,
-                    "Sprachausgabe ist nicht bereit. Prüfe Stimme und Berechtigungen.",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
-    val onSpeak: (String, String) -> Unit = { messageId, text ->
-        if (isSpeechPlaybackActive && activeSpeechMessageId == messageId) {
-            stopSpeechPlayback()
-        } else {
-            speakMessage(messageId, text, true)
-        }
-    }
-
-    // Auto-speak last AI message when TTS enabled (track by ID to avoid re-speaking)
-    var lastSpokenMessageId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(
-        messages.size,
-        ttsEnabled,
-        ttsProVoiceEnabled,
-        cloudVoiceEnabled,
-        cloudVoiceProvider,
-        elevenLabsApiKey,
-        elevenLabsVoiceId,
-        elevenLabsModelId,
-        piperEndpoint,
-        piperVoiceName
-    ) {
-        val canSpeak = if (cloudVoiceRequested) {
-            cloudVoiceConfig != null
-        } else {
-            ttsEnabled
-        }
-        if (canSpeak && messages.isNotEmpty()) {
-            val last = messages.last()
-            if (!last.isUser && last.text.isNotBlank() && last.id != lastSpokenMessageId) {
-                lastSpokenMessageId = last.id
-                speakMessage(last.id, last.text, false)
-            }
-        }
-    }
-
-    // STT
-    val isListeningState = remember { mutableStateOf(false) }
-    var isListening by isListeningState
-    var isSpeechStartPending by remember { mutableStateOf(false) }
-    var ignoreNextSpeechClientError by remember { mutableStateOf(false) }
-    var pushToTalkSessionActive by remember { mutableStateOf(false) }
-    var lastPartialUpdateAt by remember { mutableLongStateOf(0L) }
-    var lastVoiceAutoSendAt by remember { mutableLongStateOf(0L) }
-    var lastVoiceAutoSendText by remember { mutableStateOf("") }
-    var hasHadVoiceExchange by remember { mutableStateOf(false) }
-    val speechRecognitionAvailable = remember { SpeechRecognizer.isRecognitionAvailable(context) }
-    val speechRecognizer = remember(context, speechRecognitionAvailable) {
-        if (speechRecognitionAvailable) SpeechRecognizer.createSpeechRecognizer(context) else null
-    }
-    val recognizerLanguageTag = remember(ttsLocale) {
-        ttsLocale.toLanguageTag().ifBlank { ttsLocale.toString() }
-    }
-    val recognizerIntent = remember(recognizerLanguageTag, voiceChatMode) {
-        val completeSilenceMs = if (voiceChatMode) 700L else 1200L
-        val possiblyCompleteSilenceMs = if (voiceChatMode) 400L else 800L
-        val minimumSpeechMs = if (voiceChatMode) 300L else 600L
-        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognizerLanguageTag)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, recognizerLanguageTag)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possiblyCompleteSilenceMs)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minimumSpeechMs)
-        }
-    }
     val latestAutoSendVoice by rememberUpdatedState(autoSendVoice)
-    val latestVoiceChatMode by rememberUpdatedState(voiceChatMode)
-    val latestIsStreaming by rememberUpdatedState(isStreaming)
-    // P0-6: the recognizer listener is built once for the lifetime of speechRecognizer;
-    // it reads the intent through this updated-state so a voiceChatMode toggle is
-    // picked up on the very next startListening() without recreating the recognizer.
-    val latestRecognizerIntent by rememberUpdatedState(recognizerIntent)
-    val startSpeechRecognition: (Boolean) -> Unit = startSpeech@{ showPrompt ->
-        val recognizer = speechRecognizer ?: return@startSpeech
-        if (isListeningState.value || isSpeechStartPending) return@startSpeech
-        isSpeechStartPending = true
-        ignoreNextSpeechClientError = false
-        scope.launch {
-            runCatching { tts?.stop() }
-            try {
-                cloudVoiceManager.stop()
-            } catch (_: Exception) {
-            }
-            if (showPrompt) {
-                Toast.makeText(context, "Sprich jetzt...", Toast.LENGTH_SHORT).show()
-            }
-            val started = runCatching {
-                recognizer.startListening(recognizerIntent)
-                true
-            }.getOrElse {
-                isSpeechStartPending = false
-                Toast.makeText(
-                    context,
-                    "Spracherkennung konnte nicht gestartet werden.",
-                    Toast.LENGTH_SHORT
-                ).show()
-                false
-            }
-            if (!started) {
-                pushToTalkSessionActive = false
-            }
-        }
+    val latestExtensionQuickAction by rememberUpdatedState(selectedExtensionQuickAction)
+    var showPermanentMicrophoneDenial by rememberSaveable { mutableStateOf(false) }
+    var microphonePermissionRequested by rememberSaveable { mutableStateOf(false) }
+    var microphonePermissionRequestHadHistory by rememberSaveable { mutableStateOf(false) }
+    var microphonePermissionPermanentlyDenied by rememberSaveable { mutableStateOf(false) }
+    var showVoicePanel by rememberSaveable { mutableStateOf(false) }
+    val settingsPreferences = remember(context) {
+        context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
     }
-    val stopSpeechRecognition: (Boolean) -> Unit = stopSpeech@{ forceCancel ->
-        val recognizer = speechRecognizer ?: return@stopSpeech
-        if (!isListeningState.value && !isSpeechStartPending) return@stopSpeech
-        ignoreNextSpeechClientError = true
-        isSpeechStartPending = false
-        runCatching {
-            if (forceCancel || !isListeningState.value) recognizer.cancel() else recognizer.stopListening()
-        }
-        if (forceCancel || !isListeningState.value) {
-            isListeningState.value = false
-        }
+    var livePrivacyConfirmed by rememberSaveable {
+        mutableStateOf(settingsPreferences.getBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, false))
     }
-    // P0-5 cleanup: wrap the MutableState write in SideEffect so we don't allocate
-    // a new lambda + State write on every recomposition.
-    SideEffect {
-        stopActiveDictation.value = {
-            if (isListeningState.value || isSpeechStartPending) {
-                stopSpeechRecognition(true)
-            }
-        }
+    var simulationStartConfirmed by rememberSaveable { mutableStateOf(false) }
+    var showLivePrivacyConfirmation by rememberSaveable { mutableStateOf(false) }
+    val liveStartConfirmed = if (liveRuntimePresentation.persistsPrivacyConfirmation) {
+        livePrivacyConfirmed
+    } else {
+        simulationStartConfirmed
     }
     val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            startSpeechRecognition(true)
+            microphonePermissionPermanentlyDenied = false
+            if (voiceUiState.mode == VoiceMode.LIVE) {
+                voiceViewModel.startLiveSession(selectedPersona.displayName)
+            } else {
+                voiceViewModel.startListening()
+            }
         } else {
-            Toast.makeText(
-                context,
-                "Mikrofon-Berechtigung wurde abgelehnt.",
-                Toast.LENGTH_SHORT
-            ).show()
+            val activity = context as? Activity
+            val permanentlyDenied = microphonePermissionRequestHadHistory && activity != null &&
+                !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
+            microphonePermissionPermanentlyDenied = permanentlyDenied
+            showPermanentMicrophoneDenial = permanentlyDenied
+            voiceViewModel.reportPermissionDenied(permanentlyDenied)
         }
     }
-    // P0-6: keying on speechRecognizer only — rebuilding the listener every time the
-    // user toggles voiceChatMode (which changes recognizerIntent) tore down and
-    // recreated the SpeechRecognizer mid-session. The listener captures the current
-    // recognizerIntent via closure; the next startListening() picks up the new intent.
-    DisposableEffect(speechRecognizer) {
-        val recognizer = speechRecognizer
-        if (recognizer == null) {
-            onDispose {}
+    val requestMicrophonePermission: () -> Unit = {
+        if (microphonePermissionPermanentlyDenied) {
+            showPermanentMicrophoneDenial = true
         } else {
-            val listener = object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) {
-                    isSpeechStartPending = false
-                    isListeningState.value = true
-                }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() { isListeningState.value = false }
-                override fun onError(error: Int) {
-                    val ignoreClientError = ignoreNextSpeechClientError && error == SpeechRecognizer.ERROR_CLIENT
-                    ignoreNextSpeechClientError = false
-                    isSpeechStartPending = false
-                    isListeningState.value = false
-                    pushToTalkSessionActive = false
-                    if (ignoreClientError) return
-                    val isSoftSpeechError =
-                        error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
-                            error == SpeechRecognizer.ERROR_NO_MATCH
-
-                    if (latestVoiceChatMode && hasHadVoiceExchange && isSoftSpeechError) {
-                        scope.launch {
-                            delay(250)
-                            val audioOk = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-                            val localSpeaking = tts?.isSpeaking == true
-                            val cloudSpeaking = cloudVoiceManager.isSpeaking()
-                            if (
-                                audioOk &&
-                                !latestIsStreaming &&
-                                !localSpeaking &&
-                                !cloudSpeaking &&
-                                !isListeningState.value &&
-                                !isSpeechStartPending
-                            ) {
-                                isSpeechStartPending = true
-                                val restarted = runCatching {
-                                    recognizer.startListening(latestRecognizerIntent)
-                                    true
-                                }.getOrDefault(false)
-                                if (!restarted) {
-                                    isSpeechStartPending = false
-                                }
-                            }
-                        }
-                        return
-                    }
-
-                    val errorMsg = when (error) {
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Netzwerk-Zeitüberschreitung"
-                        SpeechRecognizer.ERROR_NETWORK -> "Netzwerkfehler"
-                        SpeechRecognizer.ERROR_AUDIO -> "Audio-Fehler"
-                        SpeechRecognizer.ERROR_CLIENT -> "Client-Fehler"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Keine Sprache erkannt"
-                        SpeechRecognizer.ERROR_NO_MATCH -> "Nichts erkannt"
-                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Spracherkennung ausgelastet"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Keine Mikrofon-Berechtigung"
-                        else -> "Spracherkennungsfehler ($error)"
-                    }
-                    android.util.Log.w("ChatScreen", "SpeechRecognizer: $errorMsg")
-                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-                }
-                override fun onResults(results: Bundle?) {
-                    isSpeechStartPending = false
-                    val data = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    if (!data.isNullOrEmpty()) {
-                        val recognizedText = data[0].trim()
-                        inputText = recognizedText
-                        if (latestAutoSendVoice) {
-                            if (recognizedText.isNotBlank()) {
-                                val now = System.currentTimeMillis()
-                                val isDuplicateAutoSend =
-                                    recognizedText.equals(lastVoiceAutoSendText, ignoreCase = true) &&
-                                        (now - lastVoiceAutoSendAt) < 1500L
-                                if (isDuplicateAutoSend) {
-                                    isListeningState.value = false
-                                    return
-                                }
-                                lastVoiceAutoSendText = recognizedText
-                                lastVoiceAutoSendAt = now
-                                val imageUri = selectedImageUri
-                                val accepted = if (imageUri != null) {
-                                    viewModel.sendMessageWithImage(recognizedText, imageUri)
-                                } else {
-                                    viewModel.sendMessage(recognizedText)
-                                }
-                                if (accepted) {
-                                    inputText = ""
-                                    if (imageUri != null) {
-                                        selectedImageUri = null
-                                    }
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        "Sprache erkannt, aber nicht gesendet.",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                                hasHadVoiceExchange = true
-                            }
-                        } else {
-                            Toast.makeText(context, "Erkannt: $recognizedText", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(context, "Keine Sprache erkannt.", Toast.LENGTH_SHORT).show()
-                    }
-                    pushToTalkSessionActive = false
-                    isListeningState.value = false
-                }
-                override fun onPartialResults(partialResults: Bundle?) {
-                    val data = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                    val partialText = data?.firstOrNull()?.trim().orEmpty()
-                    if (partialText.isBlank()) return
-                    val now = System.currentTimeMillis()
-                    if ((now - lastPartialUpdateAt) >= 120L) {
-                        inputText = partialText
-                        lastPartialUpdateAt = now
-                    }
-                }
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            }
-            recognizer.setRecognitionListener(listener)
-            onDispose { recognizer.destroy() }
+            microphonePermissionRequestHadHistory = microphonePermissionRequested
+            microphonePermissionRequested = true
+            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
-    // Sync state back to Compose
-    // (removed redundant LaunchedEffect: `isListening` is already a delegated MutableState read)
-
-    // Continuous voice mode: re-trigger listening when AI and TTS playback are both finished
-    LaunchedEffect(isStreaming, voiceChatMode, hasHadVoiceExchange, messages.lastOrNull()?.id) {
-        if (!voiceChatMode || isStreaming || !hasHadVoiceExchange) return@LaunchedEffect
-
-        var waitedMs = 0L
-        while ((tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()) && waitedMs < 6000L) {
-            delay(120)
-            waitedMs += 120L
+    val startConfirmedLiveInput: () -> Unit = {
+        if (voiceUiState.liveSessionActive) {
+            voiceViewModel.beginLiveUserTurn()
+        } else {
+            voiceViewModel.startLiveSession(selectedPersona.displayName)
         }
-        if (tts?.isSpeaking == true || cloudVoiceManager.isSpeaking()) return@LaunchedEffect
-
-        val audioOk = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (audioOk && !isListeningState.value && !isSpeechStartPending) {
-            isSpeechStartPending = true
-            val restarted = runCatching {
-                speechRecognizer?.startListening(recognizerIntent)
-                true
-            }.getOrDefault(false)
-            if (!restarted) {
-                isSpeechStartPending = false
+    }
+    val startVoiceInput: () -> Unit = {
+        if (voiceUiState.mode == VoiceMode.LIVE && !voiceUiState.realtimeAvailable) {
+            showVoicePanel = true
+        } else if (voiceUiState.mode == VoiceMode.LIVE && !liveStartConfirmed) {
+            showLivePrivacyConfirmation = true
+        } else if (voiceUiState.mode == VoiceMode.LIVE && !liveRuntimePresentation.requiresMicrophonePermission) {
+            startConfirmedLiveInput()
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            if (voiceUiState.mode == VoiceMode.LIVE) {
+                startConfirmedLiveInput()
+            } else {
+                if (isLoading || isStreaming) viewModel.cancelStream()
+                voiceViewModel.startListening()
+            }
+        } else {
+            requestMicrophonePermission()
+        }
+    }
+    val toggleVoiceInput: () -> Unit = {
+        if (voiceUiState.mode == VoiceMode.LIVE) {
+            when {
+                !voiceUiState.realtimeAvailable -> showVoicePanel = true
+                !liveStartConfirmed -> showLivePrivacyConfirmation = true
+                liveRuntimePresentation.requiresMicrophonePermission && ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) != PackageManager.PERMISSION_GRANTED -> requestMicrophonePermission()
+                voiceUiState.liveSessionActive -> voiceViewModel.toggleLiveMicrophone()
+                else -> voiceViewModel.startLiveSession(selectedPersona.displayName)
+            }
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            val state = voiceUiState.state
+            if (state !is VoiceSessionState.Preparing &&
+                state !is VoiceSessionState.Listening &&
+                state !is VoiceSessionState.Transcribing &&
+                (isLoading || isStreaming)
+            ) {
+                viewModel.cancelStream()
+            }
+            voiceViewModel.toggleListening()
+        } else {
+            requestMicrophonePermission()
+        }
+    }
+    val latestAssistantMessage = messages.lastOrNull { !it.isUser && it.text.isNotBlank() }
+    LaunchedEffect(latestAssistantMessage?.id, latestAssistantMessage?.text, isStreaming) {
+        latestAssistantMessage?.let { assistant ->
+            voiceViewModel.onAssistantTextChanged(assistant.id, assistant.text, isStreaming)
+        }
+    }
+    LaunchedEffect(voiceViewModel) {
+        voiceViewModel.finalTranscripts.collect { transcript ->
+            inputText = transcript.text
+            if (latestAutoSendVoice) {
+                val imageUri = selectedImageUri
+                val accepted = if (imageUri != null) {
+                    viewModel.sendMessageWithImage(transcript.text, imageUri)
+                } else {
+                    viewModel.sendMessage(transcript.text, latestExtensionQuickAction)
+                }
+                if (accepted) {
+                    inputText = ""
+                    if (imageUri != null) selectedImageUri = null
+                }
+                voiceViewModel.markTranscriptHandled(accepted)
+            } else {
+                voiceViewModel.markTranscriptHandled(false)
             }
         }
+    }
+    LaunchedEffect(voiceViewModel) {
+        voiceViewModel.realtimeTurns.collect { turn ->
+            viewModel.persistRealtimeVoiceTurn(turn)
+        }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val latestLiveSessionActive by rememberUpdatedState(voiceUiState.liveSessionActive)
+    DisposableEffect(lifecycleOwner, voiceViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && latestLiveSessionActive) {
+                voiceViewModel.endLiveSession()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    DisposableEffect(voiceViewModel) {
+        onDispose { voiceViewModel.leaveChatScreen() }
+    }
+
+    if (showPermanentMicrophoneDenial) {
+        AlertDialog(
+            onDismissRequest = { showPermanentMicrophoneDenial = false },
+            title = { Text("Mikrofonzugriff aktivieren") },
+            text = { Text("Öffne die App-Einstellungen und erlaube BamaChat den Mikrofonzugriff.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermanentMicrophoneDenial = false
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)
+                            )
+                        )
+                    }
+                ) { Text("Einstellungen öffnen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermanentMicrophoneDenial = false }) { Text("Abbrechen") }
+            }
+        )
+    }
+    if (showLivePrivacyConfirmation) {
+        VoiceStartConfirmationDialog(
+            presentation = liveRuntimePresentation,
+            onConfirm = {
+                if (liveRuntimePresentation.persistsPrivacyConfirmation) {
+                    livePrivacyConfirmed = true
+                    settingsPreferences.edit()
+                        .putBoolean(KEY_LIVE_VOICE_PRIVACY_CONFIRMED, true)
+                        .apply()
+                } else {
+                    simulationStartConfirmed = true
+                }
+                showLivePrivacyConfirmation = false
+                if (liveRuntimePresentation.requiresMicrophonePermission &&
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    requestMicrophonePermission()
+                } else {
+                    startConfirmedLiveInput()
+                }
+            },
+            onDismiss = { showLivePrivacyConfirmation = false }
+        )
+    }
+    val isVoiceListening = if (voiceUiState.mode == VoiceMode.LIVE) {
+        voiceUiState.liveSessionActive && !voiceUiState.microphoneMuted
+    } else {
+        when (voiceUiState.state) {
+            VoiceSessionState.Preparing,
+            VoiceSessionState.Listening,
+            is VoiceSessionState.Transcribing -> true
+            else -> false
+        }
+    }
+    val isSpeechPlaybackActive = voiceUiState.state == VoiceSessionState.Speaking
+    val activeSpeechMessageId = voiceUiState.activeOutputMessageId
+    val stopVoiceInteraction: () -> Unit = {
+        if (voiceUiState.mode == VoiceMode.LIVE) {
+            voiceViewModel.stopSpeaking()
+        } else {
+            if (isLoading || isStreaming) viewModel.cancelStream()
+            voiceViewModel.stopAll()
+        }
+    }
+    val onSpeak: (String, String) -> Unit = { messageId, text ->
+        if (isSpeechPlaybackActive && activeSpeechMessageId == messageId) {
+            voiceViewModel.stopSpeaking()
+        } else {
+            voiceViewModel.speakMessage(messageId, text)
+        }
+    }
+    LaunchedEffect((voiceUiState.state as? VoiceSessionState.Error)?.userMessage) {
+        val voiceError = voiceUiState.state as? VoiceSessionState.Error ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = voiceError.userMessage,
+            actionLabel = if (voiceError.recoverable) "Erneut" else null,
+            withDismissAction = true,
+            duration = SnackbarDuration.Long
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            voiceViewModel.recoverFromError()
+            startVoiceInput()
+        } else {
+            voiceViewModel.recoverFromError()
+        }
+    }
+    if (showVoicePanel) {
+        BamaVoicePanel(
+            uiState = voiceUiState,
+            isListening = isVoiceListening,
+            onDismiss = { showVoicePanel = false },
+            onMicrophone = toggleVoiceInput,
+            onCancelListening = { voiceViewModel.cancelListening() },
+            onStopSpeaking = stopVoiceInteraction,
+            onEndConversation = {
+                if (voiceUiState.mode == VoiceMode.LIVE) {
+                    voiceViewModel.endLiveSession()
+                } else {
+                    stopVoiceInteraction()
+                }
+                showVoicePanel = false
+            }
+        )
     }
 
     // Theme colors
@@ -889,41 +555,6 @@ fun ChatScreen(
         animationSpec = tween(800), label = "themeColor"
     )
 
-    // Auto-scroll — P1-6: only auto-scroll when the user is already near the tail,
-    // or when a brand-new message id just arrived. If the user has scrolled up to
-    // re-read older messages, we leave the position alone.
-    var autoScrollTailId by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(messages.lastOrNull()?.id, isStreaming) {
-        val tailId = messages.lastOrNull()?.id ?: return@LaunchedEffect
-        val targetIndex = messages.lastIndex
-        val isNewTail = tailId != autoScrollTailId
-        autoScrollTailId = tailId
-
-        val layoutInfo = listState.layoutInfo
-        val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        val distanceFromTail = targetIndex - lastVisibleIndex
-        // "Near the tail" = within ~2 items of the bottom, OR list was never scrolled yet.
-        val nearTail = lastVisibleIndex < 0 || distanceFromTail <= 2
-
-        // Only follow streaming updates if the user is still pinned near the tail.
-        // For brand-new messages, follow when near-tail OR when the new message is the user's own.
-        val isOwnLastMessage = messages.lastOrNull()?.isUser == true
-        if ((isStreaming && nearTail) || (isNewTail && (nearTail || isOwnLastMessage))) {
-            scope.launch {
-                val currentIndex = listState.firstVisibleItemIndex
-                val farDistance = (targetIndex - currentIndex) > 8
-                if (isStreaming || farDistance) {
-                    listState.scrollToItem(targetIndex)
-                } else {
-                    listState.animateScrollToItem(targetIndex)
-                }
-            }
-        }
-    }
-
-    if (showSettingsDialog) {
-        SettingsDialog(viewModel = settingsViewModel, onDismiss = { showSettingsDialog = false }, mcpServerManager = viewModel.mcpServerManager, mcpWorkflowManager = viewModel.mcpWorkflowManager)
-    }
     if (showPersonaDialog) {
         PersonaDialog(viewModel, onDismiss = { showPersonaDialog = false })
     }
@@ -934,33 +565,14 @@ fun ChatScreen(
         )
     }
 
-    val filteredConversations = remember(conversations, activeWorkspaceName, workspaceChatFilterEnabled) {
+    val filteredConversations = remember(conversations, chatWorkspaceName, workspaceChatFilterEnabled) {
         viewModel.getConversationsForWorkspace(
-            activeWorkspaceName = activeWorkspaceName,
+            activeWorkspaceName = chatWorkspaceName,
             onlyActiveWorkspace = workspaceChatFilterEnabled
         )
     }
-    val selectableProviders = remember(
-        aiProvider,
-        openRouterApiKey,
-        groqApiKey,
-        cerebrasApiKey,
-        togetherApiKey,
-        openCodeApiKey,
-        openCodeEndpoint
-    ) {
-        buildList {
-            if (openRouterApiKey.isNotBlank()) add("OpenRouter")
-            if (openCodeApiKey.isNotBlank() && openCodeEndpoint.isNotBlank()) add("OpenCode")
-            if (groqApiKey.isNotBlank()) add("Groq")
-            if (cerebrasApiKey.isNotBlank()) add("Cerebras")
-            if (togetherApiKey.isNotBlank()) add("Together")
-            add("Ollama")
-            if (aiProvider.isNotBlank()) add(aiProvider)
-        }.distinct()
-    }
-
     ModalNavigationDrawer(
+        modifier = Modifier.testTag("chat_screen"),
         drawerState = drawerState,
         drawerContent = {
             ChatDrawer(
@@ -999,11 +611,15 @@ fun ChatScreen(
                     if (accepted) {
                         selectedImageUri = null
                         inputText = ""
+                        voiceViewModel.markTextMessageAccepted()
                     }
                     accepted
                 } else if (trimmedInput.isNotEmpty()) {
                     val accepted = viewModel.sendMessage(trimmedInput, selectedExtensionQuickAction)
-                    if (accepted) inputText = ""
+                    if (accepted) {
+                        inputText = ""
+                        voiceViewModel.markTextMessageAccepted()
+                    }
                     accepted
                 } else {
                     false
@@ -1042,72 +658,31 @@ fun ChatScreen(
             },
             selectedImageUri = selectedImageUri,
             onClearImage = { selectedImageUri = null },
-            isListening = isListening,
+            isListening = isVoiceListening,
+            voiceUiState = voiceUiState,
             voicePushToTalkEnabled = voicePushToTalkEnabled,
-            onMicClick = {
-                if (!speechRecognitionAvailable) {
-                    Toast.makeText(
-                        context,
-                        "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else if (isListening || isSpeechStartPending) {
-                    stopSpeechRecognition(false)
-                } else if (ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    startSpeechRecognition(true)
-                } else {
-                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
-            onMicPressStart = {
-                if (!speechRecognitionAvailable) {
-                    Toast.makeText(
-                        context,
-                        "Spracherkennung ist auf diesem Gerät nicht verfügbar.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } else if (ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    if (!isListening && !isSpeechStartPending) {
-                        pushToTalkSessionActive = true
-                        startSpeechRecognition(true)
-                    }
-                } else {
-                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
+            onMicClick = toggleVoiceInput,
+            onMicPressStart = startVoiceInput,
             onMicPressEnd = {
-                if (pushToTalkSessionActive) {
-                    pushToTalkSessionActive = false
-                    stopSpeechRecognition(!isListening)
+                if (voiceUiState.mode == VoiceMode.LIVE) {
+                    voiceViewModel.finishLiveUserTurn()
+                } else {
+                    voiceViewModel.finishListening()
                 }
             },
+            onVoicePanelClick = { showVoicePanel = true },
+            onStopVoice = stopVoiceInteraction,
             themeColor = themeColor,
             personaMood = personaMood,
             fontSize = fontSize,
             selectedPersona = selectedPersona,
-            aiProvider = aiProvider,
-            selectableProviders = selectableProviders,
-            multiProviderEnabled = multiProviderEnabled,
-            onSelectProvider = { selected ->
-                settingsViewModel.setAiProvider(selected)
-                if (multiProviderEnabled) {
-                    settingsViewModel.setMultiProviderEnabled(false)
-                    Toast.makeText(context, "Auto-Fallback deaktiviert: Provider manuell gesetzt.", Toast.LENGTH_SHORT).show()
-                }
-            },
+            chatProviderStatus = chatProviderStatus,
             onPersonaClick = { showPersonaDialog = true },
             onBottomNavRoute = onBottomNavRoute,
             onSearchClick = onSearchClick,
             onMenuClick = { scope.launch { drawerState.open() } },
-            onSettingsClick = { showSettingsDialog = true },
+            onSettingsClick = onOpenSettings,
+            onOpenWorkspaceClick = onOpenWorkspace,
             onMiniAppsClick = onOpenMiniApps,
             onAgentHubClick = onOpenAgentHub,
             onComposeLabClick = onOpenComposeLab,
@@ -1119,7 +694,11 @@ fun ChatScreen(
                 }
                 context.startActivity(Intent.createChooser(sendIntent, "Chat exportieren"))
             },
-            onStopGeneration = { viewModel.cancelStream() },
+            onStopGeneration = {
+                voiceViewModel.stopAll()
+                viewModel.cancelStream()
+            },
+            onOpenChatProviderSelection = onOpenChatProviderSelection,
             onSpeak = onSpeak,
             activeSpeechMessageId = activeSpeechMessageId,
             isSpeechPlaybackActive = isSpeechPlaybackActive,
@@ -1134,7 +713,15 @@ fun ChatScreen(
             onLoadOlderMessages = { viewModel.loadOlderMessages() },
             uiDesignPreset = uiDesignPreset,
             compactChatHeader = compactChatHeader,
-            activeWorkspaceName = activeWorkspaceName,
+            chatWorkspaceId = chatWorkspaceId,
+            chatWorkspaceName = chatWorkspaceName,
+            onLeaveWorkspace = {
+                viewModel.setChatWorkspaceContext(null)
+                settingsViewModel.setWorkspaceChatFilterEnabled(false)
+                scope.launch {
+                    viewModel.openOrCreateNormalConversation()
+                }
+            },
             connectChatBottomBars = connectChatBottomBars,
             glassEffectsEnabled = glassEffectsEnabled,
             uiCornerRoundnessScale = uiCornerRoundnessScale,
@@ -1175,6 +762,354 @@ private fun triggerBiometric(context: android.content.Context, onResult: (Boolea
     biometricPrompt.authenticate(promptInfo)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BamaVoicePanel(
+    uiState: VoiceSessionUiState,
+    isListening: Boolean,
+    onDismiss: () -> Unit,
+    onMicrophone: () -> Unit,
+    onCancelListening: () -> Unit,
+    onStopSpeaking: () -> Unit,
+    onEndConversation: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val runtimePresentation = VoiceRuntimePresentation.resolve()
+    val displayedConnectionLabel = if (uiState.mode == VoiceMode.LIVE) {
+        runtimePresentation.statusText(uiState.state) ?: uiState.connectionLabel
+    } else {
+        uiState.connectionLabel
+    }
+    var sessionElapsedSeconds by remember { mutableStateOf(0L) }
+    LaunchedEffect(
+        uiState.sessionStartedAtEpochMillis,
+        uiState.liveSessionActive
+    ) {
+        sessionElapsedSeconds = 0L
+        while (uiState.liveSessionActive && uiState.sessionStartedAtEpochMillis != null) {
+            sessionElapsedSeconds =
+                ((System.currentTimeMillis() - uiState.sessionStartedAtEpochMillis) / 1_000L)
+                    .coerceAtLeast(0L)
+            delay(1_000L)
+        }
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFF141427),
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("BamaVoice", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(displayedConnectionLabel, color = NeonCyan, style = MaterialTheme.typography.labelLarge)
+                }
+                Surface(
+                    shape = RoundedCornerShape(50.dp),
+                    color = NeonPurple.copy(alpha = 0.16f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonPurple.copy(alpha = 0.45f))
+                ) {
+                    Text(
+                        if (uiState.mode == VoiceMode.LIVE) runtimePresentation.modeLabel else uiState.mode.displayName,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+
+            if (uiState.mode == VoiceMode.LIVE) {
+                VoiceRuntimeDisclosure(runtimePresentation)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                VoiceProviderBadge(
+                    label = if (uiState.mode == VoiceMode.LIVE) {
+                        runtimePresentation.inputProviderLabel ?: "Eingabe: ${uiState.inputProvider.displayName}"
+                    } else {
+                        "Eingabe: ${uiState.inputProvider.displayName}"
+                    },
+                    icon = Icons.Default.Mic
+                )
+                VoiceProviderBadge(
+                    label = if (uiState.mode == VoiceMode.LIVE) {
+                        runtimePresentation.outputProviderLabel ?: "Ausgabe: ${uiState.outputProvider.displayName}"
+                    } else {
+                        "Ausgabe: ${uiState.outputProvider.displayName}"
+                    },
+                    icon = Icons.AutoMirrored.Filled.VolumeUp
+                )
+            }
+
+            if (uiState.mode == VoiceMode.LIVE && runtimePresentation.showRealtimeVoice) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (uiState.secureConnection) Icons.Default.Lock else Icons.Default.LockOpen,
+                        contentDescription = null,
+                        tint = if (uiState.secureConnection) NeonGreen else Color.White.copy(alpha = 0.55f)
+                    )
+                    Text(
+                        uiState.realtimeTransportStatusLabel,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "${formatVoiceDuration(sessionElapsedSeconds)}" +
+                            uiState.sessionDurationLimitSeconds?.let { " / ${formatVoiceDuration(it)}" }.orEmpty(),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                Text(
+                    "Stimme: ${uiState.selectedVoiceLabel}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = NeonCyan
+                )
+                if (runtimePresentation.showServerDurationPolicy) {
+                    Text(
+                        "Automatisches Ende nach 3 Min. Inaktivität; Serverlimit wird oben angezeigt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.62f)
+                    )
+                }
+            }
+
+            VoiceTranscriptCard(
+                title = "Du",
+                text = uiState.partialTranscript.ifBlank { uiState.finalTranscript.ifBlank { "Noch keine Sprache erkannt." } },
+                accent = NeonCyan
+            )
+            VoiceTranscriptCard(
+                title = "BamaChat",
+                text = uiState.assistantTranscript.ifBlank { "Die Antwort erscheint hier während der Unterhaltung." },
+                accent = NeonPurple
+            )
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White.copy(alpha = 0.05f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Default.PrivacyTip, null, tint = NeonGreen, modifier = Modifier.size(20.dp))
+                    Column {
+                        Text("Datenschutz", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            uiState.privacyLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.72f)
+                        )
+                    }
+                }
+            }
+
+            if (uiState.mode == com.example.bamachat.voice.VoiceMode.LIVE && !uiState.realtimeAvailable) {
+                Text(
+                    runtimePresentation.unavailableNotice,
+                    color = NeonPink,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilledIconButton(
+                    onClick = onMicrophone,
+                    enabled = uiState.mode != VoiceMode.LIVE || uiState.realtimeAvailable,
+                    modifier = Modifier.size(56.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (isListening) NeonPink else NeonPurple
+                    )
+                ) {
+                    Icon(
+                        if ((uiState.mode == VoiceMode.LIVE && uiState.microphoneMuted) || isListening) {
+                            Icons.Default.MicOff
+                        } else {
+                            Icons.Default.Mic
+                        },
+                        contentDescription = if (isListening) {
+                            runtimePresentation.stopInputActionDescription ?: "Spracheingabe beenden"
+                        } else {
+                            runtimePresentation.startInputActionDescription ?: "Spracheingabe starten"
+                        }
+                    )
+                }
+                FilledTonalIconButton(
+                    onClick = onStopSpeaking,
+                    enabled = uiState.state == VoiceSessionState.Speaking ||
+                        uiState.state == VoiceSessionState.Thinking,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = "Sprachausgabe stoppen")
+                }
+                if (isListening) {
+                    FilledTonalIconButton(
+                        onClick = onCancelListening,
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Spracheingabe abbrechen")
+                    }
+                }
+                FilledTonalButton(
+                    onClick = onEndConversation,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Icon(Icons.Default.CallEnd, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Beenden")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+private fun formatVoiceDuration(seconds: Long): String =
+    "%02d:%02d".format(Locale.ROOT, seconds / 60L, seconds % 60L)
+
+private const val KEY_LIVE_VOICE_PRIVACY_CONFIRMED = "voice_live_privacy_confirmed"
+
+@Composable
+private fun VoiceProviderBadge(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White.copy(alpha = 0.06f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+internal fun ChatProviderStatusChip(
+    status: com.example.bamachat.ui.viewmodel.ChatProviderRuntimeStatus,
+    cornerRadius: Dp,
+    chipAlpha: Float,
+    onClick: () -> Unit
+) {
+    val foreground = if (status.valid) Color.White else MaterialTheme.colorScheme.onErrorContainer
+    Surface(
+        shape = RoundedCornerShape(cornerRadius),
+        color = if (status.valid) {
+            Color.White.copy(alpha = chipAlpha)
+        } else {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f)
+        },
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (status.valid) Color.White.copy(alpha = 0.2f) else MaterialTheme.colorScheme.error
+        ),
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .widthIn(max = 240.dp)
+            .testTag("chat_provider_status")
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = buildString {
+                    append("Chat-Anbieter: ${status.providerName}. ")
+                    status.modelName?.let { append("Modell: $it. ") }
+                    append("${status.badge}. ")
+                    if (!status.valid) append("Auswahl nicht verfügbar. ")
+                    append("Anbieter und Modell auswählen")
+                }
+            }
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Column(Modifier.weight(1f, fill = false)) {
+                Text(
+                    text = status.providerName,
+                    color = foreground,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                status.modelName?.let { model ->
+                    Text(
+                        text = model,
+                        color = foreground.copy(alpha = if (status.valid) 0.78f else 1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Text(
+                text = status.badge,
+                color = foreground.copy(alpha = if (status.valid) 0.82f else 1f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
+            Icon(
+                Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                tint = foreground,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceTranscriptCard(
+    title: String,
+    text: String,
+    accent: Color
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = accent.copy(alpha = 0.08f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.3f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, color = accent, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+            Text(
+                text,
+                color = Color.White.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 5,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 @Composable
 private fun LockScreen(primaryColorInt: Int, onUnlock: () -> Unit) {
     Box(
@@ -1207,23 +1142,25 @@ private fun ChatContent(
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
     isListening: Boolean,
+    voiceUiState: VoiceSessionUiState,
     voicePushToTalkEnabled: Boolean,
     onMicClick: () -> Unit,
     onMicPressStart: () -> Unit,
     onMicPressEnd: () -> Unit,
+    onVoicePanelClick: () -> Unit,
+    onStopVoice: () -> Unit,
     themeColor: Color,
     personaMood: PersonaMood,
     fontSize: Float,
     selectedPersona: ChatViewModel.Persona,
-    aiProvider: String,
-    selectableProviders: List<String>,
-    multiProviderEnabled: Boolean,
-    onSelectProvider: (String) -> Unit,
+    chatProviderStatus: com.example.bamachat.ui.viewmodel.ChatProviderRuntimeStatus,
+    onOpenChatProviderSelection: () -> Unit,
     onPersonaClick: () -> Unit,
     onBottomNavRoute: (String) -> Unit,
     onSearchClick: () -> Unit,
     onMenuClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onOpenWorkspaceClick: () -> Unit = {},
     onMiniAppsClick: () -> Unit,
     onAgentHubClick: () -> Unit,
     onComposeLabClick: () -> Unit,
@@ -1243,7 +1180,9 @@ private fun ChatContent(
     onLoadOlderMessages: () -> Unit,
     uiDesignPreset: String,
     compactChatHeader: Boolean,
-    activeWorkspaceName: String,
+    chatWorkspaceId: String?,
+    chatWorkspaceName: String,
+    onLeaveWorkspace: () -> Unit,
     connectChatBottomBars: Boolean,
     glassEffectsEnabled: Boolean,
     uiCornerRoundnessScale: Float,
@@ -1276,12 +1215,35 @@ private fun ChatContent(
     val surfaceOpacity = uiSurfaceOpacity.coerceIn(0.55f, 1.0f)
     val density = LocalDensity.current
     val isKeyboardOpen = WindowInsets.ime.getBottom(density) > 0
+    val scrollScope = rememberCoroutineScope()
+    val nearBottomThresholdPx = with(density) { 56.dp.roundToPx() }
+    var autoFollowEnabled by remember(listState) { mutableStateOf(true) }
+    var programmaticScrollInProgress by remember(listState) { mutableStateOf(false) }
+    var explicitScrollInProgress by remember(listState) { mutableStateOf(false) }
+    var explicitScrollInterrupted by remember(listState) { mutableStateOf(false) }
+    val isNearBottom by remember(listState, nearBottomThresholdPx) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+            ChatScrollPolicy.isNearBottom(
+                totalItemsCount = layoutInfo.totalItemsCount,
+                lastVisibleItemIndex = lastVisibleItem?.index,
+                lastVisibleItemEndOffset = lastVisibleItem?.let { it.offset + it.size },
+                viewportEndOffset = layoutInfo.viewportEndOffset,
+                thresholdPx = nearBottomThresholdPx
+            )
+        }
+    }
+    val showScrollToBottomButton = ChatScrollPolicy.shouldShowScrollButton(
+        hasMessages = messages.isNotEmpty(),
+        isNearBottom = isNearBottom,
+        autoFollowEnabled = autoFollowEnabled
+    )
     var compactInputBarMode by remember { mutableStateOf(false) }
-    var compactBottomNavVisible by remember { mutableStateOf(true) }
     val headerVerticalPadding = if (compactChatHeader) 2.dp else 5.dp
     val headerBottomSpacer = if (compactChatHeader) 0.dp else 2.dp
     val headerTitleStyle = if (compactChatHeader) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge
-    val chatScrollCollapseConnection = remember(isKeyboardOpen, messages.isNotEmpty()) {
+    val chatScrollCollapseConnection = remember(isKeyboardOpen, messages.isNotEmpty(), listState) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (
@@ -1291,16 +1253,88 @@ private fun ChatContent(
                     available.y != 0f
                 ) {
                     compactInputBarMode = true
-                    compactBottomNavVisible = true
+                    if (explicitScrollInProgress) {
+                        explicitScrollInterrupted = true
+                    }
+                    autoFollowEnabled = false
                 }
                 return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            Triple(
+                listState.isScrollInProgress,
+                isNearBottom,
+                programmaticScrollInProgress
+            )
+        }.collect { (isScrollInProgress, nearBottom, isProgrammaticScroll) ->
+            autoFollowEnabled = ChatScrollPolicy.resolveAutoFollow(
+                previousAutoFollow = autoFollowEnabled,
+                isScrollInProgress = isScrollInProgress,
+                isProgrammaticScroll = isProgrammaticScroll,
+                isNearBottom = nearBottom
+            )
+        }
+    }
+    val latestMessage = messages.lastOrNull()
+    LaunchedEffect(
+        listState,
+        latestMessage,
+        messages.size,
+        isLoading,
+        isStreaming,
+        activeToolCalls.size,
+        hasOlderMessages,
+        autoFollowEnabled,
+        explicitScrollInProgress
+    ) {
+        if (!autoFollowEnabled || explicitScrollInProgress || latestMessage == null) {
+            return@LaunchedEffect
+        }
+        val expectedItemCount = messages.size + if (hasOlderMessages) 1 else 0
+        snapshotFlow { listState.layoutInfo.totalItemsCount }
+            .first { it >= expectedItemCount }
+        withFrameNanos { }
+        val targetIndex = ChatScrollPolicy.newestItemIndex(
+            listState.layoutInfo.totalItemsCount
+        ) ?: return@LaunchedEffect
+        programmaticScrollInProgress = true
+        try {
+            val farDistance = kotlin.math.abs(targetIndex - listState.firstVisibleItemIndex) > 8
+            listState.scrollToNewestItem(
+                targetIndex = targetIndex,
+                animated = !isStreaming && !farDistance
+            )
+        } finally {
+            programmaticScrollInProgress = false
+        }
+    }
+    val scrollToNewest: () -> Unit = {
+        if (!explicitScrollInProgress && messages.isNotEmpty()) {
+            explicitScrollInterrupted = false
+            explicitScrollInProgress = true
+            scrollScope.launch {
+                programmaticScrollInProgress = true
+                try {
+                    val expectedItemCount = messages.size + if (hasOlderMessages) 1 else 0
+                    val totalItemsCount = snapshotFlow { listState.layoutInfo.totalItemsCount }
+                        .first { it >= expectedItemCount }
+                    ChatScrollPolicy.newestItemIndex(totalItemsCount)?.let { targetIndex ->
+                        listState.scrollToNewestItem(targetIndex = targetIndex, animated = true)
+                    }
+                } finally {
+                    programmaticScrollInProgress = false
+                    explicitScrollInProgress = false
+                    autoFollowEnabled = !explicitScrollInterrupted
+                }
             }
         }
     }
     LaunchedEffect(messages.isEmpty()) {
         if (messages.isEmpty()) {
             compactInputBarMode = false
-            compactBottomNavVisible = true
         }
     }
     val backgroundGradient = remember(designPalette) {
@@ -1340,7 +1374,6 @@ private fun ChatContent(
     )
     val chatListBottomPadding = 18.dp
     var topMenuExpanded by remember { mutableStateOf(false) }
-    var providerMenuExpanded by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize().background(backgroundGradient)) {
         Scaffold(
@@ -1368,14 +1401,25 @@ private fun ChatContent(
                         ) {
                             CenterAlignedTopAppBar(
                                 title = {
-                                    Text(
-                                        text = "BamaChat · ${selectedPersona.displayName}",
-                                        style = headerTitleStyle,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    val inWorkspace = chatWorkspaceName.isNotBlank()
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = if (inWorkspace) chatWorkspaceName else "BamaChat \u00b7 ${selectedPersona.displayName}",
+                                            style = headerTitleStyle,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (inWorkspace) {
+                                            Text(
+                                                text = "Arbeitsbereich",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.White.copy(alpha = 0.7f),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                 },
                                 navigationIcon = {
                                     IconButton(onClick = onMenuClick) {
@@ -1383,9 +1427,9 @@ private fun ChatContent(
                                     }
                                 },
                                 actions = {
-                                    if (!usageStatus.isPremium) {
-                                        IconButton(onClick = onUpgradeClick) {
-                                            Icon(Icons.Default.Star, "Upgrade", tint = Color.White)
+                                    if (chatWorkspaceId != null) {
+                                        IconButton(onClick = onLeaveWorkspace) {
+                                            Icon(Icons.Default.Close, "Arbeitsbereich verlassen", tint = Color.White)
                                         }
                                     }
                                     IconButton(onClick = onPersonaClick) {
@@ -1398,7 +1442,10 @@ private fun ChatContent(
                                         Icon(Icons.Default.Share, "Teilen", tint = Color.White)
                                     }
                                     Box {
-                                        IconButton(onClick = { topMenuExpanded = true }) {
+                                        IconButton(
+                                            onClick = { topMenuExpanded = true },
+                                            modifier = Modifier.testTag("chat_more_button")
+                                        ) {
                                             Icon(Icons.Default.MoreVert, "Mehr", tint = Color.White)
                                         }
                                         DropdownMenu(
@@ -1446,6 +1493,7 @@ private fun ChatContent(
                                                 }
                                             )
                                             DropdownMenuItem(
+                                                modifier = Modifier.testTag("chat_settings_button"),
                                                 text = { Text("Einstellungen") },
                                                 leadingIcon = { Icon(Icons.Default.Settings, null) },
                                                 onClick = {
@@ -1453,6 +1501,38 @@ private fun ChatContent(
                                                     onSettingsClick()
                                                 }
                                             )
+                                            if (!usageStatus.isPremium) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Upgrade") },
+                                                    leadingIcon = { Icon(Icons.Default.Star, null) },
+                                                    onClick = {
+                                                        topMenuExpanded = false
+                                                        onUpgradeClick()
+                                                    }
+                                                )
+                                            }
+                                            DropdownMenuItem(
+                                                text = { Text("Design: $designName") },
+                                                leadingIcon = { Icon(Icons.Default.Palette, null) },
+                                                onClick = { topMenuExpanded = false },
+                                                enabled = false
+                                            )
+                                            if (activeExtensionsLabel.isNotBlank()) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Extensions: $activeExtensionsLabel") },
+                                                    leadingIcon = { Icon(Icons.Default.Extension, null) },
+                                                    onClick = { topMenuExpanded = false },
+                                                    enabled = false
+                                                )
+                                            }
+                                            if (!usageStatus.isPremium) {
+                                                DropdownMenuItem(
+                                                    text = { Text("Plan: ${usageStatus.tierLabel} · ${usageStatus.textUsed}/${usageStatus.textLimit} · Credits ${usageStatus.creditsBalance}") },
+                                                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                                                    onClick = { topMenuExpanded = false },
+                                                    enabled = false
+                                                )
+                                            }
                                         }
                                     }
                                 },
@@ -1466,138 +1546,12 @@ private fun ChatContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Box {
-                                    Surface(
-                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                                        modifier = Modifier
-                                            .semantics {
-                                                role = Role.Button
-                                                contentDescription = "Provider wechseln"
-                                            }
-                                            .clickable { providerMenuExpanded = true }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "Provider: $aiProvider",
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                            )
-                                            Spacer(Modifier.width(4.dp))
-                                            Icon(
-                                                Icons.Default.ArrowDropDown,
-                                                contentDescription = "Provider wählen",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                    DropdownMenu(
-                                        expanded = providerMenuExpanded,
-                                        onDismissRequest = { providerMenuExpanded = false }
-                                    ) {
-                                        selectableProviders.forEach { providerOption ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        text = if (providerOption == aiProvider) "✓ $providerOption" else providerOption
-                                                    )
-                                                },
-                                                onClick = {
-                                                    providerMenuExpanded = false
-                                                    onSelectProvider(providerOption)
-                                                }
-                                            )
-                                        }
-                                        if (multiProviderEnabled) {
-                                            HorizontalDivider()
-                                            // P2-4: render the auto-fallback note as a non-clickable
-                                            // info row instead of a DropdownMenuItem so it isn't
-                                            // mistaken for a selectable provider.
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Info,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(18.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-                                                )
-                                                Text(
-                                                    text = "Auto-Fallback ist aktiv",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                    color = Color.Black.copy(alpha = 0.24f),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        when (designPreset) {
-                                            ChatDesignPreset.GLASS -> Color(0xFF9FCBFF).copy(alpha = 0.7f)
-                                            ChatDesignPreset.EDITORIAL -> Color(0xFFFFB08A).copy(alpha = 0.7f)
-                                            ChatDesignPreset.NOIR -> Color(0xFF86A8FF).copy(alpha = 0.7f)
-                                            ChatDesignPreset.SOLAR -> Color(0xFFFFC386).copy(alpha = 0.7f)
-                                            ChatDesignPreset.DASHBOARD -> Color(0xFF7DD3FC).copy(alpha = 0.7f)
-                                            ChatDesignPreset.CURRENT -> Color.White.copy(alpha = 0.35f)
-                                        }
-                                    )
-                                ) {
-                                    Text(
-                                        text = "Design: $designName",
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                        color = Color.White,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1
-                                    )
-                                }
-                                // P1-1: Workspace chip — read-only here. Tap opens settings → workspaces.
-                                if (activeWorkspaceName.isNotBlank()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            Color.White.copy(alpha = 0.22f)
-                                        ),
-                                        modifier = Modifier.clickable { onSettingsClick() }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Folder,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(Modifier.width(6.dp))
-                                            Text(
-                                                text = activeWorkspaceName,
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.widthIn(max = 120.dp)
-                                            )
-                                        }
-                                    }
-                                }
+                                ChatProviderStatusChip(
+                                    status = chatProviderStatus,
+                                    cornerRadius = designTokens.chipCornerRadius,
+                                    chipAlpha = designTokens.chipAlpha,
+                                    onClick = onOpenChatProviderSelection
+                                )
                                 Surface(
                                     shape = RoundedCornerShape(designTokens.chipCornerRadius),
                                     color = personaMood.cardSurface.copy(alpha = designTokens.bubbleSurfaceAlpha),
@@ -1625,69 +1579,7 @@ private fun ChatContent(
                                     }
                                 }
                             }
-                            if (activeExtensionsLabel.isNotBlank() || lastAppliedExtensionsLabel.isNotBlank()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 0.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (activeExtensionsLabel.isNotBlank()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                            color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                                        ) {
-                                            Text(
-                                                text = "Extensions: $activeExtensionsLabel",
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                    if (lastAppliedExtensionsLabel.isNotBlank()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                            color = Color(0xFF15344E).copy(alpha = 0.65f),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, themeColor.copy(alpha = 0.42f))
-                                        ) {
-                                            Text(
-                                                text = "Modus: $lastAppliedExtensionsLabel",
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            if (!usageStatus.isPremium) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 0.dp),
-                                    horizontalArrangement = Arrangement.Start
-                                ) {
-                                    Surface(
-                                        modifier = Modifier.clickable { onUpgradeClick() },
-                                        shape = RoundedCornerShape(designTokens.chipCornerRadius),
-                                        color = Color.White.copy(alpha = designTokens.chipAlpha),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                                    ) {
-                                        Text(
-                                            text = "${usageStatus.tierLabel}-Plan · Nachrichten ${usageStatus.textUsed}/${usageStatus.textLimit} · Credits ${usageStatus.creditsBalance}",
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-                            }
+
                             Spacer(Modifier.height(headerBottomSpacer))
                         }
                     }
@@ -1708,7 +1600,7 @@ private fun ChatContent(
                     ) { showEmpty ->
                         if (showEmpty) {
                             Box(modifier = Modifier.fillMaxSize().graphicsLayer(alpha = messageContentAlpha)) {
-                                EmptyChatState(themeColor, selectedPersona)
+                                EmptyChatState(themeColor, selectedPersona, chatWorkspaceName)
                             }
                         } else {
                             LazyColumn(
@@ -1778,6 +1670,23 @@ private fun ChatContent(
                         )
                     }
                 }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(if (messages.isEmpty()) 0.dp else 60.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = showScrollToBottomButton,
+                        enter = fadeIn(tween(140)) + scaleIn(tween(160), initialScale = 0.82f),
+                        exit = fadeOut(tween(100)) + scaleOut(tween(120), targetScale = 0.82f)
+                    ) {
+                        ChatScrollToBottomButton(
+                            themeColor = themeColor,
+                            onClick = scrollToNewest
+                        )
+                    }
+                }
                 Box {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         // P1-1: Stop button visible only while generation/streaming is in flight.
@@ -1834,13 +1743,17 @@ private fun ChatContent(
                         selectedImageUri = selectedImageUri,
                         onClearImage = onClearImage,
                         isListening = isListening,
+                        voiceUiState = voiceUiState,
                         voicePushToTalkEnabled = voicePushToTalkEnabled,
                         onMicClick = onMicClick,
                         onMicPressStart = onMicPressStart,
                         onMicPressEnd = onMicPressEnd,
+                        onVoicePanelClick = onVoicePanelClick,
+                        onStopVoice = onStopVoice,
                         themeColor = themeColor,
                         surfaceColor = personaMood.cardSurface,
                         isLoading = isLoading,
+                        onStopGeneration = onStopGeneration,
                         designTokens = designTokens,
                         connectChatBottomBars = connectChatBottomBars,
                         glassEffectsEnabled = glassEffectsEnabled,
@@ -1851,26 +1764,10 @@ private fun ChatContent(
                         selectedExtensionQuickAction = selectedExtensionQuickAction,
                         onSelectExtensionQuickAction = onSelectExtensionQuickAction,
                         compactMode = compactInputBarMode,
-                        onCompactBottomNavVisibilityChange = { compactBottomNavVisible = it },
                         promptTemplates = com.example.bamachat.ui.component.defaultPromptTemplates,
                         onSelectPromptTemplate = {}
                     )
                     }
-                }
-                AnimatedVisibility(
-                    visible = !isKeyboardOpen && (!compactInputBarMode || compactBottomNavVisible),
-                    enter = fadeIn(tween(160)) + expandVertically(animationSpec = tween(180)),
-                    exit = fadeOut(tween(120)) + shrinkVertically(animationSpec = tween(150))
-                ) {
-                    BamaChatBottomNav(
-                        currentRoute = "chat",
-                        designPreset = uiDesignPreset,
-                        onNavigate = onBottomNavRoute,
-                        attachedToComposer = true,
-                        cornerRoundnessScale = uiCornerScale,
-                        shadowIntensityScale = uiShadowScale,
-                        surfaceOpacity = surfaceOpacity
-                    )
                 }
                 }
             }
@@ -1879,57 +1776,70 @@ private fun ChatContent(
 }
 
 @Composable
-private fun ToolCallsDisplay(activeToolCalls: List<ToolCallProgress>, themeColor: Color) {
-    Column(
+private fun ChatScrollToBottomButton(
+    themeColor: Color,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        targetValue = if (isFocused) Color.White else themeColor.copy(alpha = 0.72f),
+        animationSpec = tween(120),
+        label = "scrollToBottomBorder"
+    )
+    FloatingActionButton(
+        onClick = onClick,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+            .size(52.dp)
+            .onFocusChanged { isFocused = it.isFocused }
+            .border(if (isFocused) 2.dp else 1.dp, borderColor, CircleShape)
+            .semantics {
+                contentDescription = "Zur neuesten Nachricht"
+                role = Role.Button
+            },
+        shape = CircleShape,
+        containerColor = Color(0xFF181321).copy(alpha = 0.97f),
+        contentColor = themeColor,
+        elevation = FloatingActionButtonDefaults.elevation(
+            defaultElevation = 8.dp,
+            pressedElevation = 4.dp,
+            focusedElevation = 10.dp,
+            hoveredElevation = 10.dp
+        )
     ) {
-        activeToolCalls.forEach { tc ->
-            val icon = when (tc.status) {
-                ToolCallStatus.RUNNING -> "◌"
-                ToolCallStatus.DONE -> "✓"
-                ToolCallStatus.ERROR -> "✗"
-            }
-            val surface = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = surface,
-                tonalElevation = 2.dp
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(icon, fontSize = 14.sp)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = tc.toolName,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = tc.arguments.take(80),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    if (tc.status == ToolCallStatus.RUNNING) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = themeColor
-                        )
-                    }
-                }
-            }
-        }
+        Icon(
+            imageVector = Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            modifier = Modifier.size(28.dp)
+        )
     }
 }
 
+private suspend fun LazyListState.scrollToNewestItem(
+    targetIndex: Int,
+    animated: Boolean
+) {
+    var targetItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+    if (targetItem == null) {
+        if (animated) {
+            animateScrollToItem(targetIndex)
+        } else {
+            scrollToItem(targetIndex)
+        }
+        withFrameNanos { }
+        targetItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == targetIndex }
+    }
 
+    val remainingDistancePx = ChatScrollPolicy.remainingScrollToBottomPx(
+        totalItemsCount = layoutInfo.totalItemsCount,
+        lastVisibleItemIndex = targetItem?.index,
+        lastVisibleItemEndOffset = targetItem?.let { it.offset + it.size },
+        viewportEndOffset = layoutInfo.viewportEndOffset
+    ) ?: return
+    if (remainingDistancePx <= 0) return
+
+    if (animated) {
+        animateScrollBy(remainingDistancePx.toFloat())
+    } else {
+        scrollBy(remainingDistancePx.toFloat())
+    }
+}

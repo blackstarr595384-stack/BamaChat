@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -25,12 +28,19 @@ import androidx.navigation.navArgument
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.example.bamachat.ui.component.BamaChatBottomNav
+import com.example.bamachat.ui.navigation.BottomNavigationRoutePolicy
+import com.example.bamachat.ui.navigation.BottomNavigationUiState
+import com.example.bamachat.ui.navigation.SettingsNavigationPolicy
+import com.example.bamachat.ui.navigation.SettingsNavigationRoutes
+import com.example.bamachat.ui.navigation.SettingsOverviewNavigationAction
 import com.example.bamachat.ui.viewmodel.AuthViewModel
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.ChatViewModel
 import com.example.bamachat.ui.viewmodel.CollabViewModel
 import com.example.bamachat.ui.viewmodel.ExtensionManagerViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.util.LegalPolicy
+import kotlinx.coroutines.launch
 
 private object Routes {
     const val ONBOARDING = "onboarding"
@@ -40,22 +50,30 @@ private object Routes {
     const val HOME_HUB = "home_hub"
     const val CHAT = "chat"
     const val PROFILE = "profile"
-    const val SETTINGS = "settings"
-    const val SETTINGS_WITH_SECTION = "settings?section={section}"
+    const val SETTINGS = SettingsNavigationRoutes.OVERVIEW
+    const val SETTINGS_VOICE_AUDIO = SettingsNavigationRoutes.VOICE_AUDIO
+    const val SETTINGS_AI_MODELS = SettingsNavigationRoutes.AI_MODELS
+    const val SETTINGS_CHAT_PROVIDER = SettingsNavigationRoutes.CHAT_PROVIDER
+    const val SETTINGS_PROVIDERS = SettingsNavigationRoutes.PROVIDERS
+    const val SETTINGS_PROVIDER_ADD = SettingsNavigationRoutes.PROVIDER_ADD
+    const val SETTINGS_PROVIDER_EDIT = SettingsNavigationRoutes.PROVIDER_EDIT_PATTERN
+    const val SETTINGS_WITH_SECTION = SettingsNavigationRoutes.LEGACY_SECTION_PATTERN
     const val HELP = "help"
     const val HERMES_CODING_ASSISTANT = "hermes_coding_assistant"
     const val REALTIME_COLLAB = "realtime_collab"
     const val MINI_APPS = "mini_apps"
     const val AGENT_HUB = "agent_hub"
     const val EXTENSIONS = "extensions"
+    const val GITHUB_INTELLIGENCE = "github_intelligence"
     const val COMPOSE_LAB = "compose_lab"
     const val COMPOSE_PLAYGROUND = "compose_playground"
     const val KNOWLEDGE_GRAPH = "knowledge_graph"
+    const val WORKSPACES = "workspaces"
     const val CHAT_SEARCH = "chat_search"
     const val COMPOSE_ARG_DEMO = "compose_arg_demo/{demoId}"
 
     fun settingsRoute(section: String?): String =
-        if (section.isNullOrBlank()) SETTINGS else "$SETTINGS?section=$section"
+        if (section.isNullOrBlank()) SETTINGS else SettingsNavigationRoutes.legacySection(section)
 }
 
 private val topLevelRoutes = listOf(
@@ -63,17 +81,22 @@ private val topLevelRoutes = listOf(
     Routes.HOME_HUB,
     Routes.CHAT,
     Routes.PROFILE,
-    Routes.SETTINGS
+    Routes.SETTINGS,
+    Routes.WORKSPACES
 )
 
-private fun normalizeRoute(route: String?): String? = route?.substringBefore("?")?.substringBefore("/")
+private fun normalizeRoute(route: String?): String? = BottomNavigationRoutePolicy.normalize(route)
 
 private fun topLevelRank(route: String?): Int = topLevelRoutes.indexOf(normalizeRoute(route))
+
+internal fun shouldEndLiveVoiceSession(previousUid: String?, currentUid: String?): Boolean =
+    previousUid != null && previousUid != currentUid
 
 @Composable
 fun BamaChatApp() {
     val chatViewModel: ChatViewModel = hiltViewModel()
     val settingsViewModel: SettingsViewModel = hiltViewModel()
+    val voiceViewModel: BamaVoiceViewModel = hiltViewModel()
     val authViewModel: AuthViewModel = hiltViewModel()
     val collabViewModel: CollabViewModel = hiltViewModel()
     val extensionManagerViewModel: ExtensionManagerViewModel = hiltViewModel()
@@ -90,12 +113,39 @@ fun BamaChatApp() {
     val uiSurfaceOpacity by settingsViewModel.uiSurfaceOpacity.collectAsState()
     val developerRealtimeCollabTesting by settingsViewModel.developerRealtimeCollabTesting.collectAsState()
     val isAuthenticated by authViewModel.isAuthenticated.collectAsState()
+    val firebaseUser by authViewModel.firebaseUser.collectAsState()
+    var previousFirebaseUid by remember { mutableStateOf(firebaseUser?.uid) }
+    LaunchedEffect(firebaseUser?.uid) {
+        val currentUid = firebaseUser?.uid
+        if (shouldEndLiveVoiceSession(previousFirebaseUid, currentUid)) {
+            voiceViewModel.endLiveSession()
+        }
+        previousFirebaseUid = currentUid
+    }
     val onboardingCompleted by settingsViewModel.onboardingCompleted.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val normalizedRoute = normalizeRoute(currentRoute)
+    val destinationHierarchyRoutes = navBackStackEntry
+        ?.destination
+        ?.hierarchy
+        ?.map { it.route }
+        ?.toList()
+        .orEmpty()
+    var previousBottomNavigationState by remember { mutableStateOf(BottomNavigationUiState()) }
+    val bottomNavigationState = BottomNavigationRoutePolicy.resolve(
+        previousState = previousBottomNavigationState,
+        destinationHierarchyRoutes = destinationHierarchyRoutes
+    )
+    val fullscreenSettingsSubpage = destinationHierarchyRoutes.any(SettingsNavigationPolicy::isFullscreenSubpage)
+    SideEffect {
+        if (previousBottomNavigationState != bottomNavigationState) {
+            previousBottomNavigationState = bottomNavigationState
+        }
+    }
     val context = LocalContext.current
     val activity = context as? Activity
+    val scope = rememberCoroutineScope()
     val startDestination = remember(onboardingCompleted, legalAcknowledgedVersion) {
         when {
             !onboardingCompleted -> Routes.ONBOARDING
@@ -113,6 +163,18 @@ fun BamaChatApp() {
         }
     }
 
+    fun navigateWelcomeThenAuth() {
+        navController.navigate(Routes.WELCOME) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                inclusive = true
+            }
+            launchSingleTop = true
+        }
+        navController.navigate(Routes.AUTH) {
+            launchSingleTop = true
+        }
+    }
+
     fun navigateHomeHub() {
         if (!navController.popBackStack(Routes.HOME_HUB, false)) {
             navController.navigate(Routes.HOME_HUB) {
@@ -125,11 +187,42 @@ fun BamaChatApp() {
         }
     }
 
+    fun navigateSettingsOverview() {
+        when (SettingsNavigationPolicy.overviewAction(currentRoute)) {
+            SettingsOverviewNavigationAction.None -> Unit
+            SettingsOverviewNavigationAction.PopToOverview -> {
+                if (!navController.popBackStack(Routes.SETTINGS, false)) {
+                    navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                }
+            }
+            SettingsOverviewNavigationAction.Navigate -> {
+                navController.navigate(Routes.SETTINGS) {
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
+
+    fun popSettingsFlowDestinations() {
+        while (SettingsNavigationPolicy.isSettingsFlowRoute(navController.currentDestination?.route)) {
+            if (!navController.popBackStack()) return
+        }
+    }
+
     fun navigateTopLevel(route: String) {
         val normalizedTarget = normalizeRoute(route) ?: route
+        if (normalizedTarget == Routes.SETTINGS) {
+            navigateSettingsOverview()
+            return
+        }
         if (normalizedTarget == normalizedRoute && !route.contains("?")) return
+        if (SettingsNavigationPolicy.shouldExitSettingsFlow(currentRoute, route)) {
+            popSettingsFlowDestinations()
+            if (normalizeRoute(navController.currentDestination?.route) == normalizedTarget) return
+        }
         if (normalizedTarget == Routes.HOME_HUB) {
             navigateHomeHub()
+            popSettingsFlowDestinations()
             return
         }
         navController.navigate(route) {
@@ -139,10 +232,11 @@ fun BamaChatApp() {
             launchSingleTop = true
             restoreState = true
         }
+        popSettingsFlowDestinations()
     }
 
-    LaunchedEffect(isAuthenticated, normalizedRoute) {
-        if (isAuthenticated && normalizedRoute == Routes.AUTH) {
+    LaunchedEffect(firebaseUser?.uid, normalizedRoute) {
+        if (firebaseUser != null && normalizedRoute == Routes.AUTH) {
             navController.navigate(Routes.HOME_HUB) {
                 popUpTo(Routes.AUTH) { inclusive = true }
                 launchSingleTop = true
@@ -155,14 +249,33 @@ fun BamaChatApp() {
         }
     }
 
-    val bottomNavRoutes = topLevelRoutes.filterNot { it == Routes.CHAT }.toSet()
-    val shouldRenderBottomNav = normalizedRoute in bottomNavRoutes
-
-    Box(modifier = Modifier.fillMaxSize()) {
+    Scaffold(
+        bottomBar = {
+            if (bottomNavigationState.visible) {
+                BamaChatBottomNav(
+                    currentRoute = bottomNavigationState.selectedRoute,
+                    designPreset = designPreset,
+                    attachedToComposer = bottomNavigationState.selectedRoute == Routes.CHAT && connectChatBottomBars,
+                    cornerRoundnessScale = uiCornerRoundnessScale,
+                    shadowIntensityScale = uiShadowIntensityScale,
+                    surfaceOpacity = uiSurfaceOpacity,
+                    onNavigate = { route -> navigateTopLevel(route) }
+                )
+            }
+        },
+        contentWindowInsets = if (fullscreenSettingsSubpage) {
+            WindowInsets(0, 0, 0, 0)
+        } else {
+            ScaffoldDefaults.contentWindowInsets
+        },
+        containerColor = Color.Transparent
+    ) { innerPadding ->
         NavHost(
             navController = navController,
             startDestination = startDestination,
-            modifier = Modifier.fillMaxSize().statusBarsPadding(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
             enterTransition = {
                 val from = normalizeRoute(initialState.destination.route)
                 val to = normalizeRoute(targetState.destination.route)
@@ -305,9 +418,20 @@ fun BamaChatApp() {
             composable(Routes.AUTH) {
                 AuthScreen(
                     authViewModel = authViewModel,
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        if (!navController.popBackStack()) {
+                            navController.navigate(Routes.WELCOME) {
+                                launchSingleTop = true
+                            }
+                        }
+                    },
                     onOpenHelp = { navController.navigate(Routes.HELP) },
                     onAuthenticated = {
+                        navController.navigate(Routes.HOME_HUB) {
+                            popUpTo(Routes.AUTH) { inclusive = true }
+                        }
+                    },
+                    onContinueAsGuest = {
                         navController.navigate(Routes.HOME_HUB) {
                             popUpTo(Routes.AUTH) { inclusive = true }
                         }
@@ -319,12 +443,23 @@ fun BamaChatApp() {
                     providerName = aiProvider,
                     designPreset = designPreset,
                     activeWorkspaceName = activeWorkspaceName,
-                    onOpenMenu = { navController.navigate(Routes.CHAT) },
-                    onOpenChat = { navController.navigate(Routes.CHAT) },
-                    onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    onOpenMenu = {
+                        chatViewModel.setChatWorkspaceContext(null)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(false)
+                        navController.navigate(Routes.CHAT)
+                    },
+                    onOpenChat = {
+                        chatViewModel.setChatWorkspaceContext(null)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(false)
+                        scope.launch {
+                            chatViewModel.openOrCreateNormalConversation()
+                            navController.navigate(Routes.CHAT)
+                        }
+                    },
+                    onOpenSettings = { navigateSettingsOverview() },
                     onOpenProviderSettings = { navController.navigate(Routes.settingsRoute("ai")) },
                     onOpenDesignSettings = { navController.navigate(Routes.settingsRoute("chat")) },
-                    onOpenWorkspaceSettings = { navController.navigate(Routes.settingsRoute("workspaces")) },
+                    onOpenWorkspaceSettings = { navController.navigate(Routes.WORKSPACES) },
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenExtensions = { navController.navigate(Routes.EXTENSIONS) },
@@ -341,12 +476,71 @@ fun BamaChatApp() {
                 ChatScreen(
                     viewModel = chatViewModel,
                     settingsViewModel = settingsViewModel,
+                    voiceViewModel = voiceViewModel,
                     onBottomNavRoute = { route -> navigateTopLevel(route) },
                     onOpenMiniApps = { navController.navigate(Routes.MINI_APPS) },
                     onOpenAgentHub = { navController.navigate(Routes.AGENT_HUB) },
                     onOpenComposeLab = { navController.navigate(Routes.COMPOSE_LAB) },
-                    onSearchClick = { navController.navigate(Routes.CHAT_SEARCH) }
+                    onOpenWorkspace = { navController.navigate(Routes.WORKSPACES) },
+                    onSearchClick = { navController.navigate(Routes.CHAT_SEARCH) },
+                    onOpenSettings = { navigateSettingsOverview() },
+                    onOpenChatProviderSelection = {
+                        navController.navigate(Routes.SETTINGS_CHAT_PROVIDER) { launchSingleTop = true }
+                    }
                 )
+            }
+            composable(Routes.SETTINGS_VOICE_AUDIO) {
+                VoiceAudioSettingsScreen(
+                    settingsViewModel = settingsViewModel,
+                    voiceViewModel = voiceViewModel,
+                    cloudChatSyncUid = firebaseUser?.uid,
+                    onBack = { navController.popBackStack() },
+                    mcpServerManager = chatViewModel.mcpServerManager,
+                    mcpWorkflowManager = chatViewModel.mcpWorkflowManager
+                )
+            }
+            composable(Routes.SETTINGS_AI_MODELS) {
+                AiModelSettingsScreen(
+                    settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenChatProviderSelection = {
+                        navController.navigate(Routes.SETTINGS_CHAT_PROVIDER) { launchSingleTop = true }
+                    },
+                    onOpenProviderManagement = {
+                        navController.navigate(Routes.SETTINGS_PROVIDERS) { launchSingleTop = true }
+                    },
+                    onOpenLegacySettings = { navController.navigate(Routes.settingsRoute("ai")) }
+                )
+            }
+            composable(Routes.SETTINGS_CHAT_PROVIDER) {
+                ChatProviderSelectionScreen(
+                    onBack = { navController.popBackStack() },
+                    onManageProviders = {
+                        navController.navigate(Routes.SETTINGS_PROVIDERS) { launchSingleTop = true }
+                    }
+                )
+            }
+            composable(Routes.SETTINGS_PROVIDERS) {
+                ProviderManagementScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddProvider = {
+                        navController.navigate(Routes.SETTINGS_PROVIDER_ADD) { launchSingleTop = true }
+                    },
+                    onOpenProvider = { providerId ->
+                        navController.navigate(SettingsNavigationRoutes.providerEditor(providerId.value)) {
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
+            composable(Routes.SETTINGS_PROVIDER_ADD) {
+                ProviderEditorScreen(onBack = { navController.popBackStack() })
+            }
+            composable(
+                route = Routes.SETTINGS_PROVIDER_EDIT,
+                arguments = listOf(navArgument("providerId") { type = NavType.StringType })
+            ) {
+                ProviderEditorScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 route = Routes.SETTINGS_WITH_SECTION,
@@ -361,11 +555,22 @@ fun BamaChatApp() {
                 val initialSection = backStackEntry.arguments
                     ?.getString("section")
                     ?.takeIf { it.isNotBlank() }
-                SettingsScreen(
+                SettingsOverviewScreen(
                     settingsViewModel = settingsViewModel,
+                    voiceViewModel = voiceViewModel,
+                    cloudChatSyncUid = firebaseUser?.uid,
                     onBack = { navController.popBackStack() },
                     onOpenProfile = { navController.navigate(Routes.PROFILE) },
-                    initialSection = initialSection,
+                    onOpenAiModels = {
+                        navController.navigate(Routes.SETTINGS_AI_MODELS) { launchSingleTop = true }
+                    },
+                    onOpenVoiceAudio = {
+                        navController.navigate(Routes.SETTINGS_VOICE_AUDIO) {
+                            launchSingleTop = true
+                        }
+                    },
+                    initialLegacySection = initialSection,
+                    onOpenWorkspaceSettings = { navController.navigate(Routes.WORKSPACES) },
                     mcpServerManager = chatViewModel.mcpServerManager,
                     mcpWorkflowManager = chatViewModel.mcpWorkflowManager
                 )
@@ -388,12 +593,8 @@ fun BamaChatApp() {
                     authViewModel = authViewModel,
                     designPreset = designPreset,
                     onBack = { navController.popBackStack() },
-                    onRequireLogin = {
-                        navController.navigate(Routes.AUTH) {
-                            popUpTo(navController.graph.startDestinationId) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    }
+                    onRequireLogin = { navigateWelcomeThenAuth() },
+                    onOpenSettings = { navigateSettingsOverview() }
                 )
             }
             composable(Routes.MINI_APPS) {
@@ -412,12 +613,38 @@ fun BamaChatApp() {
                 ExtensionManagerScreen(
                     extensionManagerViewModel = extensionManagerViewModel,
                     designPreset = designPreset,
+                    onOpenGitHubIntelligence = {
+                        navController.navigate(Routes.GITHUB_INTELLIGENCE) { launchSingleTop = true }
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Routes.GITHUB_INTELLIGENCE) {
+                GitHubIntelligenceScreen(
                     onBack = { navController.popBackStack() }
                 )
             }
             composable(Routes.KNOWLEDGE_GRAPH) {
                 KnowledgeGraphScreen(
+                    ownerScope = chatViewModel.currentOwnerScope(),
                     onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Routes.WORKSPACES) {
+                WorkspaceScreen(
+                    settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenChat = { workspaceId ->
+                        settingsViewModel.setActiveWorkspace(workspaceId)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(true)
+                        chatViewModel.setChatWorkspaceContext(workspaceId)
+                        scope.launch {
+                            chatViewModel.openOrCreateWorkspaceConversation(workspaceId)
+                            navController.navigate(Routes.CHAT) {
+                                popUpTo(Routes.HOME_HUB)
+                            }
+                        }
+                    }
                 )
             }
             composable(Routes.COMPOSE_LAB) {
@@ -430,6 +657,8 @@ fun BamaChatApp() {
                 ChatSearchScreen(
                     onBack = { navController.popBackStack() },
                     onOpenConversation = { conversationId ->
+                        chatViewModel.setChatWorkspaceContext(null)
+                        settingsViewModel.setWorkspaceChatFilterEnabled(false)
                         navController.navigate(Routes.CHAT) {
                             popUpTo(Routes.HOME_HUB)
                         }
@@ -457,26 +686,6 @@ fun BamaChatApp() {
                     onBack = { navController.popBackStack() }
                 )
             }
-        }
-
-        // Bottom Navigation — positioned at bottom, no overlap
-        AnimatedVisibility(
-            visible = shouldRenderBottomNav,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-        ) {
-            BamaChatBottomNav(
-                currentRoute = normalizedRoute,
-                designPreset = designPreset,
-                attachedToComposer = normalizedRoute == Routes.CHAT && connectChatBottomBars,
-                cornerRoundnessScale = uiCornerRoundnessScale,
-                shadowIntensityScale = uiShadowIntensityScale,
-                surfaceOpacity = uiSurfaceOpacity,
-                onNavigate = { route -> navigateTopLevel(route) }
-            )
         }
     }
 }

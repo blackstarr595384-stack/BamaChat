@@ -7,7 +7,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -40,7 +42,8 @@ fun ProfileScreen(
     authViewModel: AuthViewModel,
     designPreset: String,
     onBack: () -> Unit,
-    onRequireLogin: () -> Unit
+    onRequireLogin: () -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val user by authViewModel.firebaseUser.collectAsStateWithLifecycle()
     val profile by authViewModel.profile.collectAsStateWithLifecycle()
@@ -50,6 +53,13 @@ fun ProfileScreen(
     val statusMessage by authViewModel.statusMessage.collectAsStateWithLifecycle()
 
     var nameInput by remember(profile?.displayName) { mutableStateOf(profile?.displayName.orEmpty()) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(user, isGuest) {
+        if (user == null && !isGuest) {
+            onRequireLogin()
+        }
+    }
 
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -81,10 +91,13 @@ fun ProfileScreen(
                 )
             )
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
+                .verticalScroll(scrollState)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header
@@ -106,8 +119,16 @@ fun ProfileScreen(
                     text = "👤 Profil",
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Einstellungen öffnen",
+                        tint = Color.White.copy(alpha = 0.7f)
+                    )
+                }
             }
 
             if (isGuest) {
@@ -391,8 +412,9 @@ fun ProfileScreen(
                         // Sign out
                         TextButton(
                             onClick = {
-                                authViewModel.signOut()
-                                onRequireLogin()
+                                authViewModel.signOut {
+                                    onRequireLogin()
+                                }
                             },
                             enabled = !isLoading,
                             modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -401,6 +423,40 @@ fun ProfileScreen(
                                 "Abmelden",
                                 color = NeonPink.copy(alpha = 0.7f),
                                 fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        // Delete account
+                        TextButton(
+                            onClick = { showDeleteConfirm = true },
+                            enabled = !isLoading,
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text(
+                                "Konto löschen",
+                                color = Color(0xFFD63031).copy(alpha = 0.7f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        // Delete confirmation dialog
+                        if (showDeleteConfirm) {
+                            AlertDialog(
+                                onDismissRequest = { showDeleteConfirm = false },
+                                title = { Text("Konto wirklich löschen?") },
+                                text = { Text("Diese Aktion löscht dein Konto und setzt lokale App-Daten zurück. Das kann nicht rückgängig gemacht werden.") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showDeleteConfirm = false
+                                            authViewModel.deleteAccount(onDeleted = onRequireLogin)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD63031))
+                                    ) { Text("Endgültig löschen") }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Abbrechen") }
+                                }
                             )
                         }
 

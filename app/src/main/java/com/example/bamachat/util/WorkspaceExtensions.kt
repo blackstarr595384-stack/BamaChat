@@ -32,6 +32,12 @@ enum class ExtensionCapability(
         description = "Darf Live-Web-Recherche durchführen.",
         risk = ExtensionRiskLevel.MEDIUM
     ),
+    GITHUB_READ(
+        key = "github_read",
+        label = "GitHub lesen",
+        description = "Darf freigegebene öffentliche Repository-Metadaten und Quelltexte ausschließlich lesend abrufen.",
+        risk = ExtensionRiskLevel.MEDIUM
+    ),
     FILE_IMPORT(
         key = "file_import",
         label = "Datei-Import",
@@ -204,14 +210,13 @@ object ExtensionCatalog {
         ExtensionManifest(
             id = "ext-repo-autopilot",
             name = "Repo Autopilot",
-            description = "Inventarisiert das Repo, schlägt Audit-Schritte vor und priorisiert Self-Optimierung.",
-            version = "1.0.0",
+            description = "Analysiert freigegebene GitHub-Repositorydaten und erstellt priorisierte, prüfbare Verbesserungsvorschläge. Keine automatischen Codeänderungen.",
+            version = "1.1.0",
             author = "Bama Labs",
             category = "Engineering",
             requiredCapabilities = setOf(
                 ExtensionCapability.CHAT_READ,
-                ExtensionCapability.WORKSPACE_EDIT,
-                ExtensionCapability.AUTOMATION_RUN
+                ExtensionCapability.GITHUB_READ
             ),
             optionalCapabilities = setOf(
                 ExtensionCapability.FILE_IMPORT,

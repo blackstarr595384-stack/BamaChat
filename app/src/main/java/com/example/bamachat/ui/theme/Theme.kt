@@ -1,7 +1,6 @@
 package com.example.bamachat.ui.theme
 
 import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -74,12 +73,15 @@ private val FuturisticLightColorScheme = lightColorScheme(
 @Composable
 fun BamaChatTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,  // Enabled for Samsung Galaxy S25 Ultra (Material You / One UI 7)
+    dynamicColor: Boolean? = null,  // null = read from settings
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
+    val prefs = context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    val useDynamicColor = dynamicColor ?: prefs.getBoolean("material_you_enabled", true)
+
     val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        useDynamicColor -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
         darkTheme -> FuturisticDarkColorScheme

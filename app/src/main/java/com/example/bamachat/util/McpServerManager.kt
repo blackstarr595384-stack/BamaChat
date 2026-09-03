@@ -7,6 +7,7 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class McpServerManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("mcp_servers", Context.MODE_PRIVATE)
@@ -14,6 +15,7 @@ class McpServerManager(private val context: Context) {
     private val gson = Gson()
     private val clients = mutableMapOf<String, McpClient>()
     private val manualConnectionStates = mutableMapOf<String, McpConnectionStatus>()
+    private val serverMutationLock = Any()
 
     private val _servers = MutableStateFlow(loadServers())
     val servers: StateFlow<List<McpServerConfig>> = _servers.asStateFlow()
@@ -55,7 +57,7 @@ class McpServerManager(private val context: Context) {
             manualConnectionStates[serverId] = McpConnectionStatus.ERROR
         }
         refreshTools()
-        _servers.value = _servers.value.toList()
+        _servers.update { it.toList() }
     }
 
     suspend fun stopServer(serverId: String) {
@@ -63,7 +65,7 @@ class McpServerManager(private val context: Context) {
         clients.remove(serverId)
         manualConnectionStates[serverId] = McpConnectionStatus.DISCONNECTED
         refreshTools()
-        _servers.value = _servers.value.toList()
+        _servers.update { it.toList() }
     }
 
     fun stopAll() {
@@ -163,7 +165,7 @@ class McpServerManager(private val context: Context) {
         }
         if (changed) {
             saveServers(merged)
-            _servers.value = merged
+            _servers.value = merged.toList()
         }
     }
 
@@ -183,28 +185,30 @@ class McpServerManager(private val context: Context) {
     }
 
     fun addServer(config: McpServerConfig) {
-        val current = _servers.value.toMutableList()
-        current.removeAll { it.id == config.id }
-        current.add(config)
-        saveServers(current)
-        _servers.value = current
+        synchronized(serverMutationLock) {
+            val updated = _servers.value.filterNot { it.id == config.id } + config
+            saveServers(updated)
+            _servers.value = updated
+        }
     }
 
     fun removeServer(serverId: String) {
         kotlinx.coroutines.runBlocking { stopServer(serverId) }
-        val current = _servers.value.toMutableList()
-        current.removeAll { it.id == serverId }
-        saveServers(current)
-        _servers.value = current
+        synchronized(serverMutationLock) {
+            val updated = _servers.value.filterNot { it.id == serverId }
+            saveServers(updated)
+            _servers.value = updated
+        }
     }
 
     fun toggleServer(serverId: String) {
-        val current = _servers.value.toMutableList()
-        val idx = current.indexOfFirst { it.id == serverId }
-        if (idx >= 0) {
-            current[idx] = current[idx].copy(enabled = !current[idx].enabled)
-            saveServers(current)
-            _servers.value = current
+        synchronized(serverMutationLock) {
+            val old = _servers.value
+            val updated = old.map { if (it.id == serverId) it.copy(enabled = !it.enabled) else it }
+            if (updated != old) {
+                saveServers(updated)
+                _servers.value = updated
+            }
         }
     }
 }

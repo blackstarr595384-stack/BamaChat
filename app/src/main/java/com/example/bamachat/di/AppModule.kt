@@ -3,17 +3,42 @@ package com.example.bamachat.di
 import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.bamachat.data.cloud.ChatCloudSyncGateway
+import com.example.bamachat.data.auth.AccountAuthenticationGateway
+import com.example.bamachat.data.auth.FirebaseAccountAuthenticationGateway
+import com.example.bamachat.data.cloud.ChatSyncPolicy
+import com.example.bamachat.data.cloud.AuthenticatedUidProvider
+import com.example.bamachat.data.cloud.FirebaseAuthenticatedUidProvider
+import com.example.bamachat.data.github.AndroidGitHubReadOnlyRepositoryGateway
+import com.example.bamachat.data.github.DisabledAgentDraftPrGateway
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.local.ChatDao
+import com.example.bamachat.data.local.ChatSessionScopeStore
+import com.example.bamachat.data.local.ConversationWorkspaceStore
+import com.example.bamachat.data.local.GuestScopeChatCleaner
+import com.example.bamachat.data.local.RoomGuestScopeChatCleaner
+import com.example.bamachat.data.local.LegacyScopeClaimer
+import com.example.bamachat.data.local.RoomLegacyScopeClaimer
 import com.example.bamachat.data.repository.ChatRepository
+import com.example.bamachat.data.provider.ProviderSecretStorage
+import com.example.bamachat.data.provider.ProviderSecretStore
+import com.example.bamachat.data.provider.local.ProviderDao
+import com.example.bamachat.data.provider.local.ProviderStore
+import com.example.bamachat.data.provider.local.RoomProviderStore
 import com.example.bamachat.service.ChatEngine
 import com.example.bamachat.service.ConversationService
+import com.example.bamachat.service.AndroidGitHubProposalAnalyzer
+import com.example.bamachat.service.GitHubProposalAnalyzer
 import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
+import com.example.bamachat.shared.core.github.GitHubReadOnlyRepositoryGateway
+import com.example.bamachat.shared.core.github.AgentDraftPrGateway
+import com.example.bamachat.shared.core.github.RepositoryContextBuilder
 import com.example.bamachat.ui.viewmodel.ApiManager
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
+import com.example.bamachat.data.cloud.AccountCloudOperationGate
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -45,8 +70,64 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideProviderDao(db: ChatDatabase): ProviderDao = db.providerDao()
+
+    @Provides
+    @Singleton
+    fun provideProviderStore(dao: ProviderDao): ProviderStore = RoomProviderStore(dao)
+
+    @Provides
+    @Singleton
+    fun provideProviderSecretStorage(store: ProviderSecretStore): ProviderSecretStorage = store
+
+    @Provides
+    @Singleton
     fun provideChatRepository(dao: ChatDao): ChatRepository {
         return ChatRepository(dao)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGuestScopeChatCleaner(cleaner: RoomGuestScopeChatCleaner): GuestScopeChatCleaner = cleaner
+
+    @Provides
+    @Singleton
+    fun provideLegacyScopeClaimer(claimer: RoomLegacyScopeClaimer): LegacyScopeClaimer = claimer
+
+    @Provides
+    @Singleton
+    fun provideAuthenticatedUidProvider(
+        provider: FirebaseAuthenticatedUidProvider
+    ): AuthenticatedUidProvider = provider
+
+    @Provides
+    @Singleton
+    fun provideAccountAuthenticationGateway(
+        gateway: FirebaseAccountAuthenticationGateway
+    ): AccountAuthenticationGateway = gateway
+
+    @Provides
+    @Singleton
+    fun provideChatCloudSyncGateway(
+        scopeStore: ChatSessionScopeStore,
+        uidProvider: AuthenticatedUidProvider,
+        operationGate: AccountCloudOperationGate
+    ): ChatCloudSyncGateway {
+        return ChatCloudSyncGateway(
+            scopeStore,
+            uidProvider,
+            operationGate,
+            com.example.bamachat.data.cloud.FirestoreChatCloudWriter()
+        )
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatSyncPolicy(
+        prefs: SharedPreferences,
+        scopeStore: ChatSessionScopeStore
+    ): ChatSyncPolicy {
+        return ChatSyncPolicy(prefs, scopeStore)
     }
 
     @Provides
@@ -57,11 +138,36 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideGitHubReadOnlyRepositoryGateway(): GitHubReadOnlyRepositoryGateway {
+        return AndroidGitHubReadOnlyRepositoryGateway()
+    }
+
+    @Provides
+    @Singleton
+    fun provideAgentDraftPrGateway(): AgentDraftPrGateway {
+        return DisabledAgentDraftPrGateway()
+    }
+
+    @Provides
+    @Singleton
+    fun provideRepositoryContextBuilder(): RepositoryContextBuilder {
+        return RepositoryContextBuilder()
+    }
+
+    @Provides
+    fun provideGitHubProposalAnalyzer(apiManager: ApiManager): GitHubProposalAnalyzer {
+        return AndroidGitHubProposalAnalyzer(apiManager)
+    }
+
+    @Provides
+    @Singleton
     fun provideConversationService(
         repo: ChatRepository,
-        prefs: SharedPreferences
+        prefs: SharedPreferences,
+        scopeStore: ChatSessionScopeStore,
+        workspaceStore: ConversationWorkspaceStore
     ): ConversationService {
-        return ConversationService(repo, prefs)
+        return ConversationService(repo, prefs, scopeStore, workspaceStore)
     }
 
     @Provides

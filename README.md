@@ -27,10 +27,14 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
 - Multi-Provider-Flow (OpenRouter, OpenCode, Gemini, Ollama + Fallback-Logik)
 - Optionale Live-Web-Recherche für Agenten (über Firebase Function Proxy + Quellenanhang)
 - Sprachfeatures:
-  - STT (Diktieren)
-  - TTS lokal
-  - optionale Cloud-Voice (ElevenLabs oder Piper)
-  - Natuerlicher Sprachmodus: Speech-Sanitizing (Markdown/Links/Code), chunked TTS mit kurzen Pausen, Anti-Echo zwischen TTS und STT
+  - BamaVoice Universal: Android-STT -> bestehender Chatprovider -> satzweise TTS-Ausgabe
+  - BamaVoice Local: On-Device-Erkennung mit Android TTS oder privatem Piper-Endpunkt, ohne Cloud-Voice-Anfrage
+  - Live-Teiltranskription, Eingabepegel, exakt-einmal-Finaltext und abbrechbare Spracheingabe
+  - Unterbrechbare Ausgabe mit Audio-Fokus, Anti-Echo-Turn-Taking und sicherem Stop während Generierung oder Playback
+  - optionale Cloud-Voice (ElevenLabs Flash/Multilingual oder Piper) mit Android-Fallback
+  - Speech-Sanitizing für Markdown, Links, Zitationen und Code sowie geordnete Satz-/Klausel-Chunks
+  - BamaVoice Live nutzt natives WebRTC und kurzlebige OpenAI-Realtime-Berechtigungen über eine Firebase-Auth-geschützte Function; ohne manuell konfigurierten Server bleibt der Modus sicher deaktiviert
+  - Backend-, Secret- und Endpoint-Einrichtung: [`BAMAVOICE_REALTIME_SETUP.md`](./BAMAVOICE_REALTIME_SETUP.md)
   - Auto-Spracherkennung pro Nachricht (ML Kit Language ID, optional)
 - Bildfunktionen:
   - Bild hochladen, Foto direkt aus dem Chat aufnehmen und analysieren
@@ -87,6 +91,7 @@ BamaChat läuft auf **Android 13+** (Jetpack Compose) und **Windows Desktop** (C
   - Neue Chats übernehmen den aktiven Workspace im Titel
   - Optionaler Chatlisten-Filter auf den aktiven Workspace
   - AI-Extensions Manager: installierbare Workspace-Plugins mit Capability-Freigaben (Pflichtrechte-Guardrail vor Aktivierung)
+  - GitHub Intelligence: Repo Autopilot liest ausschließlich freigegebene öffentliche Daten von `blackstarr595384-stack/BamaChat`, blockiert Symlinks/Submodule, redaktiert Credential-Muster vor der KI-Analyse und erzeugt strukturierte Vorschläge ohne GitHub-Schreibrechte
   - Chat-Integration: aktive Extensions werden pro Turn in den Runtime-Kontext eingebunden (inkl. optionalem Live-Web-Trigger für Research-Radar)
   - Quick-Action-Leiste im Composer: `Auto`, `Research`, `Code Review`, `Plan` für schnellere manuelle Steuerung pro Nachricht
   - Automation-Templates (Tagesbriefing, Meeting->ToDos, Release-Check, Risiko-Scan)
@@ -551,3 +556,6 @@ Vor Store-Upload:
 - Credit Produkt-ID: `credits_100`
 - Credit Produkt-ID: `credits_300`
 - Credit Produkt-ID: `credits_1000`
+## Phase 7.6b Agent Draft PR
+
+GitHub Intelligence kann aus validierten Vorschlägen mit stabiler `proposal-<64 hex>`-Parser-ID einen lokalen, deklarativen Umsetzungsplan vorbereiten. Die Plan-ID bindet den vollständigen fachlichen Inhalt kollisionsfrei über versionierte UTF-8-Längenfelder, die Testliste wird exakt aus den betroffenen Modulpfaden abgeleitet, direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle bleiben blockiert und ein Abbruch ist nur vor `SERVER_ACCEPTED` zulässig. Die finale Übermittlung bleibt deaktiviert, solange kein sicherer BamaWorker mit serverseitiger GitHub App vorhanden ist; der Android-Client besitzt keine GitHub-Schreibrechte oder Tokens. Details: `docs/phase-7.6b-agent-draft-pr.md`.

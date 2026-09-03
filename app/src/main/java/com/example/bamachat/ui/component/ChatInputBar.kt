@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -32,6 +34,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -41,11 +44,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.bamachat.ui.theme.NeonPurple
+import com.example.bamachat.ui.voice.VoiceRuntimePresentation
 import com.example.bamachat.ui.theme.NeonCyan
 import com.example.bamachat.ui.theme.NeonPink
 import com.example.bamachat.ui.theme.SurfaceDarkElevated
 import com.example.bamachat.ui.theme.SurfaceDarkInput
 import com.example.bamachat.ui.viewmodel.ChatViewModel
+import com.example.bamachat.voice.VoiceMode
+import com.example.bamachat.voice.VoiceSessionState
+import com.example.bamachat.voice.VoiceSessionUiState
 
 data class PromptTemplate(
     val id: String,
@@ -69,13 +76,17 @@ fun ChatInputBar(
     selectedImageUri: Uri?,
     onClearImage: () -> Unit,
     isListening: Boolean,
+    voiceUiState: VoiceSessionUiState,
     voicePushToTalkEnabled: Boolean,
     onMicClick: () -> Unit,
     onMicPressStart: () -> Unit,
     onMicPressEnd: () -> Unit,
+    onVoicePanelClick: () -> Unit,
+    onStopVoice: () -> Unit,
     themeColor: Color,
     surfaceColor: Color,
     isLoading: Boolean,
+    onStopGeneration: () -> Unit,
     designTokens: ChatDesignTokens,
     connectChatBottomBars: Boolean,
     glassEffectsEnabled: Boolean,
@@ -92,6 +103,7 @@ fun ChatInputBar(
 ) {
     val focusManager = LocalFocusManager.current
     var moreActionsExpanded by remember { mutableStateOf(false) }
+    var modeMenuExpanded by remember { mutableStateOf(false) }
 
     val inputShape = RoundedCornerShape(
         topStart = 20.dp,
@@ -104,7 +116,6 @@ fun ChatInputBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
-            .navigationBarsPadding()
             .imePadding()
             .animateContentSize(animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing))
     ) {
@@ -187,6 +198,49 @@ fun ChatInputBar(
                     )
                     .padding(top = 8.dp, bottom = 8.dp, start = 8.dp, end = 8.dp)
             ) {
+                if (automationQuickActionsEnabled) {
+                    val quickActions = listOf(
+                        ChatViewModel.ExtensionQuickAction.AUTO to "Auto",
+                        ChatViewModel.ExtensionQuickAction.RESEARCH to "Research",
+                        ChatViewModel.ExtensionQuickAction.CODE_REVIEW to "Code",
+                        ChatViewModel.ExtensionQuickAction.PLAN to "Plan"
+                    )
+                    val selectedLabel = quickActions.firstOrNull { it.first == selectedExtensionQuickAction }?.second ?: "Auto"
+                    Box(modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
+                        AssistChip(
+                            onClick = { modeMenuExpanded = true },
+                            label = { Text("Modus: $selectedLabel") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp)) }
+                        )
+                        DropdownMenu(expanded = modeMenuExpanded, onDismissRequest = { modeMenuExpanded = false }) {
+                            quickActions.forEach { (action, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    leadingIcon = {
+                                        if (action == selectedExtensionQuickAction) Icon(Icons.Default.Check, null)
+                                    },
+                                    onClick = {
+                                        onSelectExtensionQuickAction(action)
+                                        modeMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = voiceUiState.state !is VoiceSessionState.Idle,
+                    enter = fadeIn(tween(140)) + scaleIn(tween(160), initialScale = 0.96f),
+                    exit = fadeOut(tween(100)) + scaleOut(tween(120), targetScale = 0.96f)
+                ) {
+                    VoiceSessionStatus(
+                        uiState = voiceUiState,
+                        onOpenPanel = onVoicePanelClick,
+                        onStopVoice = onStopVoice
+                    )
+                }
+
                 // Text input row
                 Row(
                     modifier = Modifier
@@ -243,19 +297,13 @@ fun ChatInputBar(
                     )
 
                     // Mic button
-                    InputActionButton(
-                        icon = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
-                        contentDesc = "Spracherkennung",
-                        tint = if (isListening) NeonPink else NeonCyan,
-                        containerAlpha = if (isListening) 0.25f else 0.1f,
-                        onClick = {
-                            if (voicePushToTalkEnabled) {
-                                onMicPressStart()
-                                onMicPressEnd()
-                            } else {
-                                onMicClick()
-                            }
-                        }
+                    VoiceMicButton(
+                        isListening = isListening,
+                        isPreparing = voiceUiState.state is VoiceSessionState.Preparing,
+                        pushToTalkEnabled = voicePushToTalkEnabled,
+                        onClick = onMicClick,
+                        onPressStart = onMicPressStart,
+                        onPressEnd = onMicPressEnd
                     )
                 }
 
@@ -269,6 +317,14 @@ fun ChatInputBar(
                 ) {
                     // Left: AI status indicator
                     Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(onClick = onVoicePanelClick)
+                            .semantics {
+                                contentDescription = "BamaVoice öffnen"
+                                role = Role.Button
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -282,9 +338,13 @@ fun ChatInputBar(
                                 )
                         )
                         Text(
-                            text = if (isLoading) "KI antwortet..." else "Bereit",
+                            text = when {
+                                voiceUiState.state is VoiceSessionState.Speaking -> "BamaVoice spricht"
+                                isLoading -> "KI antwortet..."
+                                else -> "BamaVoice"
+                            },
                             color = Color.White.copy(alpha = 0.4f),
-                            fontSize = 10.sp
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
 
@@ -292,11 +352,9 @@ fun ChatInputBar(
                     if (isLoading) {
                         // Stop button
                         FilledIconButton(
-                            onClick = {
-                                // The ChatScreen handles stop via the ChatViewModel
-                            },
+                            onClick = onStopGeneration,
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .shadow(
                                     elevation = 8.dp,
                                     shape = CircleShape,
@@ -323,7 +381,7 @@ fun ChatInputBar(
                             },
                             enabled = inputText.isNotBlank() || selectedImageUri != null,
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .shadow(
                                     elevation = 8.dp,
                                     shape = CircleShape,
@@ -392,6 +450,179 @@ fun ChatInputBar(
 }
 
 @Composable
+private fun VoiceSessionStatus(
+    uiState: VoiceSessionUiState,
+    onOpenPanel: () -> Unit,
+    onStopVoice: () -> Unit
+) {
+    val state = uiState.state
+    val runtimeStatusText = if (uiState.mode == VoiceMode.LIVE) {
+        VoiceRuntimePresentation.resolve().statusText(state)
+    } else {
+        null
+    }
+    val statusText = runtimeStatusText ?: when (state) {
+        VoiceSessionState.Idle -> ""
+        VoiceSessionState.Preparing -> "Mikrofon wird vorbereitet …"
+        VoiceSessionState.Connecting -> "Sichere Verbindung wird hergestellt …"
+        is VoiceSessionState.Reconnecting -> "Verbindung wird wiederhergestellt …"
+        VoiceSessionState.Listening -> "Ich höre zu …"
+        is VoiceSessionState.Transcribing -> state.partialText.ifBlank { "Ich höre zu …" }
+        VoiceSessionState.Thinking -> "BamaChat denkt …"
+        VoiceSessionState.Speaking -> "BamaChat spricht …"
+        VoiceSessionState.Interrupted -> "Sprachausgabe unterbrochen"
+        VoiceSessionState.Ended -> "Live-Unterhaltung beendet"
+        is VoiceSessionState.Error -> state.userMessage
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .heightIn(min = 48.dp)
+            .clickable(onClick = onOpenPanel),
+        shape = RoundedCornerShape(14.dp),
+        color = NeonPurple.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, NeonPurple.copy(alpha = 0.35f))
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            when (state) {
+                VoiceSessionState.Preparing,
+                VoiceSessionState.Connecting,
+                is VoiceSessionState.Reconnecting -> CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = NeonCyan
+                )
+                VoiceSessionState.Listening,
+                is VoiceSessionState.Transcribing -> VoiceInputLevel(uiState.inputLevel)
+                VoiceSessionState.Speaking -> VoiceVisualizer(NeonPurple)
+                VoiceSessionState.Thinking -> Icon(Icons.Default.AutoAwesome, null, tint = NeonCyan)
+                VoiceSessionState.Interrupted -> Icon(Icons.Default.PauseCircle, null, tint = NeonPink)
+                VoiceSessionState.Ended -> Icon(Icons.Default.CallEnd, null, tint = NeonCyan)
+                is VoiceSessionState.Error -> Icon(Icons.Default.ErrorOutline, null, tint = NeonPink)
+                VoiceSessionState.Idle -> Unit
+            }
+            Text(
+                text = statusText,
+                modifier = Modifier.weight(1f),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            if (state == VoiceSessionState.Speaking || state == VoiceSessionState.Thinking) {
+                IconButton(
+                    onClick = onStopVoice,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        Icons.Default.StopCircle,
+                        contentDescription = "Sprachausgabe stoppen",
+                        tint = NeonPink
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VoiceInputLevel(level: Float) {
+    Row(
+        modifier = Modifier.width(26.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(4) { index ->
+            val amplitude = (4.dp * (index + 1)) * level.coerceIn(0f, 1f)
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(5.dp + amplitude)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (level > 0.05f) NeonPink else NeonCyan.copy(alpha = 0.55f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceMicButton(
+    isListening: Boolean,
+    isPreparing: Boolean,
+    pushToTalkEnabled: Boolean,
+    onClick: () -> Unit,
+    onPressStart: () -> Unit,
+    onPressEnd: () -> Unit
+) {
+    val contentDesc = if (isListening || isPreparing) {
+        "Spracheingabe beenden"
+    } else {
+        "Spracheingabe starten"
+    }
+    val tint = if (isListening || isPreparing) NeonPink else NeonCyan
+    var focused by remember { mutableStateOf(false) }
+    val interactionModifier = if (pushToTalkEnabled) {
+        Modifier.pointerInput(onPressStart, onPressEnd) {
+            detectTapGestures(
+                onPress = {
+                    onPressStart()
+                    try {
+                        tryAwaitRelease()
+                    } finally {
+                        onPressEnd()
+                    }
+                }
+            )
+        }
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .onFocusChanged { focused = it.isFocused }
+            .then(interactionModifier)
+            .focusable()
+            .clip(CircleShape)
+            .background(tint.copy(alpha = if (isListening || isPreparing) 0.25f else 0.1f))
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) Color.White else tint.copy(alpha = 0.35f),
+                shape = CircleShape
+            )
+            .semantics {
+                contentDescription = contentDesc
+                role = Role.Button
+                onClick {
+                    onClick()
+                    true
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        if (isPreparing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+                color = tint
+            )
+        } else {
+            Icon(
+                imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun InputActionButton(
     icon: ImageVector,
     contentDesc: String,
@@ -401,7 +632,7 @@ private fun InputActionButton(
 ) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(tint.copy(alpha = containerAlpha))
             .clickable(onClick = onClick),

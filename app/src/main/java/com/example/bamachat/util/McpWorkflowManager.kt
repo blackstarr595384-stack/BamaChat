@@ -3,6 +3,7 @@ package com.example.bamachat.util
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 class McpWorkflowManager(private val mcpServerManager: McpServerManager) {
@@ -55,11 +56,11 @@ class McpWorkflowManager(private val mcpServerManager: McpServerManager) {
     }
 
     fun addWorkflow(workflow: McpWorkflow) {
-        _workflows.value = _workflows.value + workflow
+        _workflows.update { it + workflow }
     }
 
     fun removeWorkflow(id: String) {
-        _workflows.value = _workflows.value.filter { it.id != id }
+        _workflows.update { old -> old.filter { it.id != id } }
     }
 
     suspend fun executeWorkflow(
@@ -74,7 +75,7 @@ class McpWorkflowManager(private val mcpServerManager: McpServerManager) {
 
         val runId = UUID.randomUUID().toString()
         val exec = McpWorkflowExecution(workflowId = workflowId, runId = runId, status = McpWorkflowStatus.RUNNING)
-        _executions.value = _executions.value + exec
+        _executions.update { it + exec }
 
         val stepResults = mutableListOf<McpWorkflowStepResult>()
         val context = inputs.toMutableMap()
@@ -113,7 +114,7 @@ class McpWorkflowManager(private val mcpServerManager: McpServerManager) {
             finalOutput = stepResults.lastOrNull()?.output,
             error = stepResults.firstOrNull { !it.success }?.error
         )
-        _executions.value = _executions.value.map { if (it.runId == runId) finalExec else it }
+        _executions.update { old -> old.map { if (it.runId == runId) finalExec else it } }
         return finalExec
     }
 

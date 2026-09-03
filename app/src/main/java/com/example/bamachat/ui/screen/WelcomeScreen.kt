@@ -4,7 +4,9 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -69,7 +71,7 @@ fun WelcomeScreen(
                     )
                 )
             ),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.TopCenter
     ) {
         // Animated background orbs
         Box(
@@ -105,12 +107,13 @@ fun WelcomeScreen(
 
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Spacer(Modifier.weight(0.5f))
+            Spacer(Modifier.height(24.dp))
 
             // Logo icon
             Box(
@@ -154,40 +157,27 @@ fun WelcomeScreen(
             )
 
             Text(
-                "Futuristische KI",
+                "KI-Arbeitsplatz",
                 fontSize = 16.sp,
                 color = NeonPurple.copy(alpha = 0.8f),
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 4.sp
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
 
             // Description
             Text(
-                "Dein KI-Workspace für intelligente\nGespräche, kreative Zusammenarbeit\nund grenzenlose Produktivität.",
+                "Dein KI-Arbeitsplatz für Chat, Tools und Agents.\nLäuft auf Android — bald auch auf Windows/Desktop.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = Color.White.copy(alpha = 0.6f),
                 textAlign = TextAlign.Center,
                 lineHeight = 24.sp
             )
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(20.dp))
 
-            // Feature highlights
-            if (!isAuthenticated) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    FeaturePill("🤖 KI-Chat", NeonPurple)
-                    FeaturePill("🎨 Kreativ", NeonCyan)
-                    FeaturePill("🔒 Sicher", NeonPink)
-                }
-                Spacer(Modifier.height(32.dp))
-            }
-
-            // Action buttons
+            // Action buttons (moved up for visibility)
             if (!isAuthenticated) {
                 Button(
                     onClick = onOpenAuth,
@@ -265,6 +255,20 @@ fun WelcomeScreen(
 
             Spacer(Modifier.height(16.dp))
 
+            // Feature highlights (moved below buttons)
+            if (!isAuthenticated) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    FeaturePill("💬 Chat & Agents", NeonPurple)
+                    FeaturePill("🧩 Tools & Workflows", NeonCyan)
+                    FeaturePill("☁️ Cloud & Collab", NeonPink)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
             TextButton(onClick = onOpenHelp) {
                 Text(
                     "Hilfe & Anleitung",
@@ -275,7 +279,7 @@ fun WelcomeScreen(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                "Version 1.0.0",
+                "Version 1.0.1",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White.copy(alpha = 0.2f)
             )

@@ -8,16 +8,30 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator
 import com.example.bamachat.data.model.ChatMessage
+import com.example.bamachat.data.model.ConversationPersonaMetadata
 import com.example.bamachat.data.model.ChatSource
 import com.example.bamachat.data.model.ModelInfo
 import com.example.bamachat.data.repository.ChatRepository
 import com.example.bamachat.service.ChatEngine
+import com.example.bamachat.service.ChatErrorRecoveryPolicy
 import com.example.bamachat.service.ConversationService
 import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
-import com.example.bamachat.service.ServiceLocator
+import com.example.bamachat.service.UserFacingAiErrorMapper
+import com.example.bamachat.data.provider.chat.ActiveChatProviderResolution
+import com.example.bamachat.data.provider.chat.ActiveChatProviderResolver
+import com.example.bamachat.data.provider.chat.ActiveChatProviderSelection
+import com.example.bamachat.data.provider.chat.ActiveChatProviderSelectionStore
+import com.example.bamachat.data.provider.chat.ProviderChatErrorMessages
+import com.example.bamachat.data.provider.chat.ProviderChatException
+import com.example.bamachat.data.provider.chat.ProviderChatExecutionEngine
+import com.example.bamachat.data.provider.chat.ProviderChatMessage
+import com.example.bamachat.data.provider.chat.ProviderChatRequest
+import com.example.bamachat.data.provider.ProviderConnectionType
+import com.example.bamachat.service.ImageUrlResolver
 import com.example.bamachat.shared.core.ChatSendDeduplicator
 import com.example.bamachat.shared.core.QuickActionSuggestion
 import com.example.bamachat.shared.core.WorkspaceNaming
@@ -29,20 +43,44 @@ import com.example.bamachat.util.McpContentItem
 import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.McpWorkflowStatus
 import com.example.bamachat.util.MonetizationConfig
+import com.example.bamachat.data.AndroidAiOrchestrator
+import com.example.bamachat.data.AgentLoopRequestFactory
+import com.example.bamachat.data.ApiClient
 import com.example.bamachat.util.SecureSettingsStore
 import com.example.bamachat.util.UserErrorMessage
-import com.example.bamachat.data.OpenRouterChatRequest
 import com.example.bamachat.data.OpenRouterMessage
+import com.example.bamachat.data.OpenRouterSseTextChunkStream
+import com.example.bamachat.data.OpenRouterStreamChunk
+import com.example.bamachat.data.toAiChatRequestForValidation
+import com.example.bamachat.shared.core.AiChatMessage
+import com.example.bamachat.shared.core.AiChatResponse
+import com.example.bamachat.shared.core.AiChatRole
+import com.example.bamachat.shared.core.AiProviderId
+import com.example.bamachat.shared.core.ai.AiStreamCompleted
+import com.example.bamachat.shared.core.ai.AiStreamDelta
+import com.example.bamachat.shared.core.ai.AiStreamError
+import com.example.bamachat.shared.core.ai.AiStreamEvent
+import com.example.bamachat.shared.core.ai.AiStreamFinished
+import com.example.bamachat.shared.core.ai.AiStreamStarted
+import com.example.bamachat.voice.RealtimeFinalizedTurn
 import dagger.hilt.android.lifecycle.HiltViewModel
-import okhttp3.OkHttpClient
+import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.*
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.ReentrantReadWriteLock
 import javax.inject.Inject
 import kotlin.concurrent.read
 import kotlin.concurrent.write
@@ -54,11 +92,29 @@ data class ToolCallProgress(
     val result: String? = null
 )
 
+data class ChatProviderRuntimeStatus(
+    val providerName: String = "BamaChat Standard",
+    val modelName: String? = null,
+    val badge: String = "Standard",
+    val customSelection: Boolean = false,
+    val valid: Boolean = true,
+    val warning: String? = null
+) {
+    val summary: String
+        get() = listOfNotNull(providerName, modelName).joinToString(" · ")
+}
+
 enum class ToolCallStatus { RUNNING, DONE, ERROR }
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     application: Application,
+    private val repo: ChatRepository,
+    private val conversationService: ConversationService,
+    private val chatSyncCoordinator: AndroidChatSyncCoordinator,
+    private val chatProviderSelectionStore: ActiveChatProviderSelectionStore,
+    private val chatProviderResolver: ActiveChatProviderResolver,
+    private val providerChatExecutionEngine: ProviderChatExecutionEngine,
     val mcpServerManager: McpServerManager,
     val mcpWorkflowManager: McpWorkflowManager
 ) : AndroidViewModel(application) {
@@ -73,9 +129,13 @@ class ChatViewModel @Inject constructor(
         private const val KEY_EXTENSION_STATES_JSON = "workspace_extension_states_json"
         private const val KEY_EXTENSION_QUICK_ACTION = "extension_quick_action"
         private const val KEY_IMAGE_GENERATION_MODE = "image_generation_mode"
+        internal const val KEY_AGENT_TOOLS_ENABLED = "agent_tools_enabled"
         private const val IMAGE_GENERATION_MODE_DISABLED = "Deaktiviert"
         // Cache system prompts for 5 minutes to reduce API load
         private const val SYSTEM_PROMPT_CACHE_TTL_MS = 5 * 60 * 1000L
+
+        internal fun shouldUseAgentLoop(hasTools: Boolean, agentToolsEnabled: Boolean): Boolean =
+            agentToolsEnabled && hasTools
 
         internal fun computeWindowedMessages(all: List<ChatMessage>, limit: Int): List<ChatMessage> {
             if (all.isEmpty()) return emptyList()
@@ -88,33 +148,233 @@ class ChatViewModel @Inject constructor(
 
         internal fun normalizeWorkspaceName(raw: String): String =
             WorkspaceNaming.normalizeWorkspaceName(raw)
+
+        internal fun toRealtimeChatMessage(turn: RealtimeFinalizedTurn): ChatMessage? {
+            val cleanText = turn.text.trim()
+            val cleanId = turn.messageId.trim()
+            if (cleanText.isBlank() || cleanId.isBlank() || cleanId.length > 200) return null
+            return ChatMessage(
+                id = cleanId,
+                text = cleanText,
+                isUser = turn.isUser,
+                timestamp = turn.timestamp,
+                role = if (turn.isUser) "USER" else "ASSISTANT"
+            )
+        }
+
+        internal suspend fun consumeAiStreamEvents(
+            events: Flow<AiStreamEvent>,
+            convId: String,
+            assistantMsg: ChatMessage,
+            webSources: List<ChatSource>,
+            webFetchedAtIso: String?,
+            streamingBuffer: StringBuilder,
+            streamFlushInterval: Long,
+            lastFlushAtProvider: () -> Long,
+            updateLastFlushAt: (Long) -> Unit,
+            saveMessage: suspend (String, ChatMessage, Boolean) -> Unit,
+            clearRetryContext: suspend () -> Unit,
+            showNotification: suspend (String) -> Unit,
+            streamTelemetrySource: String? = null,
+            streamTelemetryModel: String? = null,
+            streamStartedAtMs: Long? = null,
+            logStreamEvent: (String, Map<String, String>) -> Unit = { _, _ -> }
+        ): AiStreamConsumptionResult {
+            var completedText: String? = null
+            var fallbackReason: String? = null
+            var errorMessage: String? = null
+            var eventProvider: AiProviderId? = null
+            var eventModel: String? = streamTelemetryModel
+
+            fun telemetryParams(reason: String? = null): Map<String, String> {
+                val params = mutableMapOf<String, String>()
+                streamTelemetrySource?.let { params["source"] = it }
+                eventProvider?.name?.let { params["provider"] = it }
+                eventModel?.takeIf { it.isNotBlank() }?.let { params["model"] = it }
+                streamStartedAtMs?.let { params["duration_ms"] = (System.currentTimeMillis() - it).toString() }
+                reason?.let { params["reason"] = it }
+                return params
+            }
+
+            events.collect { event ->
+                when (event) {
+                    is AiStreamStarted -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
+                        streamTelemetrySource?.let {
+                            logStreamEvent("stream_event_started", telemetryParams())
+                        }
+                    }
+                    is AiStreamDelta -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
+                        streamingBuffer.append(event.text)
+                        val now = System.currentTimeMillis()
+                        if (now - lastFlushAtProvider() >= streamFlushInterval) {
+                            updateLastFlushAt(now)
+                            saveMessage(
+                                convId,
+                                assistantMsg.copy(text = streamingBuffer.toString()),
+                                false
+                            )
+                        }
+                    }
+                    is AiStreamCompleted -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
+                        completedText = event.response.message.text
+                    }
+                    is AiStreamError -> {
+                        eventProvider = event.provider
+                        eventModel = event.model
+                        fallbackReason = "provider_error"
+                        errorMessage = event.message
+                    }
+                    is AiStreamFinished -> Unit
+                }
+            }
+
+            fallbackReason?.let {
+                streamTelemetrySource?.let { _ ->
+                    logStreamEvent("stream_event_error", telemetryParams(reason = it))
+                }
+                return AiStreamConsumptionResult(
+                    success = false,
+                    fallbackReason = it,
+                    errorMessage = errorMessage
+                )
+            }
+
+            val finalText = completedText
+                ?.takeIf { it.isNotBlank() }
+                ?: run {
+                    streamTelemetrySource?.let {
+                        logStreamEvent("stream_event_error", telemetryParams(reason = "empty_stream"))
+                    }
+                    return AiStreamConsumptionResult(success = false, fallbackReason = "empty_stream")
+                }
+
+            val finalized = assistantMsg.copy(
+                text = finalText,
+                sources = webSources,
+                webFetchedAtIso = webFetchedAtIso
+            )
+            saveMessage(convId, finalized, true)
+            clearRetryContext()
+            showNotification(finalText)
+            streamTelemetrySource?.let {
+                logStreamEvent("stream_event_completed", telemetryParams())
+            }
+            return AiStreamConsumptionResult(success = true, finalText = finalText)
+        }
+
+        internal fun legacyStreamAsAiEvents(
+            provider: AiProviderId,
+            model: String,
+            streamChatResponse: suspend (
+                onChunkReceived: (String) -> Unit,
+                onError: (String) -> Unit
+            ) -> ApiManager.ApiResponse,
+            onIntermediateError: (String) -> Unit = {},
+            onTerminalError: (ApiManager.ApiResponse) -> Unit = {}
+        ): Flow<AiStreamEvent> = channelFlow {
+            send(AiStreamStarted(provider = provider, model = model))
+
+            val response = try {
+                streamChatResponse(
+                    { chunk ->
+                        if (chunk.isNotEmpty()) {
+                            trySend(
+                                AiStreamDelta(
+                                    text = chunk,
+                                    provider = provider,
+                                    model = model
+                                )
+                            )
+                        }
+                    },
+                    { error ->
+                        onIntermediateError(error)
+                    }
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                val userFailure = UserFacingAiErrorMapper.terminal(provider, error.message)
+                send(
+                    AiStreamError(
+                        message = userFailure.message,
+                        exceptionClass = error::class.java.simpleName,
+                        provider = provider,
+                        model = model
+                    )
+                )
+                send(AiStreamFinished(provider = provider, model = model))
+                return@channelFlow
+            }
+
+            val finalProvider = response.usedProvider?.toAiProviderId() ?: provider
+            if (response.success && response.content.isNotBlank()) {
+                send(
+                    AiStreamCompleted(
+                        AiChatResponse(
+                            provider = finalProvider,
+                            model = model,
+                            message = AiChatMessage(
+                                role = AiChatRole.ASSISTANT,
+                                text = response.content
+                            )
+                        )
+                    )
+                )
+            } else {
+                onTerminalError(response)
+                val userFailure = UserFacingAiErrorMapper.terminal(finalProvider, response.error)
+                send(
+                    AiStreamError(
+                        message = userFailure.message,
+                        provider = finalProvider,
+                        model = model
+                    )
+                )
+            }
+
+            send(AiStreamFinished(provider = finalProvider, model = model))
+        }
+
+        private fun ApiClient.Provider.toAiProviderId(): AiProviderId = when (this) {
+            ApiClient.Provider.OPENROUTER -> AiProviderId.OPENROUTER
+            ApiClient.Provider.GROQ -> AiProviderId.GROQ
+            ApiClient.Provider.CEREBRAS -> AiProviderId.CEREBRAS
+            ApiClient.Provider.TOGETHER -> AiProviderId.TOGETHER
+            ApiClient.Provider.OPENCODE -> AiProviderId.OPENCODE
+        }
     }
+
+    internal data class AiStreamConsumptionResult(
+        val success: Boolean,
+        val finalText: String? = null,
+        val fallbackReason: String? = null,
+        val errorMessage: String? = null
+    )
 
     private val prefs = application.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val appContext = getApplication<Application>().applicationContext
 
-    // Services from ServiceLocator
-    private val conversationService: ConversationService
-        get() = ServiceLocator.conversationService
+    // Legacy services pending full DI migration
+    private val serviceLocator = com.example.bamachat.service.ServiceLocator
     private val knowledgeService: KnowledgeService
-        get() = ServiceLocator.knowledgeService
+        get() = serviceLocator.knowledgeService
     private val mediaService: MediaService
-        get() = ServiceLocator.mediaService
+        get() = serviceLocator.mediaService
     private val chatEngine: ChatEngine
-        get() = ServiceLocator.chatEngine
+        get() = serviceLocator.chatEngine
     private val apiManager: ApiManager
-        get() = ServiceLocator.apiManager
+        get() = serviceLocator.apiManager
     private val notificationService: NotificationService
-        get() = ServiceLocator.notificationService
+        get() = serviceLocator.notificationService
 
-    private val repo = ChatRepository(
-        com.example.bamachat.data.local.ChatDatabase.getDatabase(application).chatDao()
-    )
-    private val imageHttpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .writeTimeout(8, TimeUnit.SECONDS)
-        .build()
+    private val imageUrlResolver = ImageUrlResolver()
 
     val personaViewModel = PersonaViewModel(application)
     val multiAgentViewModel = MultiAgentViewModel(application, apiManager, personaViewModel)
@@ -124,13 +384,24 @@ class ChatViewModel @Inject constructor(
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
     private val allMessagesBuffer = mutableListOf<ChatMessage>()
-    private val bufferLock = ReentrantLock()
+    private val bufferLock = ReentrantReadWriteLock()
     private val _visibleMessageLimit = MutableStateFlow(INITIAL_VISIBLE_MESSAGE_LIMIT)
     private val _hasOlderMessages = MutableStateFlow(false)
     val hasOlderMessages: StateFlow<Boolean> = _hasOlderMessages
 
     private val _conversations = MutableStateFlow<List<com.example.bamachat.data.local.ConversationEntity>>(emptyList())
     val conversations: StateFlow<List<com.example.bamachat.data.local.ConversationEntity>> = _conversations
+
+    private val _chatWorkspaceId = MutableStateFlow<String?>(null)
+    val chatWorkspaceId: StateFlow<String?> = _chatWorkspaceId
+    val chatWorkspaceName: StateFlow<String> = _chatWorkspaceId.map { chatWsId ->
+        if (chatWsId.isNullOrBlank()) ""
+        else conversationService.findWorkspaceNameById(chatWsId).orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    fun setChatWorkspaceContext(workspaceId: String?) {
+        _chatWorkspaceId.value = workspaceId
+    }
 
     private val _currentConversationId = MutableStateFlow<String?>(null)
     val currentConversationId: StateFlow<String?> = _currentConversationId
@@ -143,6 +414,10 @@ class ChatViewModel @Inject constructor(
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage
+    private val _providerFallbackMessage = MutableStateFlow<String?>(null)
+    val providerFallbackMessage: StateFlow<String?> = _providerFallbackMessage.asStateFlow()
+    private val _chatProviderStatus = MutableStateFlow(ChatProviderRuntimeStatus())
+    val chatProviderStatus: StateFlow<ChatProviderRuntimeStatus> = _chatProviderStatus.asStateFlow()
     private val _errorActionLabel = MutableStateFlow<String?>(null)
     val errorActionLabel: StateFlow<String?> = _errorActionLabel
     private val _isErrorRetryable = MutableStateFlow(false)
@@ -217,7 +492,7 @@ class ChatViewModel @Inject constructor(
     }
 
     enum class Persona(val displayName: String, val emoji: String, val systemPrompt: String) {
-        ASSISTANT("Assistent", "🤖", "Du bist BamaChat, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
+        ASSISTANT(ConversationPersonaMetadata.DEFAULT_PERSONA_DISPLAY_NAME, "🤖", "Du bist BamaChat, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
         DEVELOPER("Entwickler", "💻", "Du bist ein erfahrener Software-Entwickler. Hilf mit Code-Beispielen und technischen Erklärungen. Nutze Markdown-Codeblöcke. Antworte auf Deutsch."),
         TEACHER("Lehrer", "🎓", "Du bist ein geduldiger Lehrer. Erkläre Dinge einfach und verständlich, mit Beispielen. Antworte auf Deutsch."),
         TRANSLATOR("Übersetzer", "🌍", "Du bist ein professioneller Übersetzer. Übersetze den Text des Benutzers. Wenn er Deutsch ist, übersetze ins Englische. Wenn nicht, ins Deutsche. Erkläre kurz Schwierigkeiten."),
@@ -238,30 +513,99 @@ class ChatViewModel @Inject constructor(
         prefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
 
         viewModelScope.launch {
-            repo.getAllConversations().collectLatest {
-                _conversations.value = it
+            conversationService.getAllConversations().collectLatest { conversations ->
+                _conversations.value = conversations
+                val currentId = _currentConversationId.value
+                if (currentId != null && conversations.any { it.id == currentId }) {
+                    return@collectLatest
+                }
+                messagesJob?.cancel()
+                _currentConversationId.value = null
+                _messages.value = emptyList()
+                bufferLock.write { allMessagesBuffer.clear() }
+                if (!conversationService.hasWritableSession()) return@collectLatest
+                val storedId = conversationService.getCurrentConversationId()
+                    ?.takeIf { id -> conversations.any { it.id == id } }
+                when {
+                    storedId != null -> switchConversation(storedId)
+                    conversations.isNotEmpty() -> switchConversation(conversations.first().id)
+                    else -> newConversation()
+                }
+            }
+        }
+        viewModelScope.launch {
+            chatProviderResolver.observeResolution().collectLatest { resolution ->
+                _chatProviderStatus.value = when (resolution) {
+                    ActiveChatProviderResolution.Legacy -> ChatProviderRuntimeStatus()
+                    is ActiveChatProviderResolution.ResolvedCustomProvider -> ChatProviderRuntimeStatus(
+                        providerName = resolution.definition.displayName,
+                        modelName = resolution.model.displayName,
+                        badge = when (resolution.definition.connectionType) {
+                            ProviderConnectionType.OPENAI_COMPATIBLE -> "Eigener Anbieter"
+                            ProviderConnectionType.OLLAMA_LOCAL -> "Lokal"
+                        },
+                        customSelection = true,
+                        valid = true
+                    )
+                    is ActiveChatProviderResolution.Invalid -> ChatProviderRuntimeStatus(
+                        providerName = "Auswahl nicht verfügbar",
+                        badge = "Prüfen",
+                        customSelection = true,
+                        valid = false,
+                        warning = resolution.userMessage
+                    )
+                }
             }
         }
 
-        val lastConvId = conversationService.getCurrentConversationId()
-        if (lastConvId != null) {
-            switchConversation(lastConvId)
-        } else {
-            viewModelScope.launch { newConversation() }
-        }
     }
 
     // ===== Conversations =====
     fun newConversation() {
         viewModelScope.launch {
-            val personaName = personaViewModel.selectedPersona.value.name
-            val wsName = conversationService.activeWorkspaceName()
+            val personaName = personaViewModel.selectedPersona.value.displayName
+            val chatWsId = _chatWorkspaceId.value
+            if (chatWsId != null) {
+                val wsName = conversationService.activeWorkspaceName()
+                val conv = conversationService.createConversation(personaName, wsName)
+                switchConversation(conv.id)
+            } else {
+                val conv = conversationService.createNormalConversation(personaName)
+                switchConversation(conv.id)
+            }
+        }
+    }
+
+    suspend fun openOrCreateWorkspaceConversation(workspaceId: String) {
+        val wsName = conversationService.findWorkspaceNameById(workspaceId)
+            ?: conversationService.activeWorkspaceName()
+        val existing = conversationService.findLatestConversationForWorkspace(
+            _conversations.value, wsName
+        )
+        if (existing != null) {
+            switchConversation(existing.id)
+        } else {
+            val personaName = personaViewModel.selectedPersona.value.displayName
             val conv = conversationService.createConversation(personaName, wsName)
             switchConversation(conv.id)
         }
     }
 
+    suspend fun openOrCreateNormalConversation() {
+        val existing = conversationService.findLatestConversationWithoutWorkspace(
+            _conversations.value
+        )
+        if (existing != null) {
+            switchConversation(existing.id)
+        } else {
+            val personaName = personaViewModel.selectedPersona.value.displayName
+            val conv = conversationService.createNormalConversation(personaName)
+            switchConversation(conv.id)
+        }
+    }
+
     fun switchConversation(id: String) {
+        val ownerScope = conversationService.currentOwnerScope()
         _currentConversationId.value = id
         viewModelScope.launch {
             conversationService.switchConversation(id)
@@ -272,7 +616,7 @@ class ChatViewModel @Inject constructor(
         bufferLock.write { allMessagesBuffer.clear() }
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
-            repo.getMessages(id).collectLatest { items ->
+            repo.getMessages(id, ownerScope).collectLatest { items ->
                 bufferLock.write {
                     allMessagesBuffer.clear()
                     allMessagesBuffer.addAll(items)
@@ -289,12 +633,18 @@ class ChatViewModel @Inject constructor(
     }
 
     fun renameConversation(id: String, newTitle: String) {
-        viewModelScope.launch { conversationService.rename(id, newTitle) }
+        val ownerScope = conversationService.writableOwnerScope()
+        viewModelScope.launch {
+            conversationService.rename(id, newTitle)
+            scheduleConversationMetadataSync(id, ownerScope)
+        }
     }
 
     fun deleteConversation(id: String) {
+        val ownerScope = conversationService.writableOwnerScope()
         viewModelScope.launch {
             conversationService.delete(id)
+            scheduleConversationSoftDelete(id, ownerScope)
             if (_currentConversationId.value == id) {
                 val remaining = _conversations.value.filter { it.id != id }
                 if (remaining.isNotEmpty()) switchConversation(remaining.first().id)
@@ -305,7 +655,84 @@ class ChatViewModel @Inject constructor(
 
     fun clearChat() {
         val convId = _currentConversationId.value ?: return
-        viewModelScope.launch { repo.clearMessages(convId) }
+        val ownerScope = conversationService.writableOwnerScope()
+        viewModelScope.launch { repo.clearMessages(convId, ownerScope) }
+    }
+
+    private suspend fun saveMessageLocally(
+        conversationId: String,
+        message: ChatMessage,
+        touchConversation: Boolean = true
+    ) {
+        repo.saveMessage(
+            conversationId,
+            message,
+            ownerScope = conversationService.writableOwnerScope(),
+            touchConversation = touchConversation
+        )
+    }
+
+    private fun scheduleMessageSync(conversationId: String, message: ChatMessage) {
+        val activePersonaName = personaViewModel.selectedPersona.value.displayName
+        val ownerScope = conversationService.currentOwnerScope()
+        viewModelScope.launch {
+            chatSyncCoordinator.syncMessageAfterLocalSave(
+                conversationId,
+                message,
+                activePersonaName,
+                ownerScope
+            )
+        }
+    }
+
+    private fun scheduleConversationMetadataSync(conversationId: String, ownerScope: String) {
+        val activePersonaName = personaViewModel.selectedPersona.value.displayName
+        viewModelScope.launch {
+            chatSyncCoordinator.syncConversationMetadataAfterLocalChange(
+                conversationId,
+                activePersonaName,
+                ownerScope = ownerScope
+            )
+        }
+    }
+
+    private fun scheduleConversationSoftDelete(conversationId: String, ownerScope: String) {
+        viewModelScope.launch {
+            chatSyncCoordinator.softDeleteConversationAfterLocalDelete(conversationId, ownerScope)
+        }
+    }
+
+    fun persistRealtimeVoiceTurn(turn: RealtimeFinalizedTurn): Boolean {
+        val message = toRealtimeChatMessage(turn) ?: return false
+        viewModelScope.launch {
+            var conversationId = _currentConversationId.value
+            if (conversationId == null) {
+                val personaName = personaViewModel.selectedPersona.value.displayName
+                val conversation = if (_chatWorkspaceId.value != null) {
+                    conversationService.createConversation(
+                        personaName,
+                        conversationService.activeWorkspaceName()
+                    )
+                } else {
+                    conversationService.createNormalConversation(personaName)
+                }
+                conversationId = conversation.id
+                switchConversation(conversation.id)
+            }
+            val resolvedConversationId = conversationId ?: return@launch
+            saveMessageLocally(resolvedConversationId, message)
+            val ownerScope = conversationService.writableOwnerScope()
+            val current = repo.getConversation(resolvedConversationId, ownerScope)
+            if (message.isUser && current != null && conversationService.isPlaceholderTitle(current.title)) {
+                repo.renameConversation(
+                    resolvedConversationId,
+                    ownerScope,
+                    message.text.take(40).ifBlank { "Chat" }
+                )
+            }
+            scheduleMessageSync(resolvedConversationId, message)
+        }
+        return true
     }
 
     /**
@@ -329,6 +756,16 @@ class ChatViewModel @Inject constructor(
         val trimmedText = text.trim()
         if (trimmedText.isBlank()) return false
         if (_isLoading.value || _isStreaming.value) return false
+        if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom &&
+            (!_chatProviderStatus.value.customSelection || !_chatProviderStatus.value.valid)
+        ) {
+            publishError(
+                _chatProviderStatus.value.warning ?: "Die eigene Anbieterwahl ist noch nicht einsatzbereit.",
+                retryable = false,
+                actionLabel = null
+            )
+            return false
+        }
 
         val convId = _currentConversationId.value
         val now = System.currentTimeMillis()
@@ -341,6 +778,14 @@ class ChatViewModel @Inject constructor(
         _chatSentiment.value = emotion.sentiment
 
         if (mediaService.isImageQuery(trimmedText)) {
+            if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom) {
+                publishError(
+                    ProviderChatErrorMessages.message(com.example.bamachat.data.provider.chat.ProviderChatError.UNSUPPORTED_FEATURE),
+                    retryable = false,
+                    actionLabel = null
+                )
+                return false
+            }
             generateImage(trimmedText, skipUserMessage = true)
             return true
         }
@@ -354,7 +799,7 @@ class ChatViewModel @Inject constructor(
 
         if (convId == null) {
             viewModelScope.launch {
-                val personaName = personaViewModel.selectedPersona.value.name
+                val personaName = personaViewModel.selectedPersona.value.displayName
                 val wsName = conversationService.activeWorkspaceName()
                 val conv = conversationService.createConversation(personaName, wsName)
                 switchConversation(conv.id)
@@ -366,18 +811,24 @@ class ChatViewModel @Inject constructor(
         val userMessage = ChatMessage(id = UUID.randomUUID().toString(), text = trimmedText, isUser = true, timestamp = System.currentTimeMillis())
         _isLoading.value = true
         activeGenerationJob = viewModelScope.launch {
-            repo.saveMessage(convId, userMessage)
+            saveMessageLocally(convId, userMessage)
 
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
-                repo.renameConversation(convId, trimmedText.take(40).ifBlank { "Chat" })
+                repo.renameConversation(
+                    convId,
+                    conversationService.writableOwnerScope(),
+                    trimmedText.take(40).ifBlank { "Chat" }
+                )
             }
+            scheduleMessageSync(convId, userMessage)
 
             knowledgeService.extractAndSaveFacts(trimmedText, "GLOBAL", userMessage.id)
-            knowledgeService.extractAndSaveEdges(trimmedText)
+            val ownerScope = conversationService.writableOwnerScope()
+            knowledgeService.extractAndSaveEdges(trimmedText, ownerScope)
 
             val personaName = personaViewModel.selectedPersona.value.name
-            val knowledgeContext = knowledgeService.retrieveRelevantContext(trimmedText, personaName)
+            val knowledgeContext = knowledgeService.retrieveRelevantContext(trimmedText, personaName, ownerScope)
 
             try {
                 val runtimeContext = chatEngine.buildRuntimeContext(trimmedText)
@@ -390,6 +841,8 @@ class ChatViewModel @Inject constructor(
                 )
                 _lastAppliedExtensionNames.value = extensionRuntime?.appliedExtensionNames.orEmpty()
                 sendChatViaApi(convId, trimmedText, runtimeContext = mergedContext, extensionRuntime)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 handleError(e)
             } finally {
@@ -402,12 +855,20 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessageWithImage(text: String, imageUri: Uri): Boolean {
         if (_isLoading.value || _isStreaming.value) return false
+        if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom) {
+            publishError(
+                "Bilder werden mit eigenen Anbietern in dieser Phase noch nicht unterstützt. Es wurde kein anderer Anbieter verwendet.",
+                retryable = false,
+                actionLabel = null
+            )
+            return false
+        }
         if (text.isBlank() && imageUri == Uri.EMPTY) return false
         if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_ANALYSIS)) return false
 
         val convId = _currentConversationId.value ?: run {
             viewModelScope.launch {
-                val personaName = personaViewModel.selectedPersona.value.name
+                val personaName = personaViewModel.selectedPersona.value.displayName
                 val wsName = conversationService.activeWorkspaceName()
                 val conv = conversationService.createConversation(personaName, wsName)
                 switchConversation(conv.id)
@@ -421,18 +882,25 @@ class ChatViewModel @Inject constructor(
 
         _isLoading.value = true
         activeGenerationJob = viewModelScope.launch {
-            repo.saveMessage(convId, userMessage)
+            saveMessageLocally(convId, userMessage)
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
-                repo.renameConversation(convId, text.take(40).ifBlank { "Bild-Chat" })
+                repo.renameConversation(
+                    convId,
+                    conversationService.writableOwnerScope(),
+                    text.take(40).ifBlank { "Bild-Chat" }
+                )
             }
+            scheduleMessageSync(convId, userMessage)
             try {
                 val systemPrompt = getSystemPromptWithCache(personaViewModel.selectedPersona.value)
                 val result = mediaService.analyzeImage(systemPrompt, text, imageUri,
                     enableOcr = prefs.getBoolean("local_ocr_enabled", true))
                 if (result.success) {
-                    repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
-                        text = result.content, isUser = false, timestamp = System.currentTimeMillis()))
+                    val assistantMessage = ChatMessage(id = UUID.randomUUID().toString(),
+                        text = result.content, isUser = false, timestamp = System.currentTimeMillis())
+                    saveMessageLocally(convId, assistantMessage)
+                    scheduleMessageSync(convId, assistantMessage)
                     notificationService.show("BamaChat (Bildanalyse)", result.content, prefs.getBoolean("notifications_enabled", true))
                 } else {
                     _errorMessage.value = result.error
@@ -456,47 +924,44 @@ class ChatViewModel @Inject constructor(
         activeGenerationJob = viewModelScope.launch {
             var convId = _currentConversationId.value
             if (convId == null) {
-                val personaName = personaViewModel.selectedPersona.value.name
+                val personaName = personaViewModel.selectedPersona.value.displayName
                 val wsName = conversationService.activeWorkspaceName()
                 val conv = conversationService.createConversation(personaName, wsName)
                 switchConversation(conv.id)
                 convId = conv.id
             }
             if (!skipUserMessage) {
-                repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
-                    text = prompt, isUser = true, timestamp = System.currentTimeMillis()))
+                val userMessage = ChatMessage(id = UUID.randomUUID().toString(),
+                    text = prompt, isUser = true, timestamp = System.currentTimeMillis())
+                saveMessageLocally(convId, userMessage)
+                scheduleMessageSync(convId, userMessage)
             }
             val current = _conversations.value.firstOrNull { it.id == convId }
             if (current != null && conversationService.isPlaceholderTitle(current.title)) {
-                repo.renameConversation(convId, "Bild: ${prompt.take(30)}")
+                repo.renameConversation(
+                    convId,
+                    conversationService.writableOwnerScope(),
+                    "Bild: ${prompt.take(30)}"
+                )
             }
             _isLoading.value = true
             try {
                 val genReq = mediaService.buildImageGenerationRequest(prompt)
-                val imageUrl = resolveWorkingImageUrl(genReq.candidateUrls)
+                val imageUrl = imageUrlResolver.resolveFirstWorkingUrl(genReq.candidateUrls)
                 if (imageUrl == null) {
                     // P0-A fix: Keine kaputte Bildkarte speichern, wenn der externe Bilddienst 402/403/Fehler liefert.
                     _errorMessage.value = "Bildgenerierung ist aktuell nicht erreichbar oder erfordert Auth/Zahlung beim Bilddienst. Bitte später erneut versuchen oder Bild-KI in den Einstellungen konfigurieren."
                     return@launch
                 }
                 if (!monetizationViewModel.consumeQuota(MonetizationViewModel.QuotaType.IMAGE_GENERATION)) return@launch
-                repo.saveMessage(convId, ChatMessage(id = UUID.randomUUID().toString(),
+                val assistantMessage = ChatMessage(id = UUID.randomUUID().toString(),
                     text = genReq.displayPrompt, isUser = false, timestamp = System.currentTimeMillis(),
-                    imageUrl = imageUrl))
+                    imageUrl = imageUrl)
+                saveMessageLocally(convId, assistantMessage)
+                scheduleMessageSync(convId, assistantMessage)
                 notificationService.show("BamaChat Bild", "Bild generiert: $prompt", prefs.getBoolean("notifications_enabled", true))
             } catch (e: Exception) { handleError(e) }
             finally { _isLoading.value = false }
-        }
-    }
-
-    private suspend fun resolveWorkingImageUrl(candidates: List<String>): String? {
-        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            candidates.firstOrNull { candidate ->
-                runCatching {
-                    val request = okhttp3.Request.Builder().url(candidate).get().build()
-                    imageHttpClient.newCall(request).execute().use { it.isSuccessful }
-                }.getOrDefault(false)
-            }
         }
     }
 
@@ -504,7 +969,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val groqKey = SecureSettingsStore.getString(appContext, prefs, "groq_api_key")
-                val result = mediaService.importMultimodal(uri, groqKey)
+                val result = mediaService.importMultimodal(uri, conversationService.writableOwnerScope(), groqKey)
                 when {
                     result == "image" -> sendMessageWithImage("Analysiere dieses Bild.", uri)
                     result?.startsWith("document_imported:") == true -> {
@@ -531,7 +996,7 @@ class ChatViewModel @Inject constructor(
             val networkError = com.example.bamachat.util.ErrorRecoveryManager
                 .mapErrorToUserMessage(java.io.IOException("No network"))
             publishError(
-                message = buildErrorDisplayText(networkError),
+                message = ChatErrorRecoveryPolicy.buildErrorDisplayText(networkError),
                 retryable = networkError.isRetryable,
                 actionLabel = networkError.actionLabel
             )
@@ -542,6 +1007,22 @@ class ChatViewModel @Inject constructor(
         val systemPrompt = getSystemPromptWithCache(personaViewModel.selectedPersona.value)
         val mergedRuntimeContext = listOfNotNull(runtimeContext, extensionRuntime?.promptContext)
             .filter { it.isNotBlank() }.joinToString("\n\n").takeIf { it.isNotBlank() }
+        val selection = chatProviderSelectionStore.selection.value
+        if (selection is ActiveChatProviderSelection.Custom) {
+            val toolsRequested = extensionRuntime?.forceWebResearch == true ||
+                (prefs.getBoolean(KEY_AGENT_TOOLS_ENABLED, false) &&
+                    (mcpServerManager.getToolDefinitionsOpenAI().isNotEmpty() || mcpWorkflowManager.getOpenAIToolDefinitions().isNotEmpty()))
+            if (toolsRequested) {
+                publishError(
+                    ProviderChatErrorMessages.message(com.example.bamachat.data.provider.chat.ProviderChatError.UNSUPPORTED_FEATURE),
+                    retryable = false,
+                    actionLabel = null
+                )
+                return
+            }
+            runCustomProviderChat(convId, text, systemPrompt, mergedRuntimeContext, selection)
+            return
+        }
         val forceWebResearch = extensionRuntime?.forceWebResearch == true
         val appliedExtensions = extensionRuntime?.appliedExtensionNames.orEmpty()
 
@@ -550,13 +1031,40 @@ class ChatViewModel @Inject constructor(
             if (canResearch) chatEngine.resolveLiveWebContext(text, forceByExtension = forceWebResearch) else null
         } else null
 
+        val messages = chatEngine.buildOpenRouterHistory(
+            _messages.value, latestUserText = text,
+            liveWebContext = webContext?.promptContext,
+            runtimeContext = mergedRuntimeContext,
+            historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
+        )
+        val pilotContent = runExperimentalNonStreamingChat(systemPrompt, messages)
+        if (!pilotContent.isNullOrBlank()) {
+            saveExperimentalNonStreamingResponse(convId, pilotContent, webContext)
+            return
+        }
+
         val toolDefs = mcpServerManager.getToolDefinitionsOpenAI() + mcpWorkflowManager.getOpenAIToolDefinitions()
         val hasTools = toolDefs.isNotEmpty()
+        val agentToolsEnabled = prefs.getBoolean(KEY_AGENT_TOOLS_ENABLED, false)
 
-        if (hasTools) {
+        if (shouldUseAgentLoop(hasTools = hasTools, agentToolsEnabled = agentToolsEnabled)) {
+            AppTelemetry.logEvent(
+                "chat_route_agent_loop",
+                mapOf(
+                    "has_tools" to hasTools.toString(),
+                    "agent_tools_enabled" to agentToolsEnabled.toString()
+                )
+            )
             runAgentLoop(convId, text, systemPrompt, startedAt, webContext, toolDefs)
         } else {
-            runStreamingChat(convId, text, systemPrompt, mergedRuntimeContext, webContext, forceWebResearch, startedAt)
+            AppTelemetry.logEvent(
+                "chat_route_streaming",
+                mapOf(
+                    "has_tools" to hasTools.toString(),
+                    "agent_tools_enabled" to agentToolsEnabled.toString()
+                )
+            )
+            runStreamingChat(convId, systemPrompt, messages, webContext, startedAt)
         }
     }
 
@@ -581,7 +1089,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
-        repo.saveMessage(convId, assistantMsg, touchConversation = false)
+        saveMessageLocally(convId, assistantMsg, touchConversation = false)
 
         var finalContent: String? = null
         var iteration = 0
@@ -590,14 +1098,29 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         try {
             while (iteration < maxIter) {
                 iteration++
-                val request = OpenRouterChatRequest(
+                val request = AgentLoopRequestFactory.buildAgentChatRequest(
                     model = selectedModel.value,
                     messages = messages,
-                    stream = false,
-                    tools = toolDefs,
-                    toolChoice = "auto",
-                    maxTokens = 2048
+                    toolDefs = toolDefs
                 )
+                runCatching {
+                    messages.toAiChatRequestForValidation(
+                        provider = AiProviderId.OPENROUTER,
+                        model = selectedModel.value,
+                        maxTokens = 2048,
+                        stream = false
+                    )
+                }.onSuccess { dryRunRequest ->
+                    AppTelemetry.logEvent(
+                        "ai_request_builder_dry_run",
+                        mapOf(
+                            "provider" to dryRunRequest.provider.name,
+                            "message_count" to dryRunRequest.messages.size.toString()
+                        )
+                    )
+                }.onFailure { error ->
+                    AppTelemetry.logError("ai_request_builder_dry_run_failed", error)
+                }
 
                 val response = apiManager.oneShotChatCompletion(request, fullSystemPrompt)
                 if (response == null) {
@@ -606,7 +1129,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         retryable = true,
                         actionLabel = "Erneut versuchen"
                     )
-                    repo.deleteMessage(assistantMsg.id)
+                    repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
                     return
                 }
 
@@ -653,11 +1176,12 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                         ) else it
                     }
 
-                    messages.add(OpenRouterMessage(
-                        role = "tool",
-                        toolCallId = toolCall.id,
-                        content = resultText
-                    ))
+                    messages.add(
+                        AgentLoopRequestFactory.createToolResultMessage(
+                            toolCallId = toolCall.id,
+                            content = resultText
+                        )
+                    )
                 }
             }
 
@@ -670,16 +1194,22 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                     retryable = true,
                     actionLabel = "Erneut versuchen"
                 )
-                repo.deleteMessage(assistantMsg.id)
+                repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
                 return
             }
 
-            repo.saveMessage(convId, assistantMsg.copy(text = trimmedContent, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso), touchConversation = true)
+            val finalAssistantMessage = assistantMsg.copy(
+                text = trimmedContent,
+                sources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso
+            )
+            saveMessageLocally(convId, finalAssistantMessage, touchConversation = true)
+            scheduleMessageSync(convId, finalAssistantMessage)
             clearRetryContext()
             notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
         } catch (e: Exception) {
             handleError(e)
-            repo.deleteMessage(assistantMsg.id)
+            repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
         } finally {
             _activeToolCalls.value = emptyList()
             _isStreaming.value = false
@@ -687,67 +1217,320 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     }
 
     private suspend fun runStreamingChat(
-        convId: String, text: String, systemPrompt: String,
-        mergedRuntimeContext: String?, webContext: ChatEngine.LiveWebContext?,
-        forceWebResearch: Boolean, startedAt: Long
+        convId: String, systemPrompt: String, messages: List<OpenRouterMessage>,
+        webContext: ChatEngine.LiveWebContext?, startedAt: Long
     ) {
-        val messages = chatEngine.buildOpenRouterHistory(
-            _messages.value, latestUserText = text,
-            liveWebContext = webContext?.promptContext,
-            runtimeContext = mergedRuntimeContext,
-            historyLimit = if (isDeveloperUnlimitedTrainingEnabled()) DEV_HISTORY_LIMIT else DEFAULT_HISTORY_LIMIT
-        )
-
+        _providerFallbackMessage.value = null
         _isStreaming.value = true
         val assistantMsg = ChatMessage(id = UUID.randomUUID().toString(), text = "",
             isUser = false, timestamp = System.currentTimeMillis())
-        repo.saveMessage(convId, assistantMsg, touchConversation = false)
         val streamingBuffer = StringBuilder()
         val streamFlushInterval = 250L
         var lastFlushAt = System.currentTimeMillis()
+        if (runExperimentalStreamingChat(
+                convId = convId,
+                systemPrompt = systemPrompt,
+                messages = messages,
+                webContext = webContext,
+                startedAt = startedAt,
+                assistantMsg = assistantMsg,
+                streamingBuffer = streamingBuffer,
+                streamFlushInterval = streamFlushInterval,
+                lastFlushAtProvider = { lastFlushAt },
+                updateLastFlushAt = { lastFlushAt = it }
+            )
+        ) {
+            return
+        }
 
         try {
-            val result = apiManager.streamChatResponse(
-                systemPrompt = systemPrompt, userMessages = messages,
-                onChunkReceived = { chunk ->
-                    streamingBuffer.append(chunk)
-                    val now = System.currentTimeMillis()
-                    if (now - lastFlushAt >= streamFlushInterval) {
-                        lastFlushAt = now
-                        viewModelScope.launch {
-                            repo.saveMessage(convId, assistantMsg.copy(text = streamingBuffer.toString()), touchConversation = false)
-                        }
+            AppTelemetry.logEvent(
+                "legacy_event_stream_started",
+                mapOf("model" to selectedModel.value)
+            )
+            var terminalLegacyError: ApiManager.ApiResponse? = null
+            val result = consumeAiStreamEvents(
+                events = legacyStreamAsAiEvents(
+                    provider = AiProviderId.OPENROUTER,
+                    model = selectedModel.value,
+                    streamChatResponse = { onChunkReceived, onError ->
+                        apiManager.streamChatResponse(
+                            systemPrompt = systemPrompt,
+                            userMessages = messages,
+                            onChunkReceived = onChunkReceived,
+                            onError = onError
+                        )
+                    },
+                    onIntermediateError = { safeStatus ->
+                        _providerFallbackMessage.value = safeStatus
+                        AppTelemetry.logEvent(
+                            "chat_stream_fallback",
+                            mapOf(
+                                "category" to "provider_fallback",
+                                "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                            )
+                        )
+                    },
+                    onTerminalError = { response ->
+                        terminalLegacyError = response
+                    }
+                ),
+                convId = convId,
+                assistantMsg = assistantMsg,
+                webSources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso,
+                streamingBuffer = streamingBuffer,
+                streamFlushInterval = streamFlushInterval,
+                lastFlushAtProvider = { lastFlushAt },
+                updateLastFlushAt = { lastFlushAt = it },
+                saveMessage = { targetConvId, message, touchConversation ->
+                    saveMessageLocally(targetConvId, message, touchConversation = touchConversation)
+                    if (touchConversation) {
+                        scheduleMessageSync(targetConvId, message)
                     }
                 },
-                onError = { error ->
-                    publishError(
-                        message = error,
-                        retryable = true,
-                        actionLabel = "Erneut versuchen"
+                clearRetryContext = { clearRetryContext() },
+                showNotification = { finalText ->
+                    notificationService.show(
+                        "BamaChat",
+                        finalText,
+                        prefs.getBoolean("notifications_enabled", true)
                     )
-                    AppTelemetry.logEvent("chat_stream_error", mapOf("duration_ms" to (System.currentTimeMillis() - startedAt).toString()))
+                },
+                streamTelemetrySource = "legacy",
+                streamTelemetryModel = selectedModel.value,
+                streamStartedAtMs = startedAt,
+                logStreamEvent = AppTelemetry::logEvent
+            )
+            _providerFallbackMessage.value = null
+
+            if (result.success) {
+                AppTelemetry.logEvent(
+                    "legacy_event_stream_completed",
+                    mapOf(
+                        "model" to selectedModel.value,
+                        "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                    )
+                )
+            } else {
+                val terminalError = terminalLegacyError
+                if (terminalError != null || !result.errorMessage.isNullOrBlank()) {
+                    val userFailure = UserFacingAiErrorMapper.terminal(
+                        AiProviderId.OPENROUTER,
+                        terminalError?.error
+                    )
+                    publishError(
+                        message = result.errorMessage ?: userFailure.message,
+                        retryable = terminalError?.retryable ?: true,
+                        actionLabel = if (terminalError?.retryable != false) "Erneut versuchen" else null
+                    )
+                }
+                AppTelemetry.logEvent(
+                    "legacy_event_stream_error",
+                    mapOf(
+                        "model" to selectedModel.value,
+                        "reason" to (result.fallbackReason ?: "unknown"),
+                        "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                    )
+                )
+                repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleError(e)
+            repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
+        } finally {
+            _providerFallbackMessage.value = null
+        }
+    }
+
+    private suspend fun runExperimentalStreamingChat(
+        convId: String,
+        systemPrompt: String,
+        messages: List<OpenRouterMessage>,
+        webContext: ChatEngine.LiveWebContext?,
+        startedAt: Long,
+        assistantMsg: ChatMessage,
+        streamingBuffer: StringBuilder,
+        streamFlushInterval: Long,
+        lastFlushAtProvider: () -> Long,
+        updateLastFlushAt: (Long) -> Unit
+    ): Boolean {
+        val sharedAiExperimental = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+        val developerModeEnabled = prefs.getBoolean("developer_mode_enabled", false)
+        val streamingPilotEnabled = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_STREAMING_PILOT, false)
+        val pilotEnabled = AndroidAiOrchestrator.isStreamingPilotEnabled(
+            sharedAiExperimental = sharedAiExperimental,
+            developerModeEnabled = developerModeEnabled,
+            sharedAiStreamingPilot = streamingPilotEnabled
+        )
+        if (!pilotEnabled) {
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf("reason" to "flag_off", "model" to selectedModel.value)
+            )
+            return false
+        }
+
+        val apiKey = SecureSettingsStore
+            .getString(appContext, prefs, "openrouter_api_key")
+            .takeIf { it.length > 10 }
+        if (apiKey == null) {
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf("reason" to "missing_api_key", "model" to selectedModel.value)
+            )
+            return false
+        }
+
+        AppTelemetry.logEvent(
+            "stream_pilot_path_selected",
+            mapOf("model" to selectedModel.value)
+        )
+
+        return try {
+            val request = (listOf(OpenRouterMessage("system", systemPrompt)) + messages)
+                .toAiChatRequestForValidation(
+                    provider = AiProviderId.OPENROUTER,
+                    model = selectedModel.value,
+                    maxTokens = 4096,
+                    temperature = 0.7,
+                    stream = true
+                )
+            val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
+            val textChunkStream = OpenRouterSseTextChunkStream(service)
+            val orchestrator = AndroidAiOrchestrator(
+                isExperimentalEnabled = { false },
+                chatCompletion = service::chatCompletion,
+                isStreamingExperimentalEnabled = { true },
+                streamTextChunks = textChunkStream::streamTextChunks,
+                legacyStreamEvents = {
+                    flow {
+                        throw StreamingPilotLegacyFallbackException("orchestrator_fallback")
+                    }
                 }
             )
 
-            if (result.success && result.content.isNotBlank()) {
-                val finalized = assistantMsg.copy(text = result.content, sources = webContext?.sources.orEmpty(), webFetchedAtIso = webContext?.fetchedAtIso)
-                repo.saveMessage(convId, finalized, touchConversation = true)
-                clearRetryContext()
-                notificationService.show("BamaChat", result.content, prefs.getBoolean("notifications_enabled", true))
-            } else {
-                if (result.error.isNotBlank()) {
-                    publishError(
-                        message = result.error,
-                        retryable = result.retryable,
-                        actionLabel = if (result.retryable) "Erneut versuchen" else null
+            val result = consumeAiStreamEvents(
+                events = orchestrator.streamEvents(request),
+                convId = convId,
+                assistantMsg = assistantMsg,
+                webSources = webContext?.sources.orEmpty(),
+                webFetchedAtIso = webContext?.fetchedAtIso,
+                streamingBuffer = streamingBuffer,
+                streamFlushInterval = streamFlushInterval,
+                lastFlushAtProvider = lastFlushAtProvider,
+                updateLastFlushAt = updateLastFlushAt,
+                saveMessage = { targetConvId, message, touchConversation ->
+                    saveMessageLocally(targetConvId, message, touchConversation = touchConversation)
+                    if (touchConversation) {
+                        scheduleMessageSync(targetConvId, message)
+                    }
+                },
+                clearRetryContext = { clearRetryContext() },
+                showNotification = { finalText ->
+                    notificationService.show(
+                        "BamaChat",
+                        finalText,
+                        prefs.getBoolean("notifications_enabled", true)
                     )
-                }
-                repo.deleteMessage(assistantMsg.id)
+                },
+                streamTelemetrySource = "pilot",
+                streamTelemetryModel = selectedModel.value,
+                streamStartedAtMs = startedAt,
+                logStreamEvent = AppTelemetry::logEvent
+            )
+            if (!result.success) {
+                throw StreamingPilotLegacyFallbackException(result.fallbackReason ?: "empty_stream")
             }
-        } catch (e: Exception) {
-            handleError(e)
-            repo.deleteMessage(assistantMsg.id)
+            AppTelemetry.logEvent(
+                "stream_pilot_completed",
+                mapOf(
+                    "model" to selectedModel.value,
+                    "duration_ms" to (System.currentTimeMillis() - startedAt).toString()
+                )
+            )
+            true
+        } catch (error: CancellationException) {
+            throw error
+        } catch (fallback: StreamingPilotLegacyFallbackException) {
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf("reason" to fallback.reason, "model" to selectedModel.value)
+            )
+            false
+        } catch (error: Exception) {
+            AppTelemetry.logError("android_ai_orchestrator_stream_pilot_integration_failed", error)
+            AppTelemetry.logEvent(
+                "stream_pilot_legacy_selected",
+                mapOf(
+                    "reason" to "exception",
+                    "model" to selectedModel.value,
+                    "exception" to error::class.java.simpleName
+                )
+            )
+            false
         }
+    }
+
+    private class StreamingPilotLegacyFallbackException(
+        val reason: String
+    ) : RuntimeException(reason)
+    private suspend fun runExperimentalNonStreamingChat(
+        systemPrompt: String,
+        messages: List<OpenRouterMessage>
+    ): String? {
+        val sharedAiExperimental = prefs.getBoolean(AndroidAiOrchestrator.KEY_SHARED_AI_EXPERIMENTAL, false)
+        val developerModeEnabled = prefs.getBoolean("developer_mode_enabled", false)
+        val pilotEnabled = AndroidAiOrchestrator.isSharedAiPilotEnabled(
+            sharedAiExperimental = sharedAiExperimental,
+            developerModeEnabled = developerModeEnabled
+        )
+        if (!pilotEnabled) return null
+
+        val apiKey = SecureSettingsStore
+            .getString(appContext, prefs, "openrouter_api_key")
+            .takeIf { it.length > 10 }
+            ?: return null
+
+        return runCatching {
+            val request = (listOf(OpenRouterMessage("system", systemPrompt)) + messages)
+                .toAiChatRequestForValidation(
+                    provider = AiProviderId.OPENROUTER,
+                    model = selectedModel.value,
+                    maxTokens = 4096,
+                    temperature = 0.7,
+                    stream = false
+                )
+            val service = ApiClient.createOpenAICompatibleService(ApiClient.Provider.OPENROUTER, apiKey)
+            val orchestrator = AndroidAiOrchestrator(
+                isExperimentalEnabled = { pilotEnabled },
+                chatCompletion = service::chatCompletion
+            )
+            orchestrator.chatOrNull(request)?.message?.text?.trim()?.takeIf { it.isNotBlank() }
+        }.onFailure { error ->
+            AppTelemetry.logError("android_ai_orchestrator_pilot_failed", error)
+        }.getOrNull()
+    }
+
+    private suspend fun saveExperimentalNonStreamingResponse(
+        convId: String,
+        content: String,
+        webContext: ChatEngine.LiveWebContext?
+    ) {
+        val assistantMsg = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            text = content,
+            isUser = false,
+            timestamp = System.currentTimeMillis(),
+            sources = webContext?.sources.orEmpty(),
+            webFetchedAtIso = webContext?.fetchedAtIso
+        )
+        saveMessageLocally(convId, assistantMsg, touchConversation = true)
+        scheduleMessageSync(convId, assistantMsg)
+        clearRetryContext()
+        notificationService.show("BamaChat", content, prefs.getBoolean("notifications_enabled", true))
     }
 
     fun getConversationsForWorkspace(activeWorkspaceName: String, onlyActiveWorkspace: Boolean): List<com.example.bamachat.data.local.ConversationEntity> {
@@ -807,8 +1590,82 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         _isErrorRetryable.value = false
     }
 
+    fun currentOwnerScope(): String = conversationService.currentOwnerScope()
+
+    private suspend fun runCustomProviderChat(
+        convId: String,
+        latestUserText: String,
+        systemPrompt: String,
+        runtimeContext: String?,
+        selection: ActiveChatProviderSelection.Custom
+    ) {
+        val resolution = chatProviderResolver.resolve(selection)
+        if (resolution is ActiveChatProviderResolution.Invalid) {
+            publishError(resolution.userMessage, retryable = false, actionLabel = null)
+            return
+        }
+        if (resolution !is ActiveChatProviderResolution.ResolvedCustomProvider) return
+        val messages = buildList {
+            add(ProviderChatMessage("system", listOfNotNull(systemPrompt, runtimeContext).joinToString("\n\n")))
+            _messages.value.takeLast(DEFAULT_HISTORY_LIMIT).forEach { message ->
+                val clean = message.text.trim()
+                if (clean.isNotEmpty()) add(ProviderChatMessage(if (message.isUser) "user" else "assistant", clean))
+            }
+            if (lastOrNull()?.role != "user" || lastOrNull()?.content != latestUserText) {
+                add(ProviderChatMessage("user", latestUserText))
+            }
+        }
+        val assistantId = UUID.randomUUID().toString()
+        var assistantCreated = false
+        val buffer = StringBuilder()
+        var lastFlushAt = 0L
+        _isStreaming.value = true
+        try {
+            val result = providerChatExecutionEngine.execute(
+                ProviderChatRequest(selection, messages)
+            ) { chunk ->
+                if (chunk.text.isEmpty()) return@execute
+                buffer.append(chunk.text)
+                val now = System.currentTimeMillis()
+                if (!assistantCreated || now - lastFlushAt >= 250L) {
+                    saveMessageLocally(
+                        convId,
+                        ChatMessage(assistantId, buffer.toString(), false, System.currentTimeMillis()),
+                        touchConversation = false
+                    )
+                    assistantCreated = true
+                    lastFlushAt = now
+                }
+            }
+            val finalText = result.text.trim()
+            if (finalText.isEmpty()) throw ProviderChatException(
+                com.example.bamachat.data.provider.chat.ProviderChatError.EMPTY_RESPONSE,
+                message = "Custom provider returned empty response"
+            )
+            val finalMessage = ChatMessage(assistantId, finalText, false, System.currentTimeMillis())
+            saveMessageLocally(convId, finalMessage, touchConversation = true)
+            scheduleMessageSync(convId, finalMessage)
+            clearRetryContext()
+            notificationService.show("BamaChat", finalText, prefs.getBoolean("notifications_enabled", true))
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            if (assistantCreated) repo.deleteMessage(assistantId, conversationService.writableOwnerScope())
+            throw cancelled
+        } catch (error: ProviderChatException) {
+            if (assistantCreated) repo.deleteMessage(assistantId, conversationService.writableOwnerScope())
+            publishError(ProviderChatErrorMessages.message(error.error), retryable = true, actionLabel = "Erneut versuchen")
+        } finally {
+            _isStreaming.value = false
+        }
+    }
+
+    fun dismissProviderFallbackStatus() {
+        _providerFallbackMessage.value = null
+    }
+
     fun retryLastFailedMessage(): Boolean {
-        val retryText = _lastRetryableUserMessage.value?.takeIf { it.isNotBlank() } ?: return false
+        val retryText = _lastRetryableUserMessage.value
+            ?.takeIf { ChatErrorRecoveryPolicy.isValidRetryCandidate(it) }
+            ?: return false
         lastAcceptedTextSend = null
         lastAcceptedConversationId = null
         lastAcceptedTextSendAtMs = 0L
@@ -849,8 +1706,9 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     // ===== Private/Utilities =====
     private fun getSystemPromptWithCache(persona: Persona): String {
         val now = System.currentTimeMillis()
-        if (systemPromptCache != null && now < systemPromptCacheExpireAt) {
-            return systemPromptCache!!
+        val cached = systemPromptCache
+        if (cached != null && now < systemPromptCacheExpireAt) {
+            return cached
         }
         val prompt = personaViewModel.getSystemPromptCached(persona)
         systemPromptCache = prompt
@@ -873,19 +1731,15 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         AppTelemetry.logError("chat_error", e)
         val userErrorMessage = com.example.bamachat.util.ErrorRecoveryManager.mapErrorToUserMessage(e)
         publishError(
-            message = buildErrorDisplayText(userErrorMessage),
+            message = ChatErrorRecoveryPolicy.buildErrorDisplayText(userErrorMessage),
             retryable = userErrorMessage.isRetryable,
             actionLabel = userErrorMessage.actionLabel
         )
     }
 
-    private fun buildErrorDisplayText(msg: UserErrorMessage): String {
-        return "${msg.title}: ${msg.description}\n\n💡 ${msg.suggestion}"
-    }
-
     private fun publishError(message: String, retryable: Boolean, actionLabel: String?) {
         val candidate = pendingUserMessageForRetry?.takeIf { it.isNotBlank() }
-        val canRetry = retryable && !candidate.isNullOrBlank()
+        val canRetry = ChatErrorRecoveryPolicy.shouldEnableRetry(retryable, candidate)
         if (canRetry) {
             _lastRetryableUserMessage.value = candidate
             _isErrorRetryable.value = true
@@ -1006,6 +1860,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         messagesJob?.cancel()
         activeGenerationJob?.cancel()
         prefs.unregisterOnSharedPreferenceChangeListener(prefChangeListener)
+        imageUrlResolver.shutdown()
         bufferLock.write { allMessagesBuffer.clear() }
         _messageFeedback.value = emptyMap()
         systemPromptCache = null

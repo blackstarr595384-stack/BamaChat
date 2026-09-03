@@ -32,7 +32,7 @@ class CloudVoiceManagerConfigTest {
         requireNotNull(config)
         assertEquals(CloudVoiceManager.Provider.ELEVENLABS, config.provider)
         assertEquals("JBFqnCBsd6RMkjVDRZzb", config.voiceId)
-        assertEquals("eleven_multilingual_v2", config.modelId)
+        assertEquals("eleven_flash_v2_5", config.modelId)
     }
 
     @Test

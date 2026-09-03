@@ -26,6 +26,7 @@ import com.example.bamachat.data.OpenRouterVisionMessage
 import com.example.bamachat.data.local.ChatDatabase
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.data.repository.ChatRepository
+import com.example.bamachat.service.UserFacingAiErrorMapper
 import com.example.bamachat.util.AppTelemetry
 import com.example.bamachat.util.EmotionAnalyzer
 import com.example.bamachat.util.EmotionSignal
@@ -152,16 +153,15 @@ class ApiManager(
                 mapOf(
                     "failed_provider" to config.provider.id,
                     "next_provider" to (if (index < providers.size - 1) providers[index + 1].provider.id else "none"),
-                    "error" to lastError.take(100)
+                    "error_category" to UserFacingAiErrorMapper.category(lastError).telemetryValue
                 )
             )
 
             if (index < providers.size - 1) {
-                onError("${config.provider.id} fehlgeschlagen, versuche ${providers[index + 1].provider.id}...")
+                onError(UserFacingAiErrorMapper.fallbackInProgress(config.provider))
             }
         }
 
-        onError("Alle Provider fehlgeschlagen. Letzer Fehler: $lastError")
         return ApiResponse(success = false, error = lastError, retryable = false)
     }
 
@@ -456,7 +456,7 @@ class ApiManager(
             val request = OpenRouterChatRequest(
                 model = config.model,
                 messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
-                maxTokens = 1024,
+                maxTokens = 4096,
                 temperature = 0.7f,
                 stream = true
             )
@@ -544,7 +544,7 @@ class ApiManager(
                     OpenRouterMessage("system", systemPrompt),
                     OpenRouterMessage("user", userPrompt)
                 ),
-                maxTokens = 800,
+                maxTokens = 2048,
                 temperature = 0.65f,
                 stream = false
             )
@@ -589,7 +589,7 @@ class ApiManager(
             val request = buildOpenCodeZenRequest(
                 model = config.model,
                 messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
-                maxTokens = 1024,
+                maxTokens = 4096,
                 temperature = 0.7f
             )
             val response = service.message(request)
@@ -645,7 +645,7 @@ class ApiManager(
                     OpenRouterMessage("system", systemPrompt),
                     OpenRouterMessage("user", userPrompt)
                 ),
-                maxTokens = 800,
+                maxTokens = 2048,
                 temperature = 0.65f
             )
             val response = service.message(request)
@@ -698,7 +698,7 @@ class ApiManager(
             val request = buildOpenCodeResponsesRequest(
                 model = config.model,
                 messages = listOf(OpenRouterMessage("system", systemPrompt)) + userMessages,
-                maxTokens = 1024,
+                maxTokens = 4096,
                 temperature = 0.7f
             )
             val response = service.response(request)
@@ -752,7 +752,7 @@ class ApiManager(
                     OpenRouterMessage("system", systemPrompt),
                     OpenRouterMessage("user", userPrompt)
                 ),
-                maxTokens = 800,
+                maxTokens = 2048,
                 temperature = 0.65f
             )
             val response = service.response(request)
@@ -986,7 +986,7 @@ class ApiManager(
                         )
                     )
                 ),
-                maxTokens = 1024,
+                maxTokens = 2048,
                 temperature = 0.4f,
                 stream = false
             )

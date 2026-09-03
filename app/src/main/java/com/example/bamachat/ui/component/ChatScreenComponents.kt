@@ -1,5 +1,8 @@
 package com.example.bamachat.ui.component
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.*
@@ -9,6 +12,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,16 +30,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
 import coil.compose.AsyncImage
 import com.example.bamachat.data.model.ChatMessage
 import com.example.bamachat.ui.theme.NeonPurple
 import com.example.bamachat.ui.theme.SurfaceDarkCard
+import com.example.bamachat.util.AppTelemetry
 import java.text.SimpleDateFormat
 import java.util.*
 
 @Composable
 fun ChatBubble(
     message: ChatMessage,
+    feedback: Boolean? = null,
+    onFeedback: (Boolean) -> Unit = {},
     onSpeak: (String, String) -> Unit,
     isSpeaking: Boolean = false,
     showLiveSources: Boolean = true,
@@ -78,7 +87,7 @@ fun ChatBubble(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .offset(y = bubbleShift)
+            .offset { IntOffset(0, bubbleShift.roundToPx()) }
             .graphicsLayer(alpha = bubbleAlpha),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
@@ -128,8 +137,8 @@ fun ChatBubble(
                     Text(
                         text = message.text,
                         color = if (isUser) Color.White else Color.White.copy(alpha = 0.9f),
-                        fontSize = (14f + fontSize).sp,
-                        lineHeight = (20f + fontSize * 1.2f).sp
+                        fontSize = fontSize.coerceIn(14f, 24f).sp,
+                        lineHeight = (fontSize.coerceIn(14f, 24f) * 1.45f).sp
                     )
 
                     message.imageUrl?.let { url ->
@@ -156,12 +165,77 @@ fun ChatBubble(
                         Spacer(Modifier.height(4.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val context = LocalContext.current
+                            var copied by remember { mutableStateOf(false) }
+
+                            // Copy Button
+                            IconButton(
+                                onClick = {
+                                    val text = message.text
+                                    if (text.isNotBlank()) {
+                                        try {
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
+                                            copied = true
+                                            AppTelemetry.logEvent("chat_copy_succeeded")
+                                            android.widget.Toast.makeText(context, "Nachricht kopiert.", android.widget.Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            AppTelemetry.logError("chat_copy_failed", e)
+                                            android.widget.Toast.makeText(context, "Kopieren fehlgeschlagen.", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                                    contentDescription = "Kopieren",
+                                    tint = if (copied) Color.Green.copy(alpha = 0.8f) else themeColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            // Speak Button
+                            IconButton(
+                                onClick = { onSpeak(message.id, message.text) },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                                    contentDescription = "Vorlesen",
+                                    tint = if (isSpeaking) Color.Yellow.copy(alpha = 0.8f) else themeColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            if (!isUser) {
+                                IconButton(onClick = { onFeedback(true) }, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.Default.ThumbUp,
+                                        contentDescription = "Hilfreiche Antwort",
+                                        tint = if (feedback == true) themeColor else Color.White.copy(alpha = 0.55f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                IconButton(onClick = { onFeedback(false) }, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.Default.ThumbDown,
+                                        contentDescription = "Problematische Antwort melden",
+                                        tint = if (feedback == false) MaterialTheme.colorScheme.error else Color.White.copy(alpha = 0.55f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.weight(1f))
+
                             Text(
                                 text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp)),
                                 color = if (isUser) Color.White.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.3f),
-                                fontSize = 10.sp
+                                style = MaterialTheme.typography.labelMedium
                             )
                         }
                     }
@@ -205,7 +279,7 @@ fun UploadedImageCard(imageUrl: String, caption: String, _themeColor: Color) {
         Spacer(Modifier.height(4.dp))
         Text(
             SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis())),
-            color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp
+            color = Color.White.copy(alpha = 0.65f), style = MaterialTheme.typography.labelMedium
         )
     }
 }
@@ -236,16 +310,16 @@ fun GeneratedImageCard(imageUrl: String, prompt: String, themeColor: Color) {
         }
         if (prompt.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
-            Text("Prompt: $prompt", color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("Prompt: $prompt", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imageUrl))) }, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imageUrl))) }, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.AutoMirrored.Filled.OpenInNew, "Öffnen", tint = themeColor, modifier = Modifier.size(16.dp))
             }
             Text(
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis())),
-                color = Color.White.copy(alpha = 0.35f), fontSize = 10.sp
+                color = Color.White.copy(alpha = 0.65f), style = MaterialTheme.typography.labelMedium
             )
         }
     }
@@ -265,7 +339,7 @@ fun BubbleSourcesSection(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Live-Quellen", color = themeColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        if (fetchedLabel != null) Text(fetchedLabel, color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+        if (fetchedLabel != null) Text(fetchedLabel, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
         sources.take(4).forEachIndexed { index, source ->
             Surface(
                 shape = RoundedCornerShape(8.dp), color = Color.White.copy(alpha = 0.04f),
@@ -276,11 +350,11 @@ fun BubbleSourcesSection(
                 Column(modifier = Modifier.padding(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Default.Public, null, tint = themeColor, modifier = Modifier.size(12.dp))
-                        Text("${index + 1}. ${source.title}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("${index + 1}. ${source.title}", color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     if (source.snippet.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
-                        Text(source.snippet, color = Color.White.copy(alpha = 0.7f), fontSize = 10.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text(source.snippet, color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }

@@ -43,21 +43,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -skip-adb-auth -no-metrics
           script: |
-            set +e
-            chmod +x ./gradlew
-            ./gradlew app:assembleDebug app:assembleDebugAndroidTest --stacktrace --info
-            BUILD_EXIT=$?
-            adb shell rm -rf /sdcard/Download/bamachat-screenshots || true
-            ./gradlew app:connectedDebugAndroidTest \
-              -Pandroid.testInstrumentationRunnerArguments.class=com.example.bamachat.AppScreenshotCaptureTest \
-              --stacktrace --info
-            TEST_EXIT=$?
-            mkdir -p artifacts
-            adb pull /sdcard/Download/bamachat-screenshots artifacts/screenshots
-            adb logcat -d > artifacts/logcat.txt || true
-            if [ $BUILD_EXIT -ne 0 ] || [ $TEST_EXIT -ne 0 ]; then
-              exit 1
-            fi
+            set +e; chmod +x ./gradlew; ./gradlew app:assembleDebug app:assembleDebugAndroidTest --stacktrace --info; BUILD_EXIT=$?; adb shell rm -rf /sdcard/Download/bamachat-screenshots || true; ./gradlew app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.bamachat.AppScreenshotCaptureTest --stacktrace --info; TEST_EXIT=$?; mkdir -p artifacts; adb pull /sdcard/Download/bamachat-screenshots artifacts/screenshots; PULL_EXIT=$?; adb logcat -d > artifacts/logcat.txt || true; if [ "$BUILD_EXIT" -ne 0 ] || [ "$TEST_EXIT" -ne 0 ] || [ "$PULL_EXIT" -ne 0 ]; then exit 1; fi
 
       - name: Upload screenshots artifact
         if: always()

@@ -8,6 +8,7 @@ import android.net.NetworkRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 class OfflineManager(private val context: Context) {
@@ -66,10 +67,10 @@ class OfflineManager(private val context: Context) {
     }
 
     fun enqueueOperation(type: OperationType, payload: String) {
-        _pendingOperations.value = _pendingOperations.value + PendingOperation(
+        _pendingOperations.update { old -> old + PendingOperation(
             type = type,
             payload = payload
-        )
+        ) }
     }
 
     suspend fun processQueue(maxRetries: Int = 3): Int {

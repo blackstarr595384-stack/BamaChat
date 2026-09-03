@@ -58,12 +58,16 @@ Aktuelle Shared-Core-Bausteine:
 - `WorkspaceNaming` (Workspace-Tagging/Normalisierung)
 - `ChatSendDeduplicator` (Send-Dedup-Fenster)
 - `ExtensionRuntimeOrchestrator` (Quick-Action + Extension-Hinweise fuer Runtime-Prompts)
+- `shared/core/github/*` (plattformneutrale Allowlist, Pfad-/Groessenlimits, Snapshot-Modelle und Untrusted-Context-Grenzen fuer GitHub Intelligence)
 
 Desktop-Client relevante Klassen:
 - `desktop/DesktopMain.kt` (Shell + Chat/Workspace/Settings Screens)
-- `desktop/DesktopChatGateway.kt` (OpenRouter/Ollama HTTP-Calls)
-- `desktop/DesktopSettingsStore.kt` (persistente Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`)
-- `desktop/DesktopCredentialCipher.kt` (optionale AES-GCM Verschluesselung von Session-Tokens)
+- `desktop/DesktopChatGateway.kt` (OpenRouter/Ollama HTTP-Calls inklusive SSE-/NDJSON-Streaming)
+- `desktop/DesktopChatHttpTransport.kt` (injizierbarer, abbrechbarer HTTP-Transport fuer Desktop-Chat)
+- `desktop/DesktopSettingsStore.kt` (atomare Settings unter `%USERPROFILE%/.bamachat-desktop/settings.properties`; isolierbar per `BAMACHAT_DESKTOP_SETTINGS_DIR`)
+- `desktop/DesktopLocalStateStore.kt` (versionierte, atomare Chat-/Workspace-Persistenz pro Owner-Scope)
+- `desktop/DesktopScopedStateSession.kt` (aktive Gast-/Account-Scope-Session ohne automatische Datenvermischung)
+- `desktop/DesktopCredentialCipher.kt` (Windows-DPAPI im Current-User-Scope plus AES-GCM-Legacy-Leser/Fallback)
 - `desktop/DesktopExtensionCatalog.kt` (Desktop-seitige Extension-Auswahl fuer Runtime-Kontext)
 - `desktop/DesktopFirebaseConfig.kt` (Default-Resolver aus `app/google-services.json`)
 - `desktop/DesktopCloudSyncGateway.kt` (Firebase Auth REST + Firestore Workspace-Sync)
@@ -135,6 +139,7 @@ Details und Prüfablauf:
 .\gradlew.bat :desktopApp:build
 .\gradlew.bat :desktopApp:run
 .\gradlew.bat :desktopApp:packageMsi
+.\gradlew.bat :desktopApp:packageStoreMsix
 .\gradlew.bat :sharedCore:test
 powershell -ExecutionPolicy Bypass -File .\scripts\start-bamachat-desktop.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\desktop-launch-smoke-test.ps1
@@ -156,7 +161,9 @@ Desktop Google-Login (Stage 4):
 - Bei Nutzung eines Web-OAuth-Clients kann ein `client_secret` im Desktop-Settings-Screen erforderlich sein.
 
 Desktop Session-Hardening (Stage 5):
-- Optional verschluesselte lokale Session-Speicherung (`encrypt_cloud_session`) via `DesktopCredentialCipher` (AES-GCM, Salt unter `%USERPROFILE%/.bamachat-desktop/session_salt.bin`).
+- OpenRouter-API-Key, optionales Google-OAuth-Client-Secret sowie Firebase-ID-/Refresh-Token werden unter Windows immer mit DPAPI im Current-User-Scope und dem Formatpräfix `dpapi:v1:` gespeichert. Der Legacy-Schalter `encrypt_cloud_session` steuert diesen Schutz nicht mehr; öffentliche Firebase-/OAuth-Konfiguration bleibt bewusst unverschlüsselt.
+- Bestehende `enc:v1:`-AES-GCM- und unterstützte Klartextwerte werden einmalig gelesen und atomar in das aktuelle Schutzformat migriert. Vor dem Replace bleibt die ursprüngliche `settings.properties` als eindeutig bezeichnete Recovery-Kopie im selben Settings-Verzeichnis erhalten; beschädigte oder fremde DPAPI-Werte werden nicht als Klartext interpretiert und stehen bis zur erneuten Eingabe beziehungsweise Anmeldung nicht zur Verfügung.
+- Nicht-Windows-Desktop-Builds verwenden einen klar gekennzeichneten `aesgcm:v1:`-Fallback mit `session_salt.bin`. `BAMACHAT_DESKTOP_SETTINGS_DIR` setzt fuer Tests und Smoke-Laeufe ein absolutes, eigenstaendiges Settings-Verzeichnis; dort bleiben `settings.properties`, Recovery-Kopien und Legacy-Salt vollständig isoliert. Ohne diesen Override bleibt der Produktionspfad unverändert. Der bestehende `BAMACHAT_DESKTOP_DATA_DIR`-Fallback auf dessen Unterordner `settings` bleibt kompatibel.
 - Auto-Refresh der Firebase Session im Desktop-Root vor Ablauf.
 - Einheitliche `CloudSessionExpiredException` fuer Refresh-/401-Faelle mit Auto-Logout-Pfad in der UI.
 
@@ -164,6 +171,22 @@ Desktop Packaging-Hardening (Stage 6):
 - `desktopApp/build.gradle.kts` setzt explizite Runtime-Module (`java.net.http`, `jdk.httpserver`, `jdk.crypto.ec`, `jdk.unsupported`, `java.naming`), um NoClassDefFoundError in installierten Builds zu vermeiden.
 - MSI ist auf `perUserInstall = true` + Startmenue-Gruppe (`BamaChat`) konfiguriert, damit Installation/Update ohne Admin-Rechte moeglich ist.
 - `upgradeUuid` ist fixiert fuer konsistente Upgrades innerhalb der per-user Linie.
+- `:desktopApp:packageStoreMsix` erzeugt unter Windows aus dem Compose-App-Image ein ungezeichnetes Store-Paket unter `desktopApp/build/compose/binaries/main/msix/BamaFlow_<A.B.C.0>_x64.msix`; MSI- und EXE-Installer werden nicht eingebettet. Die Desktop-Version `A.B.C` wird nur bei drei gueltigen numerischen Komponenten in das MSIX-Schema `A.B.C.0` ueberfuehrt.
+- Die Partner-Center-Identitaet lautet `MamadouDianBald.BamaFlow`, Publisher `CN=2279D882-BC23-4831-AA4E-D384F8EFCD9A` und Publisher-Anzeigename `Mamadou Dian Baldé`. Die Store-ID `9P61V47KR1Z8` dient ausschließlich der Dokumentation und ist keine Package Identity.
+- Die quadratischen MSIX-PNG-Assets werden deterministisch aus `desktopApp/src/main/resources/bamachat.ico` erzeugt und zusammen mit Manifest, Executable, Capability sowie dem Ausschluss lokaler Settings, Zustandsdateien, Secrets, Zertifikate und Installer nach dem Entpacken erneut geprüft.
+- `desktopApp/scripts/test-store-msix-local.ps1` signiert ausschließlich eine temporaere Paketkopie mit einem kurzlebigen CurrentUser-Testzertifikat, installiert sie ohne App-Start und entfernt danach exakt das Testpaket, das Zertifikat und alle temporaeren Dateien. Die ungezeichnete Store-Ausgabe bleibt unverändert.
+
+Desktop Local Persistence (Stage 7):
+- Chatverlauf und Workspace-Notizen liegen unter `%LOCALAPPDATA%/BamaChat/data`; ohne geeigneten Windows-Pfad wird `%USERPROFILE%/.bamachat-desktop/data` verwendet. `BAMACHAT_DESKTOP_DATA_DIR` setzt ausschließlich fuer Tests und Smoke-Laeufe ein separates Datenverzeichnis. Wenn kein eigener Settings-Override gesetzt ist, bleiben Desktop-Settings kompatibel im Unterordner `settings` dieses Overrides.
+- Gastdaten nutzen einen stabilen lokalen Scope. Angemeldete Konten erhalten ausschließlich einen aus der erfolgreich authentifizierten UID abgeleiteten SHA-256-Scope; rohe UID und E-Mail stehen weder im Dateinamen noch im Zustandsdokument.
+- Scope-Wechsel laden nur den Ziel-Scope. Gast- und Kontodaten werden weder geloescht noch automatisch zusammengefuehrt; fehlgeschlagene Anmeldungen wechseln den aktiven Scope nicht.
+- Das JSON-Format besitzt eine `schemaVersion` und wird per temporaerer Datei mit anschließendem atomarem Replace/Move geschrieben. Beschädigte oder inkompatible Dateien werden als eindeutig benannte Recovery-Kopie im selben Ordner bewahrt; die App startet fuer diesen Scope leer weiter.
+- API-Schluessel, Firebase-/OAuth-Konfiguration und Cloud-Session-Tokens bleiben getrennt in `DesktopSettingsStore` beziehungsweise `DesktopCredentialCipher` und werden nicht in der Chat-/Workspace-Zustandsdatei gespeichert.
+
+Desktop Streaming (Stage 8):
+- OpenRouter liefert inkrementelle Textfragmente als SSE-`data:`-Events bis `[DONE]`; Ollama liefert NDJSON-Zeilen bis `done: true`. Leere Keepalive-Zeilen werden ignoriert und unvollständige oder fehlerhafte Frames kontrolliert beendet.
+- Ein einzelner Retry ist nur bei temporaeren I/O-Fehlern sowie HTTP 408, 429 und 5xx erlaubt, solange noch kein Textfragment ausgegeben wurde. Nach dem ersten Fragment wird nie automatisch erneut gesendet; 400, 401, 403, Konfigurationsfehler und Cancellation werden nicht wiederholt.
+- Der Desktop-Chat zeigt eingehende Fragmente unmittelbar an und kann genau den aktiven Streaming-Job abbrechen. Der bestehende nicht-streamende Gateway-Pfad bleibt fuer direkte Aufrufer erhalten.
 
 ## AndroidTest APK bauen
 ```powershell
@@ -222,12 +245,33 @@ Verhalten:
 - Die finale Konto-Löschung läuft ueber `AuthViewModel.deleteAccount()` und entfernt Auth, Cloud-Daten und lokale Daten; öffentliche Rechtstexte liegen unter `/privacy-policy/`, `/terms/`, `/delete-account/` und `/support/`.
 
 ## Voice
-- Lokale TTS/STT in `ChatScreen.kt`
-- Cloud-Voice in `CloudVoiceManager.kt`
-- Cloud-Voice Provider aktuell: `ElevenLabs` und `Piper`; die Settings-UI zeigt nur die Felder des gewählten Providers.
-- TTS nutzt Speech-Sanitizing + Chunking mit kurzen Pausen (`sanitizeForSpeech`, `splitSpeechChunks`) fuer natuerlicheres Sprechen.
-- Continuous Voice wartet auf abgeschlossenes Playback (lokal + Cloud), bevor STT neu startet (Anti-Echo/Loop-Schutz).
-- Settings enthalten ein "Natuerliches Preset" fuer TTS-Geschwindigkeit/Stimmhoehe.
+- `BamaVoiceSessionController` ist die einzige Autorität für Listening, Transcribing, Thinking, Speaking, Interrupt und Error.
+- `BamaVoiceViewModel` besitzt genau eine aktive STT-/TTS-Engine, reagiert auf Providerwechsel und gibt Recognizer/Player beim Verlassen des Chats frei.
+- `AndroidSpeechRecognizerEngine` liefert Pegel, Teiltext und genau ein finales Ergebnis. Ein finaler Ergebnis-Timeout verhindert dauerhaftes Transcribing.
+- `VoiceTextProcessor` entfernt Markdown, URLs, Zitationsmarker und Codeblöcke; `StreamingSpeechBuffer` gibt vollständige Sätze/Klauseln in stabiler Reihenfolge aus.
+- Ausgabefallbacks sind `ElevenLabs` (standardmäßig Flash v2.5), `Piper` und Android TTS. Ein bereits gestarteter Cloud-Chunk wird bei Fehlern nicht erneut über Android vorgelesen.
+- `AudioTranscriptionManager` bleibt ausschließlich für importierte Audio-/Videodateien in `MediaService`; die Live-Mikrofonsteuerung verwendet ihn nicht.
+- BamaVoice Universal verwendet den bestehenden Textprovider. BamaVoice Local erzwingt On-Device-STT und erlaubt nur Android TTS oder einen privaten Piper-Endpunkt.
+- Es gibt keinen Mikrofon-Foreground-Service: Aufnahme ist bewusst auf die sichtbare Chat-Oberfläche beschränkt.
+
+```text
+Chat UI -> BamaVoiceViewModel -> BamaVoiceSessionController
+                               |-> SpeechToTextEngine (Android)
+                               |-> bestehender ChatViewModel-Textstream
+                               |-> SpeechOutputEngine (ElevenLabs/Piper/Android)
+                               `-> VoiceAudioSession (Playback-Fokus + MODE_IN_COMMUNICATION)
+```
+
+Androids `SpeechRecognizer` besitzt den Aufnahmefokus selbst. BamaVoice fordert deshalb beim Listening keinen konkurrierenden App-Audiofokus an; eigener transienter Fokus wird nur für Sprachausgabe gehalten.
+
+### Realtime-Grenze
+- `FirebaseRealtimeSessionCredentialProvider` sendet einen aktuellen Firebase ID-Token an `voiceRealtimeSession`; die Function verifiziert die UID serverseitig und liefert nur eine kurzlebige OpenAI-Realtime-Clientberechtigung.
+- `OpenAiRealtimeVoiceEngine` besitzt Credential, Reconnect-Grenze und Event-Mapping. `AndroidRealtimePeerConnectionController` stellt natives WebRTC-Audio und den Data Channel `oai-events` bereit; `ChatScreen` steuert WebRTC nie direkt.
+- Der dauerhafte OpenAI-Key ist ausschließlich als Firebase-Secret `OPENAI_API_KEY` gebunden. Ohne beide konfigurierten Function-URLs bleibt Live-Unterhaltung deaktiviert; es gibt keinen unsicheren Fallback-Key im APK.
+- Live-Transkripte gehen über `BamaVoiceSessionController` in `ChatViewModel.persistRealtimeVoiceTurn`: nur finale, stabile Realtime-IDs werden lokal gespeichert und anschließend an die bestehende opt-in Cloud-Synchronisierung übergeben. Der normale Textprovider und ElevenLabs/Android-TTS werden im Live-Modus nicht parallel gestartet.
+- Sessions sind serverseitig auf 15 Minuten und clientseitig zusätzlich auf drei Minuten Inaktivität begrenzt; Reconnect endet nach zwei Versuchen.
+- Einrichtung und manuelle Deploy-Schritte stehen in [`BAMAVOICE_REALTIME_SETUP.md`](./BAMAVOICE_REALTIME_SETUP.md).
+- Gemini Live und xAI Voice benötigen separate, tatsächlich getestete Adapter und bleiben bis dahin ohne Produktionsbutton.
 
 ## Advanced-AI-Basis (Feature 1-8, aktueller MVP-Stand)
 - Persistent Memory:
@@ -277,6 +321,7 @@ Verhalten:
     - Orchestrierung: `ExtensionManagerViewModel.kt`
     - Katalog + Capability-Persistenz: `WorkspaceExtensions.kt`
     - Guardrail: Aktivierung nur, wenn alle Pflicht-Capabilities freigegeben sind
+    - Repo Autopilot 1.1.0: `CHAT_READ` + `GITHUB_READ`, dedizierter unauthentifizierter GET-only-Gateway für das öffentliche Allowlist-Repository, nur reguläre Git-Blobs mit Tree-SHA-Prüfung, Credential-Redaction vor dem AI-Kontext und keine GitHub-Schreiboperationen
     - Runtime-Hook im Chat: `ChatViewModel` lädt aktive Extensions und injiziert turn-basierten Extension-Kontext in `buildOpenRouterHistory` (inkl. optionaler Web-Recherche-Erzwingung)
     - Quick-Action-Steuerung im Eingabefeld (`Auto`, `Research`, `Code Review`, `Plan`) mit Persistenz über SharedPreferences
   - Mini-Apps V2 in `MiniAppsScreen.kt`:
@@ -345,6 +390,12 @@ Tools: `read_file`, `write_file`, `list_directory`, `search_files`, `search_in_f
 - `persona_training_examples`
 
 Hinweis: DB-Migrationen laufen explizit über definierte Room-Migrationsschritte (fail-fast bei fehlender Migration, kein automatischer Daten-Reset).
+
+Chat-Datenbesitz:
+- Neue Conversations und Messages tragen immer denselben Owner-Scope: `account:<Firebase-UID>` oder `guest:<persistente Session-ID>`.
+- Die nichtdestruktive Migration auf Schema 10 erhält vorhandene Chatzeilen zunächst als `legacy:unclassified`. Beim ersten eindeutig authentifizierten Konto werden alle Legacy-Conversations und -Messages atomar diesem `account:<UID>` zugeordnet; vorher bleiben sie unsichtbar und Cloud-Sync-gesperrt.
+- Abfragen und Schreibzugriffe laufen ausschließlich im aktiven Scope. Cloud-Sync und Backups akzeptieren nur `account:<aktuelle UID>` aus derselben `ChatSessionScopeStore`-Singletoninstanz und bleiben während jeder persistenten Übergangsphase gesperrt.
+- Erst nach bestätigter Authentifizierung entfernt eine Room-Transaktion ausschließlich den aktuellen Guest-Scope, claimt Legacy-Daten und migriert Workspace-Bindings. Danach wird der Account-Scope aktiviert und Cloud-Sync freigegeben; Abbruch und Fehler lassen Gastdaten unverändert.
 
 ## Release-/Feature-Kommunikation
 - Wenn du ein neues User-Feature einbaust, aktualisiere immer direkt `README.md` und diesen Developer Guide.
@@ -418,3 +469,6 @@ Zusatz für Mini-Apps und Photo-AI:
 3. Proguard/Minify mit Testflight intern validieren.
 4. Datenschutztexte + Consent-Flows finalisieren.
 5. Erst danach Play-Store-Publishing.
+## Phase 7.6b: sichere Draft-PR-Vorbereitung
+
+Die Draft-PR-Erweiterung von GitHub Intelligence liegt in `sharedCore/src/main/kotlin/com/example/bamachat/shared/core/github/AgentDraftPrModels.kt`, `app/src/main/java/com/example/bamachat/data/github/DisabledAgentDraftPrGateway.kt`, `GitHubIntelligenceViewModel` und `GitHubIntelligenceScreen`. Reale `proposal-<64 hex>`-Parser-IDs werden unverändert gebunden; die `plan-<20 hex>`-ID wird zentral über eine versionierte, UTF-8-längengebundene Kodierung aus dem vollständigen fachlichen Planinhalt berechnet und erneut geprüft. Validierungen müssen exakt der zentral aus den betroffenen Modulpfaden abgeleiteten Reihenfolge entsprechen, direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle werden abgelehnt und Cancellation ist nur vor `SERVER_ACCEPTED` erlaubt. Ohne nachweisbaren BamaWorker bleibt der Gateway strikt deaktiviert. Niemals GitHub-Tokens, direkte GitHub-Schreibrequests oder Client-seitige Git-Kommandos ergänzen. Der vollständige zukünftige Serververtrag steht in `docs/phase-7.6b-agent-draft-pr.md`.

@@ -215,11 +215,12 @@ fun PersonaMarketplaceScreen(
         }
     }
 
-    if (state.showDetail && state.selectedPersona != null) {
+    val selectedPersona = state.selectedPersona
+    if (state.showDetail && selectedPersona != null) {
         PersonaDetailSheet(
-            persona = state.selectedPersona!!,
+            persona = selectedPersona,
             onDismiss = viewModel::dismissDetail,
-            onInstall = { viewModel.toggleInstall(state.selectedPersona!!.id) }
+            onInstall = { viewModel.toggleInstall(selectedPersona.id) }
         )
     }
 }

@@ -31,6 +31,7 @@ import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.RadioButton
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
+import androidx.compose.material.TextFieldDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Cloud
@@ -47,25 +48,37 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.example.bamachat.shared.core.ExtensionRuntimeOrchestrator
+import com.example.bamachat.shared.core.AiChatMessage
+import com.example.bamachat.shared.core.AiChatRole
 import com.example.bamachat.shared.core.PromptDraft
 import com.example.bamachat.shared.core.PromptDrafts
 import com.example.bamachat.shared.core.QuickActionInterpreter
 import com.example.bamachat.shared.core.QuickActionSuggestion
 import com.example.bamachat.shared.core.WorkspaceTextToolkit
+import com.example.bamachat.shared.core.ai.AiStreamCompleted
+import com.example.bamachat.shared.core.ai.AiStreamDelta
+import com.example.bamachat.shared.core.ai.AiStreamError
+import com.example.bamachat.shared.core.ai.AiStreamFinished
+import com.example.bamachat.shared.core.ai.AiStreamStarted
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 private enum class DesktopSection {
@@ -74,6 +87,9 @@ private enum class DesktopSection {
     SETTINGS
 }
 
+private val BAMACHAT_PURPLE = Color(0xFF7C4DFF)
+private val BAMACHAT_BLUE = Color(0xFF448AFF)
+
 private val DESKTOP_TEMPLATE_TITLES = listOf(
     "Tagesbriefing",
     "Meeting -> ToDos",
@@ -81,10 +97,22 @@ private val DESKTOP_TEMPLATE_TITLES = listOf(
     "Risiko Scan"
 )
 
+@Composable
+private fun desktopFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
+    textColor = Color.White,
+    disabledTextColor = Color.White.copy(alpha = 0.5f),
+    backgroundColor = Color(0xFF0D1B33),
+    cursorColor = BAMACHAT_PURPLE,
+    focusedBorderColor = BAMACHAT_PURPLE,
+    unfocusedBorderColor = Color(0xFF2D4A7A),
+    focusedLabelColor = Color.White.copy(alpha = 0.8f),
+    unfocusedLabelColor = Color.White.copy(alpha = 0.55f),
+)
+
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "BamaChat Desktop"
+        title = "BamaChat für Windows"
     ) {
         MaterialTheme {
             DesktopRoot()
@@ -94,22 +122,74 @@ fun main() = application {
 
 @Composable
 private fun DesktopRoot() {
+    val initialSettings = remember { DesktopSettingsStore.load() }
     var activeSection by remember { mutableStateOf(DesktopSection.CHAT) }
-    var settings by remember { mutableStateOf(DesktopSettingsStore.load()) }
-    var appStatus by remember { mutableStateOf("Desktop bereit.") }
-    var workspaceNotes by remember { mutableStateOf("") }
+    var settings by remember { mutableStateOf(initialSettings) }
+    val localStateSession = remember {
+        DesktopScopedStateSession(initialAuthenticatedUid = initialSettings.authUid)
+    }
+    var localState by remember { mutableStateOf(localStateSession.currentState) }
+    var appStatus by remember {
+        mutableStateOf(
+            if (localStateSession.lastLoadRecoveryCopyCreated) {
+                "Beschädigter lokaler Zustand wurde als Recovery-Kopie gesichert."
+            } else {
+                "Desktop bereit."
+            }
+        )
+    }
     val cloudGateway = remember { DesktopCloudSyncGateway() }
 
     fun persistSettings(
         updated: DesktopUserSettings,
         successMessage: String = "Einstellungen gespeichert."
     ) {
+        val saveFailure = runCatching { DesktopSettingsStore.save(updated) }.exceptionOrNull()
+        if (saveFailure != null) {
+            appStatus = "Speichern fehlgeschlagen: ${saveFailure.message ?: "Unbekannter Fehler"}"
+            return
+        }
+
+        val ownerSwitch = when {
+            updated.authUid == settings.authUid -> null
+            updated.authUid.isBlank() -> localStateSession.switchToGuest()
+            else -> localStateSession.switchToAuthenticatedOwner(updated.authUid)
+        }
+        if (ownerSwitch is DesktopOwnerSwitchResult.Rejected) {
+            appStatus = "Kontowechsel abgelehnt; lokaler Zustand bleibt unverändert."
+            return
+        }
+        if (ownerSwitch is DesktopOwnerSwitchResult.Activated) {
+            localState = ownerSwitch.state
+        }
         settings = updated
-        val saveResult = runCatching { DesktopSettingsStore.save(updated) }
-        appStatus = saveResult.fold(
-            onSuccess = { successMessage },
-            onFailure = { "Speichern fehlgeschlagen: ${it.message ?: "Unbekannter Fehler"}" }
+        appStatus = if (
+            ownerSwitch is DesktopOwnerSwitchResult.Activated &&
+            ownerSwitch.recoveryCopyCreated
+        ) {
+            "Beschädigter lokaler Zustand wurde als Recovery-Kopie gesichert."
+        } else {
+            successMessage
+        }
+    }
+
+    fun appendLocalMessage(message: AiChatMessage): Result<Unit> = runCatching {
+        localState = localStateSession.appendMessage(
+            role = message.role.toDesktopLocalRole(),
+            text = message.text
         )
+    }.map { Unit }
+
+    fun clearLocalConversation(): Result<Unit> = runCatching {
+        localState = localStateSession.clearActiveConversation()
+    }.map { Unit }
+
+    fun updateLocalWorkspaceNotes(notes: String) {
+        runCatching {
+            localState = localStateSession.updateWorkspaceNotes(notes)
+        }.onFailure {
+            appStatus = "Lokale Workspace-Notizen konnten nicht gespeichert werden."
+        }
     }
 
     LaunchedEffect(
@@ -171,20 +251,30 @@ private fun DesktopRoot() {
                 color = Color(0xFF17233A)
             ) {
                 when (activeSection) {
-                    DesktopSection.CHAT -> DesktopChatWorkspace(
-                        settings = settings,
-                        onRequestOpenSettings = { activeSection = DesktopSection.SETTINGS },
-                        onStatusChange = { appStatus = it }
-                    )
-                    DesktopSection.WORKSPACE -> DesktopNotesWorkspace(
-                        settings = settings,
-                        notes = workspaceNotes,
-                        onNotesChange = { workspaceNotes = it },
-                        onSettingsChange = { updated, statusMessage ->
-                            persistSettings(updated, statusMessage)
-                        },
-                        onStatusChange = { appStatus = it }
-                    )
+                    DesktopSection.CHAT -> key(localState.ownerScopeId) {
+                        DesktopChatWorkspace(
+                            settings = settings,
+                            chatHistory = localState.activeConversation()
+                                ?.messages
+                                .orEmpty()
+                                .map { it.toAiChatMessage() },
+                            onAppendMessage = ::appendLocalMessage,
+                            onClearConversation = ::clearLocalConversation,
+                            onRequestOpenSettings = { activeSection = DesktopSection.SETTINGS },
+                            onStatusChange = { appStatus = it }
+                        )
+                    }
+                    DesktopSection.WORKSPACE -> key(localState.ownerScopeId) {
+                        DesktopNotesWorkspace(
+                            settings = settings,
+                            notes = localState.workspace.notes,
+                            onNotesChange = ::updateLocalWorkspaceNotes,
+                            onSettingsChange = { updated, statusMessage ->
+                                persistSettings(updated, statusMessage)
+                            },
+                            onStatusChange = { appStatus = it }
+                        )
+                    }
                     DesktopSection.SETTINGS -> DesktopSettingsView(
                         settings = settings,
                         onSave = { updated ->
@@ -221,17 +311,46 @@ private fun LeftSidebar(
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(
-                text = "BamaChat",
-                style = MaterialTheme.typography.h6,
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Desktop client",
-                color = Color.White.copy(alpha = 0.75f),
-                style = MaterialTheme.typography.body2
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(BAMACHAT_PURPLE, Color(0xFFE040FB))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "B",
+                            color = Color.White,
+                            style = MaterialTheme.typography.subtitle1,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "BamaChat",
+                        style = MaterialTheme.typography.h6,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Desktop-Client",
+                        color = Color.White.copy(alpha = 0.75f),
+                        style = MaterialTheme.typography.body2
+                    )
+                }
+            }
             Text(
                 text = "Provider: ${provider.label()}",
                 color = Color.White.copy(alpha = 0.72f),
@@ -247,6 +366,11 @@ private fun LeftSidebar(
                 color = Color.White.copy(alpha = 0.66f),
                 style = MaterialTheme.typography.caption
             )
+            Text(
+                text = "Entwickler: M.D Baldé",
+                color = Color.White.copy(alpha = 0.60f),
+                style = MaterialTheme.typography.caption
+            )
             Spacer(Modifier.height(10.dp))
             SidebarButton(
                 label = "Chat",
@@ -256,14 +380,14 @@ private fun LeftSidebar(
                 onSelect(DesktopSection.CHAT)
             }
             SidebarButton(
-                label = "Workspace",
+                label = "Arbeitsbereiche",
                 icon = Icons.Default.Notes,
                 isActive = activeSection == DesktopSection.WORKSPACE
             ) {
                 onSelect(DesktopSection.WORKSPACE)
             }
             SidebarButton(
-                label = "Settings",
+                label = "Einstellungen",
                 icon = Icons.Default.Settings,
                 isActive = activeSection == DesktopSection.SETTINGS
             ) {
@@ -315,6 +439,9 @@ private fun SidebarButton(
 @Composable
 private fun DesktopChatWorkspace(
     settings: DesktopUserSettings,
+    chatHistory: List<AiChatMessage>,
+    onAppendMessage: (AiChatMessage) -> Result<Unit>,
+    onClearConversation: () -> Result<Unit>,
     onRequestOpenSettings: () -> Unit,
     onStatusChange: (String) -> Unit
 ) {
@@ -323,9 +450,10 @@ private fun DesktopChatWorkspace(
     var prompt by remember { mutableStateOf("") }
     var selectedQuickAction by remember { mutableStateOf(QuickActionSuggestion.AUTO) }
     var isSending by remember { mutableStateOf(false) }
+    var activeRequestJob by remember { mutableStateOf<Job?>(null) }
+    var streamingText by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
     val draftHistory = remember { mutableStateListOf<PromptDraft>() }
-    val chatHistory = remember { mutableStateListOf<DesktopChatMessage>() }
     val quickActionSuggestion = remember(prompt) { QuickActionInterpreter.suggest(prompt) }
     val activeExtensions = remember(settings.enabledExtensionIds) {
         DesktopExtensionCatalog.all
@@ -337,19 +465,37 @@ private fun DesktopChatWorkspace(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = "Chat Workbench",
-            style = MaterialTheme.typography.h5,
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = "Produktiver Desktop-Chat mit OpenRouter/Ollama und Shared-Core Quick Actions.",
-            color = Color.White.copy(alpha = 0.78f),
-            style = MaterialTheme.typography.body2
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Chat",
+                style = MaterialTheme.typography.h6,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = Color(0xFF2D4A7A),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = settings.provider.label(),
+                        color = Color.White,
+                        style = MaterialTheme.typography.caption,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+
         if (settings.provider == DesktopProvider.OPENROUTER && settings.openRouterApiKey.isBlank()) {
             Surface(
                 color = Color(0xFF4B2330),
@@ -357,175 +503,26 @@ private fun DesktopChatWorkspace(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.padding(10.dp),
+                    modifier = Modifier.padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = "OpenRouter API-Key fehlt.",
                         color = Color.White,
+                        style = MaterialTheme.typography.caption,
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = onRequestOpenSettings) {
-                        Text("Settings")
+                        Text("Einstellungen", style = MaterialTheme.typography.caption)
                     }
                 }
             }
-        }
-
-        Text(
-            text = "Quick Action",
-            color = Color.White.copy(alpha = 0.86f),
-            style = MaterialTheme.typography.body2,
-            fontWeight = FontWeight.SemiBold
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            QuickActionSuggestion.entries.forEach { action ->
-                QuickActionButton(
-                    action = action,
-                    selected = selectedQuickAction == action,
-                    onClick = { selectedQuickAction = action }
-                )
-            }
-            Button(
-                onClick = { selectedQuickAction = quickActionSuggestion },
-                colors = ButtonDefaults.buttonColors(
-                    backgroundColor = Color(0xFF1E3256),
-                    contentColor = Color.White
-                )
-            ) {
-                Text("Nutze Vorschlag")
-            }
-        }
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            label = { Text("Nachricht", color = Color.White.copy(alpha = 0.8f)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = 96.dp)
-        )
-        Text(
-            text = "Vorschlag: ${quickActionSuggestion.label()} | Aktiv: ${selectedQuickAction.label()}",
-            color = Color.White.copy(alpha = 0.78f),
-            style = MaterialTheme.typography.body2
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                enabled = !isSending,
-                onClick = {
-                    val newDraft = PromptDrafts.createOrNull(prompt)
-                    if (newDraft != null) {
-                        val updated = PromptDrafts.prepend(draftHistory.toList(), newDraft)
-                        draftHistory.clear()
-                        draftHistory.addAll(updated)
-                        onStatusChange("Draft gespeichert.")
-                    }
-                }
-            ) {
-                Text("Draft speichern")
-            }
-            Button(
-                enabled = chatHistory.isNotEmpty() && !isSending,
-                onClick = {
-                    chatHistory.clear()
-                    localError = null
-                    onStatusChange("Chatverlauf geloescht.")
-                }
-            ) {
-                Text("Chat leeren")
-            }
-            Button(
-                enabled = prompt.isNotBlank() && !isSending,
-                onClick = {
-                    val userText = prompt.trim()
-                    if (userText.isEmpty()) return@Button
-
-                    localError = null
-                    prompt = ""
-                    chatHistory += DesktopChatMessage(
-                        role = DesktopChatRole.USER,
-                        text = userText
-                    )
-
-                    val newDraft = PromptDrafts.createOrNull(userText)
-                    if (newDraft != null) {
-                        val updated = PromptDrafts.prepend(draftHistory.toList(), newDraft)
-                        draftHistory.clear()
-                        draftHistory.addAll(updated)
-                    }
-
-                    isSending = true
-                    onStatusChange("Sende Anfrage an ${settings.provider.label()} ...")
-                    coroutineScope.launch {
-                        try {
-                            val runtimeDecision = ExtensionRuntimeOrchestrator.buildRuntimeContext(
-                                userText = userText,
-                                quickAction = selectedQuickAction,
-                                activeExtensions = activeExtensions,
-                                templateTitles = DESKTOP_TEMPLATE_TITLES
-                            )
-                            val reply = gateway.requestAssistantReply(
-                                settings = settings,
-                                chatHistory = chatHistory.toList(),
-                                quickAction = selectedQuickAction,
-                                runtimeDecision = runtimeDecision
-                            )
-                            chatHistory += DesktopChatMessage(
-                                role = DesktopChatRole.ASSISTANT,
-                                text = reply
-                            )
-                            onStatusChange("Antwort erhalten (${settings.provider.label()}).")
-                        } catch (t: Throwable) {
-                            val message = t.message ?: "Unbekannter Fehler"
-                            localError = message
-                            chatHistory += DesktopChatMessage(
-                                role = DesktopChatRole.ASSISTANT,
-                                text = "Fehler: $message"
-                            )
-                            onStatusChange("Anfrage fehlgeschlagen.")
-                        } finally {
-                            isSending = false
-                        }
-                    }
-                }
-            ) {
-                Text("Senden")
-            }
-            if (isSending) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .height(24.dp)
-                        .width(24.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
-            }
-        }
-
-        Text(
-            text = "Aktive Extensions: ${
-                DesktopExtensionCatalog.all
-                    .filter { settings.enabledExtensionIds.contains(it.id) }
-                    .joinToString { it.name }
-                    .ifBlank { "Keine" }
-            }",
-            color = Color.White.copy(alpha = 0.72f),
-            style = MaterialTheme.typography.caption
-        )
-
-        localError?.let { error ->
-            Text(
-                text = "Letzter Fehler: $error",
-                color = Color(0xFFFFB3B3),
-                style = MaterialTheme.typography.caption
-            )
         }
 
         Surface(
-            modifier = Modifier.fillMaxSize().weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f),
             color = Color(0xFF132036),
             shape = RoundedCornerShape(10.dp)
         ) {
@@ -538,15 +535,29 @@ private fun DesktopChatWorkspace(
                         .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (chatHistory.isEmpty()) {
-                        Text(
-                            "Noch kein Chat. Sende oben deine erste Nachricht.",
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
+                    if (chatHistory.isEmpty() && streamingText.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 40.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "Willkommen bei BamaChat",
+                                color = Color.White.copy(alpha = 0.85f),
+                                style = MaterialTheme.typography.subtitle2,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "Starte einen Chat, wähle ein Modell oder nutze eine Schnellaktion.",
+                                color = Color.White.copy(alpha = 0.55f),
+                                style = MaterialTheme.typography.caption
+                            )
+                        }
                     } else {
-                        val clipboardManager = LocalClipboardManager.current
                         chatHistory.forEach { item ->
-                            val cardColor = if (item.role == DesktopChatRole.USER) {
+                            val cardColor = if (item.role == AiChatRole.USER) {
                                 Color(0xFF2C4C7D)
                             } else {
                                 Color(0xFF1E3256)
@@ -570,8 +581,12 @@ private fun DesktopChatWorkspace(
                                         )
                                         IconButton(
                                             onClick = {
-                                                clipboardManager.setText(AnnotatedString(item.text))
-                                                onStatusChange("In Zwischenablage kopiert.")
+                                                runCatching {
+                                                    Toolkit.getDefaultToolkit()
+                                                        .systemClipboard
+                                                        .setContents(StringSelection(item.text), null)
+                                                    onStatusChange("Nachricht kopiert.")
+                                                }
                                             },
                                             modifier = Modifier.size(24.dp)
                                         ) {
@@ -591,12 +606,232 @@ private fun DesktopChatWorkspace(
                                 }
                             }
                         }
+                        if (streamingText.isNotEmpty()) {
+                            Surface(
+                                color = Color(0xFF1E3256),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = "Assistant · Streaming",
+                                        style = MaterialTheme.typography.caption,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White.copy(alpha = 0.8f)
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(text = streamingText, color = Color.White)
+                                }
+                            }
+                        }
                     }
                 }
                 VerticalScrollbar(
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
                     adapter = rememberScrollbarAdapter(scrollState)
                 )
+            }
+        }
+
+        localError?.let { error ->
+            Surface(
+                color = Color(0xFF4B2330),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = error,
+                    color = Color(0xFFFFD6D6),
+                    style = MaterialTheme.typography.caption,
+                    modifier = Modifier.padding(8.dp)
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            QuickActionSuggestion.entries.forEach { action ->
+                QuickActionButton(
+                    action = action,
+                    selected = selectedQuickAction == action,
+                    onClick = { selectedQuickAction = action }
+                )
+            }
+            Button(
+                onClick = { selectedQuickAction = quickActionSuggestion },
+                colors = ButtonDefaults.buttonColors(
+                    backgroundColor = Color(0xFF1E3256),
+                    contentColor = Color.White
+                )
+            ) {
+                Text("Vorschlag")
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = prompt,
+                onValueChange = { prompt = it },
+                label = { Text("Nachricht", color = Color.White.copy(alpha = 0.8f)) },
+                colors = desktopFieldColors(),
+                modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minHeight = 48.dp)
+            )
+            if (isSending) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .height(24.dp)
+                            .width(24.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Button(
+                        onClick = {
+                            onStatusChange("Streaming wird abgebrochen ...")
+                            activeRequestJob?.cancel()
+                        }
+                    ) {
+                        Text("Abbrechen")
+                    }
+                }
+            } else {
+                Button(
+                    enabled = prompt.isNotBlank(),
+                    onClick = {
+                        val userText = prompt.trim()
+                        if (userText.isEmpty()) return@Button
+
+                        localError = null
+                        prompt = ""
+                        val userMessage = AiChatMessage(
+                            role = AiChatRole.USER,
+                            text = userText
+                        )
+                        if (onAppendMessage(userMessage).isFailure) {
+                            prompt = userText
+                            localError = "Die Nachricht konnte nicht lokal gespeichert werden."
+                            onStatusChange("Lokales Speichern fehlgeschlagen.")
+                            return@Button
+                        }
+                        val requestHistory = chatHistory + userMessage
+
+                        val newDraft = PromptDrafts.createOrNull(userText)
+                        if (newDraft != null) {
+                            val updated = PromptDrafts.prepend(draftHistory.toList(), newDraft)
+                            draftHistory.clear()
+                            draftHistory.addAll(updated)
+                        }
+
+                        isSending = true
+                        streamingText = ""
+                        onStatusChange("Sende Anfrage an ${settings.provider.label()} ...")
+                        val requestJob = coroutineScope.launch(start = CoroutineStart.LAZY) {
+                            try {
+                                val runtimeDecision = ExtensionRuntimeOrchestrator.buildRuntimeContext(
+                                    userText = userText,
+                                    quickAction = selectedQuickAction,
+                                    activeExtensions = activeExtensions,
+                                    templateTitles = DESKTOP_TEMPLATE_TITLES
+                                )
+                                gateway.streamAssistantReply(
+                                    settings = settings,
+                                    chatHistory = requestHistory,
+                                    quickAction = selectedQuickAction,
+                                    runtimeDecision = runtimeDecision
+                                ).collect { event ->
+                                    when (event) {
+                                        is AiStreamStarted -> onStatusChange(
+                                            "Empfange Antwort von ${settings.provider.label()} ..."
+                                        )
+                                        is AiStreamDelta -> streamingText += event.text
+                                        is AiStreamCompleted -> {
+                                            val assistantMessage = event.response.message
+                                            if (onAppendMessage(assistantMessage).isFailure) {
+                                                localError =
+                                                    "Die Antwort konnte nicht lokal gespeichert werden."
+                                                onStatusChange("Lokales Speichern fehlgeschlagen.")
+                                            } else {
+                                                onStatusChange(
+                                                    "Antwort erhalten (${settings.provider.label()})."
+                                                )
+                                            }
+                                            streamingText = ""
+                                        }
+                                        is AiStreamError -> {
+                                            streamingText = ""
+                                            localError = event.message
+                                            onStatusChange("Streaming-Anfrage fehlgeschlagen.")
+                                        }
+                                        is AiStreamFinished -> Unit
+                                    }
+                                }
+                            } catch (_: CancellationException) {
+                                streamingText = ""
+                                localError = null
+                                onStatusChange("Streaming abgebrochen.")
+                            } catch (t: Throwable) {
+                                val (userMessage, statusMessage) = when (t) {
+                                    is DesktopMissingApiKeyException ->
+                                        "OpenRouter API-Key fehlt. Bitte in den Einstellungen hinterlegen." to
+                                        "API-Key fehlt – Einstellungen öffnen."
+                                    is DesktopModelUnavailableException ->
+                                        "Das ausgewählte ${settings.provider.label()}-Modell ist aktuell nicht verfügbar. Bitte in den Einstellungen ein anderes Modell wählen oder Ollama nutzen." to
+                                        "Modell nicht verfügbar – Einstellungen prüfen."
+                                    is DesktopProviderHttpException ->
+                                        "${settings.provider.label()} antwortet nicht. Bitte Einstellungen und Internetverbindung prüfen." to
+                                        "Verbindungsfehler – Einstellungen prüfen."
+                                    else ->
+                                        "Fehler beim Senden der Anfrage. Bitte Einstellungen und Verbindung prüfen." to
+                                        "Anfrage fehlgeschlagen."
+                                }
+                                localError = userMessage
+                                onStatusChange(statusMessage)
+                            } finally {
+                                isSending = false
+                                activeRequestJob = null
+                            }
+                        }
+                        activeRequestJob = requestJob
+                        requestJob.start()
+                    }
+                ) {
+                    Text("Senden")
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Button(
+                enabled = !isSending,
+                onClick = {
+                    val newDraft = PromptDrafts.createOrNull(prompt)
+                    if (newDraft != null) {
+                        val updated = PromptDrafts.prepend(draftHistory.toList(), newDraft)
+                        draftHistory.clear()
+                        draftHistory.addAll(updated)
+                        onStatusChange("Draft gespeichert.")
+                    }
+                }
+            ) {
+                Text("Entwurf speichern")
+            }
+            Button(
+                enabled = chatHistory.isNotEmpty() && !isSending,
+                onClick = {
+                    if (onClearConversation().isSuccess) {
+                        localError = null
+                        onStatusChange("Chatverlauf geloescht.")
+                    } else {
+                        localError = "Der Chatverlauf konnte nicht lokal aktualisiert werden."
+                        onStatusChange("Lokales Speichern fehlgeschlagen.")
+                    }
+                }
+            ) {
+                Text("Chat leeren")
             }
         }
     }
@@ -627,13 +862,13 @@ private fun DesktopNotesWorkspace(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "Workspace Notes",
+            text = "Arbeitsbereich-Notizen",
             style = MaterialTheme.typography.h5,
             color = Color.White,
             fontWeight = FontWeight.SemiBold
         )
         Text(
-            text = "Workspace-Notizen mit Shared-Core Summary/Action-Item-Extraktion.",
+            text = "Notizen mit Zusammenfassung und Aufgaben-Erkennung.",
             color = Color.White.copy(alpha = 0.78f)
         )
         Text(
@@ -732,7 +967,7 @@ private fun DesktopNotesWorkspace(
             text = if (settings.authEmail.isNotBlank()) {
                 "Cloud-Konto: ${settings.authEmail}"
             } else {
-                "Cloud-Konto: nicht angemeldet (Login in Settings)."
+                "Cloud-Konto: nicht angemeldet (Login in den Einstellungen)."
             },
             color = Color.White.copy(alpha = 0.74f),
             style = MaterialTheme.typography.caption
@@ -757,9 +992,9 @@ private fun DesktopNotesWorkspace(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Summary", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Zusammenfassung", color = Color.White, fontWeight = FontWeight.SemiBold)
                 Text(summary, color = Color.White.copy(alpha = 0.84f))
-                Text("Action items", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text("Aufgaben", color = Color.White, fontWeight = FontWeight.SemiBold)
                 if (actionItems.isEmpty()) {
                     Text("Keine ToDos erkannt.", color = Color.White.copy(alpha = 0.74f))
                 } else {
@@ -775,15 +1010,16 @@ private fun DesktopNotesWorkspace(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(),
-            label = { Text("Project notes", color = Color.White.copy(alpha = 0.8f)) }
+            label = { Text("Projekt-Notizen", color = Color.White.copy(alpha = 0.8f)) },
+            colors = desktopFieldColors()
         )
     }
 }
 
 private fun QuickActionSuggestion.label(): String = when (this) {
     QuickActionSuggestion.AUTO -> "Auto"
-    QuickActionSuggestion.RESEARCH -> "Research"
-    QuickActionSuggestion.CODE_REVIEW -> "Code Review"
+    QuickActionSuggestion.RESEARCH -> "Recherche"
+    QuickActionSuggestion.CODE_REVIEW -> "Code prüfen"
     QuickActionSuggestion.PLAN -> "Plan"
 }
 
@@ -808,7 +1044,6 @@ private fun DesktopSettingsView(
     var firebaseProjectId by remember(settings) { mutableStateOf(settings.firebaseProjectId) }
     var googleOAuthClientId by remember(settings) { mutableStateOf(settings.googleOAuthClientId) }
     var googleOAuthClientSecret by remember(settings) { mutableStateOf(settings.googleOAuthClientSecret) }
-    var encryptCloudSession by remember(settings) { mutableStateOf(settings.encryptCloudSession) }
     var loginEmail by remember(settings) { mutableStateOf(settings.authEmail) }
     var loginPassword by remember { mutableStateOf("") }
     var enabledExtensionIds by remember(settings) {
@@ -825,13 +1060,13 @@ private fun DesktopSettingsView(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Desktop Settings",
+                text = "Desktop-Einstellungen",
                 style = MaterialTheme.typography.h5,
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "Provider, Modelle und aktivierte Extensions fuer den Desktop-Chat.",
+                text = "Anbieter, Modelle und aktivierte Erweiterungen für den Desktop-Chat.",
                 color = Color.White.copy(alpha = 0.78f)
             )
             Text(
@@ -846,7 +1081,7 @@ private fun DesktopSettingsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Provider", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Anbieter", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         ProviderRadio(
                             selected = provider == DesktopProvider.OPENROUTER,
@@ -859,71 +1094,88 @@ private fun DesktopSettingsView(
                             onSelect = { provider = DesktopProvider.OLLAMA }
                         )
                     }
+                    if (provider == DesktopProvider.OPENROUTER && openRouterModel.isBlank()) {
+                        Text(
+                            "Bitte ein gültiges OpenRouter-Modell eingeben (z. B. \"openai/gpt-4o-mini\").",
+                            color = Color(0xFFFFB3B3),
+                            style = MaterialTheme.typography.caption
+                        )
+                    }
+                    if (openRouterModel == OLD_STALE_OPENROUTER_MODEL) {
+                        Text(
+                            "Das Modell \"google/gemma-3-12b-it:free\" ist nicht mehr verfügbar. Bitte ein anderes Modell eingeben.",
+                            color = Color(0xFFFFB3B3),
+                            style = MaterialTheme.typography.caption
+                        )
+                    }
                     Divider(color = Color.White.copy(alpha = 0.2f))
                     OutlinedTextField(
                         value = openRouterApiKey,
                         onValueChange = { openRouterApiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("OpenRouter API-Key", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("OpenRouter API-Schlüssel", color = Color.White.copy(alpha = 0.8f)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = desktopFieldColors()
                     )
                     OutlinedTextField(
                         value = openRouterModel,
                         onValueChange = { openRouterModel = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("OpenRouter Modell", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("OpenRouter-Modell", color = Color.White.copy(alpha = 0.8f)) },
+                        colors = desktopFieldColors()
                     )
                     OutlinedTextField(
                         value = ollamaBaseUrl,
                         onValueChange = { ollamaBaseUrl = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Ollama Base URL", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Ollama-Basis-URL", color = Color.White.copy(alpha = 0.8f)) },
+                        colors = desktopFieldColors()
                     )
                     OutlinedTextField(
                         value = ollamaModel,
                         onValueChange = { ollamaModel = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Ollama Modell", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Ollama-Modell", color = Color.White.copy(alpha = 0.8f)) },
+                        colors = desktopFieldColors()
                     )
                     Divider(color = Color.White.copy(alpha = 0.2f))
-                    Text("Firebase Cloud", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Firebase-Cloud", color = Color.White, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = firebaseApiKey,
                         onValueChange = { firebaseApiKey = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Firebase Web API-Key", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Firebase Web API-Schlüssel", color = Color.White.copy(alpha = 0.8f)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = desktopFieldColors()
                     )
                     OutlinedTextField(
                         value = firebaseProjectId,
                         onValueChange = { firebaseProjectId = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Firebase Project-ID", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Firebase-Projekt-ID", color = Color.White.copy(alpha = 0.8f)) },
+                        colors = desktopFieldColors()
                     )
                     OutlinedTextField(
                         value = googleOAuthClientId,
                         onValueChange = { googleOAuthClientId = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Google OAuth Client-ID", color = Color.White.copy(alpha = 0.8f)) }
+                        label = { Text("Google OAuth Client-ID", color = Color.White.copy(alpha = 0.8f)) },
+                        colors = desktopFieldColors()
                     )
                     OutlinedTextField(
                         value = googleOAuthClientSecret,
                         onValueChange = { googleOAuthClientSecret = it },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Google OAuth Client-Secret (optional)", color = Color.White.copy(alpha = 0.8f)) },
-                        visualTransformation = PasswordVisualTransformation()
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = desktopFieldColors()
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Checkbox(
-                            checked = encryptCloudSession,
-                            onCheckedChange = { encryptCloudSession = it }
-                        )
-                        Text(
-                            "Cloud-Session lokal verschluesseln (ID/Refresh-Token)",
-                            color = Color.White.copy(alpha = 0.84f)
-                        )
-                    }
+                    Text(
+                        "Lokale Zugangsdaten werden unter Windows automatisch mit DPAPI " +
+                            "für den aktuellen Benutzer geschützt.",
+                        color = Color.White.copy(alpha = 0.84f),
+                        style = MaterialTheme.typography.caption
+                    )
                 }
             }
 
@@ -933,7 +1185,7 @@ private fun DesktopSettingsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Extensions", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Erweiterungen", color = Color.White, fontWeight = FontWeight.SemiBold)
                     DesktopExtensionCatalog.all.forEach { preset ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -982,7 +1234,7 @@ private fun DesktopSettingsView(
                                 authIdToken = settings.authIdToken,
                                 authRefreshToken = settings.authRefreshToken,
                                 authTokenExpiryEpochMs = settings.authTokenExpiryEpochMs,
-                                encryptCloudSession = encryptCloudSession
+                                encryptCloudSession = settings.encryptCloudSession
                             )
                         )
                     }
@@ -1000,11 +1252,10 @@ private fun DesktopSettingsView(
                         firebaseProjectId = DesktopUserSettings().firebaseProjectId
                         googleOAuthClientId = DesktopUserSettings().googleOAuthClientId
                         googleOAuthClientSecret = DesktopUserSettings().googleOAuthClientSecret
-                        encryptCloudSession = DesktopUserSettings().encryptCloudSession
                         enabledExtensionIds = DesktopUserSettings().enabledExtensionIds
                     }
                 ) {
-                    Text("Defaults")
+                    Text("Standard")
                 }
             }
 
@@ -1014,7 +1265,7 @@ private fun DesktopSettingsView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Cloud Login", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Cloud-Anmeldung", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(
                         text = if (settings.authUid.isNotBlank()) {
                             "Angemeldet als ${settings.authEmail.ifBlank { settings.authUid }}"
@@ -1046,8 +1297,7 @@ private fun DesktopSettingsView(
                                     firebaseApiKey = firebaseApiKey.trim(),
                                     firebaseProjectId = firebaseProjectId.trim(),
                                     googleOAuthClientId = googleOAuthClientId.trim(),
-                                    googleOAuthClientSecret = googleOAuthClientSecret.trim(),
-                                    encryptCloudSession = encryptCloudSession
+                                    googleOAuthClientSecret = googleOAuthClientSecret.trim()
                                 )
                                 coroutineScope.launch {
                                     try {
@@ -1077,8 +1327,7 @@ private fun DesktopSettingsView(
                                     firebaseApiKey = firebaseApiKey.trim(),
                                     firebaseProjectId = firebaseProjectId.trim(),
                                     googleOAuthClientId = googleOAuthClientId.trim(),
-                                    googleOAuthClientSecret = googleOAuthClientSecret.trim(),
-                                    encryptCloudSession = encryptCloudSession
+                                    googleOAuthClientSecret = googleOAuthClientSecret.trim()
                                 )
                                 coroutineScope.launch {
                                     try {
@@ -1108,8 +1357,7 @@ private fun DesktopSettingsView(
                                     firebaseApiKey = firebaseApiKey.trim(),
                                     firebaseProjectId = firebaseProjectId.trim(),
                                     googleOAuthClientId = googleOAuthClientId.trim(),
-                                    googleOAuthClientSecret = googleOAuthClientSecret.trim(),
-                                    encryptCloudSession = encryptCloudSession
+                                    googleOAuthClientSecret = googleOAuthClientSecret.trim()
                                 )
                                 coroutineScope.launch {
                                     try {
@@ -1165,7 +1413,7 @@ private fun DesktopSettingsView(
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Hinweise", color = Color.White, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "OpenRouter braucht einen gueltigen API-Key. Ollama braucht einen lokal laufenden Server. Fuer Cloud-Sync sind Firebase API-Key + Project-ID + Login noetig. Fuer Google-Login verwende bevorzugt einen OAuth Client vom Typ 'Desktop App'.",
+                        "OpenRouter braucht einen gültigen API-Schlüssel. Ollama braucht einen lokal laufenden Server. Für Cloud-Sync sind Firebase API-Schlüssel + Projekt-ID + Anmeldung nötig. Für Google-Login verwende bevorzugt einen OAuth-Client vom Typ 'Desktop-App'.",
                         color = Color.White.copy(alpha = 0.78f)
                     )
                 }
@@ -1216,7 +1464,19 @@ private fun DesktopProvider.label(): String = when (this) {
     DesktopProvider.OLLAMA -> "Ollama"
 }
 
-private fun DesktopChatRole.label(): String = when (this) {
-    DesktopChatRole.USER -> "User"
-    DesktopChatRole.ASSISTANT -> "Assistant"
+private fun AiChatRole.label(): String = when (this) {
+    AiChatRole.SYSTEM -> "System"
+    AiChatRole.USER -> "User"
+    AiChatRole.ASSISTANT -> "Assistant"
 }
+
+private fun AiChatRole.toDesktopLocalRole(): DesktopLocalMessageRole = when (this) {
+    AiChatRole.SYSTEM -> DesktopLocalMessageRole.SYSTEM
+    AiChatRole.USER -> DesktopLocalMessageRole.USER
+    AiChatRole.ASSISTANT -> DesktopLocalMessageRole.ASSISTANT
+}
+
+private fun DesktopLocalMessage.toAiChatMessage(): AiChatMessage = AiChatMessage(
+    role = AiChatRole.valueOf(role),
+    text = text
+)

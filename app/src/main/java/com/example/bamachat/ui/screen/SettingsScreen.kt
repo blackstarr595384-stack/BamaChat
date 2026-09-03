@@ -1,319 +1,343 @@
-﻿package com.example.bamachat.ui.screen
+package com.example.bamachat.ui.screen
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.bamachat.ui.theme.NeonPurple
-import com.example.bamachat.ui.theme.NeonCyan
-import com.example.bamachat.ui.theme.NeonPink
-import com.example.bamachat.ui.theme.NeonGreen
-import com.example.bamachat.ui.theme.NeonBlue
-import com.example.bamachat.ui.theme.SurfaceDarkCard
-import com.example.bamachat.ui.theme.SurfaceDarkElevated
-import com.example.bamachat.ui.theme.AppDesignSystem
+import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator.ChatSyncState
+import com.example.bamachat.ui.component.settings.SettingsCategoryCard
+import com.example.bamachat.ui.component.settings.SettingsNavigationRow
+import com.example.bamachat.ui.component.settings.SettingsSectionTitle
+import com.example.bamachat.ui.component.settings.SettingsTopBar
+import com.example.bamachat.ui.component.settings.settingsScreenContentPadding
+import com.example.bamachat.ui.settings.VoiceModeUiPolicy
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
+import com.example.bamachat.util.McpServerManager
+import com.example.bamachat.util.McpWorkflowManager
 import com.example.bamachat.util.MonetizationConfig
 
-private enum class SettingsMode { SIMPLE, ADVANCED }
-
-private data class SettingsEntryItem(
+private data class SettingsOverviewCategory(
+    val id: String,
     val title: String,
-    val subtitle: String,
+    val description: String,
     val icon: ImageVector,
-    val gradientStart: Color,
-    val gradientEnd: Color,
-    val section: String? = null,
-    val openProfile: Boolean = false
+    val accent: Color,
+    val value: String? = null
 )
 
 @Composable
-fun SettingsScreen(
+fun SettingsOverviewScreen(
     settingsViewModel: SettingsViewModel,
+    voiceViewModel: BamaVoiceViewModel,
+    cloudChatSyncUid: String? = null,
     onBack: () -> Unit,
     onOpenProfile: () -> Unit,
-    initialSection: String? = null,
+    onOpenAiModels: () -> Unit,
+    onOpenVoiceAudio: () -> Unit,
+    onOpenWorkspaceSettings: () -> Unit,
+    initialLegacySection: String? = null,
     onOpenPrivacyPolicy: () -> Unit = {},
-    @Suppress("UNUSED_PARAMETER") mcpServerManager: Any? = null,
-    @Suppress("UNUSED_PARAMETER") mcpWorkflowManager: Any? = null
+    mcpServerManager: McpServerManager? = null,
+    mcpWorkflowManager: McpWorkflowManager? = null
 ) {
     val provider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
-    val design by settingsViewModel.uiDesignPreset.collectAsStateWithLifecycle()
     val activeWorkspaceName by settingsViewModel.activeWorkspaceName.collectAsStateWithLifecycle()
-    val tier by settingsViewModel.subscriptionTier.collectAsStateWithLifecycle()
-    val credits by settingsViewModel.creditsBalance.collectAsStateWithLifecycle()
-    val scrollState = rememberScrollState()
+    val subscriptionTier by settingsViewModel.subscriptionTier.collectAsStateWithLifecycle()
+    val voiceMode by settingsViewModel.voiceMode.collectAsStateWithLifecycle()
+    val cloudPreferenceRevision by settingsViewModel.cloudChatSyncPreferenceRevision.collectAsStateWithLifecycle()
+    val cloudRuntimeStatus by settingsViewModel.cloudChatSyncRuntimeStatus.collectAsStateWithLifecycle()
+    var legacySection by rememberSaveable(initialLegacySection) {
+        mutableStateOf(initialLegacySection)
+    }
 
-    var expandedSection by remember(initialSection) { mutableStateOf(initialSection) }
-    var mode by remember { mutableStateOf(SettingsMode.SIMPLE) }
-    if (expandedSection != null) {
+    val chatSyncEnabled = remember(cloudChatSyncUid, cloudPreferenceRevision) {
+        settingsViewModel.isCloudChatSyncEnabledForUser(cloudChatSyncUid)
+    }
+    val syncSummary = remember(
+        cloudChatSyncUid,
+        chatSyncEnabled,
+        cloudRuntimeStatus.uid,
+        cloudRuntimeStatus.state
+    ) {
+        when {
+            cloudChatSyncUid.isNullOrBlank() -> "Nur lokal · Anmeldung erforderlich"
+            !chatSyncEnabled -> "Nur lokal"
+            cloudRuntimeStatus.uid != cloudChatSyncUid -> "Synchronisierung aktiv"
+            cloudRuntimeStatus.state == ChatSyncState.Pending -> "Synchronisierung ausstehend"
+            cloudRuntimeStatus.state == ChatSyncState.Success -> "Zuletzt erfolgreich"
+            cloudRuntimeStatus.state == ChatSyncState.Failed -> "Fehlgeschlagen · lokal sicher"
+            else -> "Synchronisierung aktiv"
+        }
+    }
+    val tierLabel = remember(subscriptionTier) {
+        MonetizationConfig.PlanTier.fromKey(subscriptionTier).label
+    }
+
+    legacySection?.let { section ->
         SettingsDialog(
             viewModel = settingsViewModel,
-            onDismiss = { expandedSection = null },
-            initialSection = expandedSection,
-            onOpenPrivacyPolicy = onOpenPrivacyPolicy
+            voiceViewModel = voiceViewModel,
+            cloudChatSyncUid = cloudChatSyncUid,
+            onDismiss = { legacySection = null },
+            initialSection = section,
+            onOpenPrivacyPolicy = onOpenPrivacyPolicy,
+            mcpServerManager = mcpServerManager,
+            mcpWorkflowManager = mcpWorkflowManager
         )
     }
 
-    val simpleEntries = listOf(
-        SettingsEntryItem("Konto", "Profil, Anmeldung, E-Mail", Icons.Default.Person, NeonPurple, Color(0xFF7C4DFF), openProfile = true),
-        SettingsEntryItem("KI & Modelle", "Provider, API-Keys, Abo, Credits", Icons.Default.Tune, NeonBlue, Color(0xFF0066CC), section = "ai"),
-        SettingsEntryItem("Darstellung", "Farben, Layout, Chat-Anzeige", Icons.Default.Palette, NeonPink, Color(0xFFAA0055), section = "chat"),
-        SettingsEntryItem("Sprache & Stimme", "TTS, Cloud-Voice, Sprachmodus", Icons.Default.GraphicEq, NeonGreen, Color(0xFF008844), section = "voice"),
-        SettingsEntryItem("Workspaces & Automationen", "Projekte, Schnellaktionen, Rollen", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), section = "workspaces"),
-        SettingsEntryItem("Datenschutz & Daten", "Sync, Bereinigung, App-Info", Icons.Default.Security, Color(0xFF00BFA5), Color(0xFF00796B), section = "data")
+    SettingsOverviewContent(
+        tier = tierLabel,
+        provider = provider,
+        workspace = activeWorkspaceName.ifBlank { "Kein aktiver Arbeitsbereich" },
+        syncStatus = syncSummary,
+        voiceModeSummary = VoiceModeUiPolicy.overviewSummary(voiceMode),
+        onBack = onBack,
+        onOpenAccount = onOpenProfile,
+        onOpenWorkspaces = onOpenWorkspaceSettings,
+        onOpenGeneral = { legacySection = "general" },
+        onOpenAiModels = onOpenAiModels,
+        onOpenVoiceAudio = onOpenVoiceAudio,
+        onOpenPrivacyData = { legacySection = "data" },
+        onOpenAdvanced = { legacySection = "ai" }
     )
-    val advancedExtraEntries = listOf(
-        SettingsEntryItem("Allgemein", "Sicherheit, Sprache, Benachrichtigung", Icons.Default.Settings, Color(0xFF6C63FF), Color(0xFF4A42D4), section = "general"),
-        SettingsEntryItem("Agenten", "Persona-Profil, Regeln, Stil", Icons.Default.Psychology, Color(0xFF9C27B0), Color(0xFF6A1B9A), section = "agents")
-    )
-    val entries = if (mode == SettingsMode.SIMPLE) simpleEntries else simpleEntries + advancedExtraEntries
+}
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0xFF0D0D1A),
-                        Color(0xFF14142A),
-                        Color(0xFF1A1A2E)
-                    )
-                )
-            )
-    ) {
-        Column(
+@Composable
+internal fun SettingsOverviewContent(
+    tier: String,
+    provider: String,
+    workspace: String,
+    syncStatus: String,
+    voiceModeSummary: String,
+    onBack: () -> Unit,
+    onOpenAccount: () -> Unit,
+    onOpenWorkspaces: () -> Unit,
+    onOpenGeneral: () -> Unit,
+    onOpenAiModels: () -> Unit,
+    onOpenVoiceAudio: () -> Unit,
+    onOpenPrivacyData: () -> Unit,
+    onOpenAdvanced: () -> Unit
+) {
+    val categories = listOf(
+        SettingsOverviewCategory(
+            id = "general",
+            title = "Allgemein",
+            description = "Erscheinungsbild, Sprache und App-Verhalten",
+            icon = Icons.Default.Settings,
+            accent = MaterialTheme.colorScheme.primary
+        ),
+        SettingsOverviewCategory(
+            id = "ai",
+            title = "KI und Modelle",
+            description = "Anbieter, Modelle und automatische Auswahl",
+            icon = Icons.Default.Tune,
+            accent = Color(0xFF5C8DFF),
+            value = provider
+        ),
+        SettingsOverviewCategory(
+            id = "voice",
+            title = "Sprache und Audio",
+            description = "Sprachmodus, Mikrofon und Antwortstimme",
+            icon = Icons.Default.GraphicEq,
+            accent = Color(0xFFAE6CFF),
+            value = voiceModeSummary
+        ),
+        SettingsOverviewCategory(
+            id = "privacy",
+            title = "Datenschutz und Daten",
+            description = "Synchronisierung, Speicherung und Löschung",
+            icon = Icons.Default.Security,
+            accent = Color(0xFFFF6B7A),
+            value = syncStatus
+        ),
+        SettingsOverviewCategory(
+            id = "advanced",
+            title = "Erweitert",
+            description = "Experimente, Integrationen und Diagnose",
+            icon = Icons.Default.Tune,
+            accent = Color(0xFF8C93A8)
+        )
+    )
+
+    Scaffold(
+        modifier = Modifier.testTag("settings_overview_screen"),
+        topBar = { SettingsTopBar(title = "Einstellungen", onBack = onBack) },
+        contentWindowInsets = WindowInsets.safeDrawing,
+        containerColor = MaterialTheme.colorScheme.background
+    ) { innerPadding ->
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
+                .padding(innerPadding)
+                .imePadding()
+                .testTag("settings_overview_list"),
+            contentPadding = settingsScreenContentPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, top = 8.dp, end = 16.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "ZurÃ¼ck",
-                        tint = Color.White
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "âš™ï¸ Einstellungen",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
+            item(key = "status") {
+                SettingsStatusCard(
+                    tier = tier,
+                    provider = provider,
+                    workspace = workspace,
+                    syncStatus = syncStatus
                 )
             }
-
-            // Subscription info card
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .shadow(
-                        elevation = 8.dp,
-                        shape = RoundedCornerShape(16.dp),
-                        spotColor = NeonPurple.copy(alpha = 0.15f)
-                    ),
-                shape = RoundedCornerShape(16.dp),
-                color = SurfaceDarkElevated.copy(alpha = 0.7f)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    NeonPurple.copy(alpha = 0.1f),
-                                    Color.Transparent
-                                )
-                            ),
-                            RoundedCornerShape(16.dp)
-                        )
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            "Abo \u2022 ${tier.uppercase()}",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Text(
-                            "Credits: \u20AC${"%.2f".format(credits.toDouble())}",
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 13.sp
-                        )
+            item(key = "account-title") {
+                SettingsSectionTitle("KONTO UND PRODUKT")
+            }
+            item(key = "account") {
+                SettingsNavigationRow(
+                    title = "Konto und Abo",
+                    description = "Profil, Anmeldung, Tarif und Credits",
+                    value = tier,
+                    icon = Icons.Default.Person,
+                    onClick = onOpenAccount
+                )
+            }
+            item(key = "workspaces") {
+                SettingsNavigationRow(
+                    title = "Arbeitsbereiche",
+                    description = "Bereiche verwalten und aktiven Bereich wählen",
+                    value = workspace,
+                    icon = Icons.Default.Folder,
+                    onClick = onOpenWorkspaces
+                )
+            }
+            item(key = "categories-title") {
+                SettingsSectionTitle("EINSTELLUNGEN")
+            }
+            items(categories, key = SettingsOverviewCategory::id) { category ->
+                SettingsCategoryCard(
+                    modifier = Modifier.testTag("settings_category_${category.id}"),
+                    title = category.title,
+                    description = category.description,
+                    icon = category.icon,
+                    accent = category.accent,
+                    value = category.value,
+                    onClick = when (category.id) {
+                        "general" -> onOpenGeneral
+                        "ai" -> onOpenAiModels
+                        "voice" -> onOpenVoiceAudio
+                        "privacy" -> onOpenPrivacyData
+                        else -> onOpenAdvanced
                     }
-                    Button(
-                        onClick = { expandedSection = "ai" },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonPurple
-                        )
-                    ) {
-                        Text("Verwalten", color = Color.White, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // Settings entries
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                entries.forEach { entry ->
-                    SettingsEntryCard(
-                        item = entry,
-                        onClick = {
-                            if (entry.openProfile) onOpenProfile()
-                            else expandedSection = entry.section
-                        }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // Footer
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    "BamaChat v1.0.0",
-                    color = Color.White.copy(alpha = 0.3f),
-                    fontSize = 12.sp
-                )
-                Text(
-                    "Futuristic AI Edition",
-                    color = Color.White.copy(alpha = 0.2f),
-                    fontSize = 11.sp
                 )
             }
-
-            Spacer(Modifier.height(32.dp))
         }
     }
 }
 
 @Composable
-private fun SettingsEntryCard(
-    item: SettingsEntryItem,
-    onClick: () -> Unit
+private fun SettingsStatusCard(
+    tier: String,
+    provider: String,
+    workspace: String,
+    syncStatus: String
 ) {
+    val summary = "Tarif $tier. KI-Anbieter $provider. Arbeitsbereich $workspace. Synchronisierung $syncStatus"
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = 6.dp,
-                shape = RoundedCornerShape(16.dp),
-                spotColor = item.gradientStart.copy(alpha = 0.1f)
-            )
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = SurfaceDarkCard.copy(alpha = 0.6f)
+            .semantics(mergeDescendants = true) {
+                contentDescription = summary
+            },
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            item.gradientStart.copy(alpha = 0.08f),
-                            Color.Transparent
-                        )
-                    ),
-                    RoundedCornerShape(16.dp)
-                )
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Icon
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .shadow(4.dp, RoundedCornerShape(12.dp), spotColor = item.gradientStart.copy(alpha = 0.2f))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                item.gradientStart.copy(alpha = 0.2f),
-                                item.gradientEnd.copy(alpha = 0.1f)
-                            )
-                        )
-                    )
-                    .border(
-                        androidx.compose.foundation.BorderStroke(
-                            1.dp, item.gradientStart.copy(alpha = 0.15f)
-                        ),
-                        RoundedCornerShape(12.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = item.icon,
-                    contentDescription = null,
-                    tint = item.gradientStart,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Spacer(Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    item.title,
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp
-                )
-                Text(
-                    item.subtitle,
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 11.sp
-                )
-            }
-
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.3f),
-                modifier = Modifier.size(20.dp)
+            Text(
+                text = "Auf einen Blick",
+                style = MaterialTheme.typography.titleMedium
             )
+            StatusLine(label = "Tarif", value = tier)
+            StatusLine(label = "KI-Anbieter", value = provider)
+            StatusLine(label = "Arbeitsbereich", value = workspace)
+            StatusLine(label = "Synchronisierung", value = syncStatus)
         }
     }
+}
+
+@Composable
+private fun StatusLine(label: String, value: String) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val useStackedLayout = maxWidth < 480.dp || LocalDensity.current.fontScale > 1.15f
+        if (useStackedLayout) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                StatusLabel(label)
+                StatusValue(value)
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                StatusLabel(label, Modifier.weight(1f))
+                StatusValue(value, Modifier.weight(1.6f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusLabel(label: String, modifier: Modifier = Modifier) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+        maxLines = 1,
+        softWrap = false
+    )
+}
+
+@Composable
+private fun StatusValue(value: String, modifier: Modifier = Modifier) {
+    Text(
+        text = value,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier
+    )
 }

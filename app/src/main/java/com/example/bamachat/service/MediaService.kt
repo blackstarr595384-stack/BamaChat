@@ -104,7 +104,7 @@ class MediaService(
         return keywords.any { lower.contains(it) }
     }
 
-    suspend fun importMultimodal(uri: Uri, groqApiKey: String = ""): String? {
+    suspend fun importMultimodal(uri: Uri, ownerScope: String, groqApiKey: String = ""): String? {
         val appContext = app.applicationContext
         val asset = MultimodalProcessor.parse(appContext, uri)
         return when (asset.category) {
@@ -112,24 +112,24 @@ class MediaService(
             MultimodalAsset.Category.AUDIO -> {
                 val transcript = transcribeAudio(uri, groqApiKey)
                 if (!transcript.isNullOrBlank()) {
-                    knowledgeService.ingestText(asset.title, "audio_transcript", transcript)
+                    knowledgeService.ingestText(asset.title, "audio_transcript", transcript, ownerScope)
                 }
                 "audio_imported"
             }
             MultimodalAsset.Category.VIDEO -> {
                 val transcript = transcribeAudio(uri, groqApiKey)
                 if (!transcript.isNullOrBlank()) {
-                    knowledgeService.ingestText(asset.title, "video_transcript", transcript)
+                    knowledgeService.ingestText(asset.title, "video_transcript", transcript, ownerScope)
                 }
                 val keyframeSummary = summarizeVideo(uri)
                 if (keyframeSummary.isNotBlank()) {
-                    knowledgeService.ingestText(asset.title, "video_keyframes", keyframeSummary)
+                    knowledgeService.ingestText(asset.title, "video_keyframes", keyframeSummary, ownerScope)
                 }
                 "video_imported"
             }
             MultimodalAsset.Category.PDF, MultimodalAsset.Category.DOCX,
             MultimodalAsset.Category.XLSX, MultimodalAsset.Category.TEXT_DOC -> {
-                val title = knowledgeService.importDocument(uri)
+                val title = knowledgeService.importDocument(uri, ownerScope)
                 if (title != null) "document_imported:$title" else null
             }
             else -> null

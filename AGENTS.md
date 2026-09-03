@@ -1,12 +1,15 @@
 # BamaChat AGENTS Leitfaden
 
+- GitHub Intelligence Phase 7.6b darf lokal nur deterministische Umsetzungspläne für unveränderte `proposal-<64 hex>`-Parser-IDs vorbereiten. Die `plan-<20 hex>`-ID bindet den vollständigen freigegebenen Planinhalt über eine versionierte, UTF-8-längengebundene Kodierung, Validierungen werden exakt aus den Modulpfaden abgeleitet, und direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle sind in Änderungsschritten verboten; Cancellation endet vor `SERVER_ACCEPTED`. Ein echter Draft-PR-Auftrag benötigt einen separat geprüften BamaWorker mit serverseitiger GitHub App; der aktuelle Android-Gateway bleibt ohne Server deaktiviert und enthält weder GitHub-Token noch direkten Schreibzugriff.
+
 ## Große Architekturübersicht
 - Dreimodulige App-Basis: Android-Hauptapp (`:app`) mit Kotlin + Compose + MVVM, Desktop-Client (`:desktopApp`) auf Compose Multiplatform (Windows Stage 6) und Shared-Core (`:sharedCore`) fuer plattformneutrale Logik; Android-Einstieg ist `MainActivity` + `BamaChatApplication` (Android 13+, minSdk 33).
 - Navigation ist zentralisiert in `ui/screen/BamaChatApp.kt`; Auth-Status steuert Routen (`WELCOME`/`AUTH`/`HOME_HUB`/`CHAT` etc.).
 - Home-Hub Verständlichkeitsmodus: `SettingsViewModel.simpleModeEnabled` (`settings.simple_mode_enabled`) steuert die reduzierte Einstiegskachel-Auswahl im `HomeHubScreen`.
 - `ChatViewModel` ist der Orchestrierungskern: AI-Provider-Routing, Streaming, Persona-Logik, Quotas/Paywall, Benachrichtigungen, multimodaler Import und Cloud-Persona-Sync.
 - Für installierbare Workspace-Plugins gibt es einen separaten Flow aus `ExtensionManagerViewModel` + `ExtensionManagerScreen` + `util/WorkspaceExtensions.kt` (Katalog, Capabilities, Persistenz); aktive Extensions werden im `ChatViewModel` turn-basiert in den Runtime-Kontext injiziert. Zusätzlich steuert die Composer-Quick-Action (`Auto`/`Research`/`Code Review`/`Plan`) den Extension-Modus pro Nachricht.
-- Lokale Persistenz verwendet Room (`data/local/*`) über `ChatRepository`; AI-Netzwerkaufrufe werden absichtlich in `ChatViewModel` durchgeführt (siehe Repo-Kommentar in `ChatRepository.kt`).
+- GitHub Intelligence (`data/github/*`, `ui/viewmodel/GitHubIntelligenceViewModel.kt`, `ui/screen/GitHubIntelligenceScreen.kt`, `shared/core/github/*`) ist strikt read-only: nur das öffentliche Allowlist-Repository `blackstarr595384-stack/BamaChat`, nur GET ohne Auth-Header, ausschließlich reguläre Git-Blobs mit SHA-Abgleich, Credential-Redaction, begrenzte Textsnapshots und feste Untrusted-Content-Grenzen.
+- Lokale Chat-Persistenz verwendet Room (`data/local/*`) über `ChatRepository` und ist immer nach `account:<Firebase-UID>` oder `guest:<Session-ID>` getrennt; migrierte Altzeilen bleiben zunächst als `legacy:unclassified` gesperrt und werden erst innerhalb des persistent gegateten ersten Kontowechsels atomar dem eindeutig authentifizierten Konto zugeordnet. AI-Netzwerkaufrufe werden absichtlich in `ChatViewModel` durchgeführt (siehe Repo-Kommentar in `ChatRepository.kt`).
 - Cloud-Status ist aufgeteilt:
   - Benutzereigene Dokumente unter `users/{uid}` (+ `persona_profiles`, `persona_prompts`, `persona_training_examples`).
   - Realtime-Kollaboration unter `collab_sessions/{sessionId}` mit `messages` und `presence` Unterkollektionen.
@@ -33,7 +36,7 @@
 - SharedPreferences (`"settings"`) ist ein wichtiger Konfigurationsbus (API-Schlüssel, Provider-Auswahl, Persona-Tuning, Billing-Flags).
 - Benutzerseitige Fehler/Status werden über ViewModel-Status (`_errorMessage`, `_statusMessage`) angezeigt und meist deutscher Text.
 - Room DB nutzt explizite Migrationen in `ChatDatabase` (kein `fallbackToDestructiveMigration`); fehlende Migrationen schlagen bewusst fehl statt lokale Daten zu loeschen.
-- Gastdaten-Bereinigung ist explizit in `LocalDataSanitizer.clearGuestSessionData`; füge neue private Schlüssel dort hinzu, falls nötig.
+- Der Gast-zu-Konto-Übergang löscht ausschließlich den aktuellen Guest-Scope über `GuestChatTransitionCoordinator`, claimt danach Legacy-Zeilen und migriert Workspace-Bindings, bevor Account-Scope und Cloud-Sync freigegeben werden; `LocalDataSanitizer.clearGuestSessionData` bleibt vollständigen, ausdrücklich ausgelösten lokalen Datenlöschungen vorbehalten und darf nicht im Auth-Erfolgspfad verwendet werden.
 - Plugin- und Dependency-Versionen liegen zentral in `gradle/libs.versions.toml`; maschinenbezogene Gradle-/AGP-Overrides bleiben in `%USERPROFILE%/.gradle/gradle.properties` oder `local.properties`.
 - Lint-Ausnahmen liegen bewusst in `app/lint.xml`: `AndroidGradlePluginVersion` ist wegen Toolchain-Pin auf AGP 8.7.3 ignoriert; `TrustAllX509TrustManager` nur fuer externes `bcpkix`-Jar (pdfbox-Transitiv).
 

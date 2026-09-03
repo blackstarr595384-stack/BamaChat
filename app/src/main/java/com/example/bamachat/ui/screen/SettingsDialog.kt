@@ -3,7 +3,6 @@ package com.example.bamachat.ui.screen
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
@@ -33,28 +32,34 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 // BuildConfig removed - using hardcoded values
 import com.example.bamachat.data.ApiClient
+import com.example.bamachat.data.cloud.AndroidChatSyncCoordinator.ChatSyncState
 import com.example.bamachat.ui.component.CompactTextAction
 import com.example.bamachat.ui.component.CompactTextActionRow
-import com.example.bamachat.ui.component.sanitizeForSpeech
-import com.example.bamachat.ui.component.splitSpeechChunks
 import com.example.bamachat.util.AgentPresetLibrary
 import com.example.bamachat.util.LegalPolicy
 import com.example.bamachat.ui.theme.AppDesignPreset
+import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
-import com.example.bamachat.util.CloudVoiceManager
 import com.example.bamachat.util.MonetizationConfig
 import com.example.bamachat.util.PlayBillingManager
 import com.example.bamachat.util.McpConnectionStatus
 import com.example.bamachat.util.McpServerManager
 import com.example.bamachat.util.McpWorkflowManager
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.example.bamachat.voice.VoiceInputProvider
+import com.example.bamachat.voice.VoiceMode
+import com.example.bamachat.voice.VoiceOutputProvider
+import com.example.bamachat.voice.VoiceProviderCatalog
+import com.example.bamachat.voice.VoiceSessionState
+import com.example.bamachat.voice.RealtimeTurnTaking
+import com.example.bamachat.voice.RealtimeVoice
 import java.util.Locale
 
 @Suppress("UNUSED_VARIABLE", "UNUSED_PARAMETER")
@@ -62,12 +67,15 @@ import java.util.Locale
 fun SettingsDialog(
     onOpenPrivacyPolicy: () -> Unit = {},
     viewModel: SettingsViewModel,
+    voiceViewModel: BamaVoiceViewModel,
+    cloudChatSyncUid: String? = null,
     onDismiss: () -> Unit,
     initialSection: String? = null,
     mcpServerManager: McpServerManager? = null,
     mcpWorkflowManager: McpWorkflowManager? = null
 ) {
     val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
+    val guestCleanupAvailable by viewModel.guestCleanupAvailable.collectAsState()
     val primaryColor by viewModel.primaryColorInt.collectAsState()
     val fontSize by viewModel.fontSize.collectAsState()
     val multiProvider by viewModel.multiProviderEnabled.collectAsState()
@@ -111,6 +119,14 @@ fun SettingsDialog(
     val soundEnabled by viewModel.soundEnabled.collectAsState()
     val vibrationEnabled by viewModel.vibrationEnabled.collectAsState()
     val autoSendVoice by viewModel.autoSendVoice.collectAsState()
+    val voiceMode by viewModel.voiceMode.collectAsState()
+    val voiceInputProvider by viewModel.voiceInputProvider.collectAsState()
+    val voiceOutputProvider by viewModel.voiceOutputProvider.collectAsState()
+    val voiceInterruptionEnabled by viewModel.voiceInterruptionEnabled.collectAsState()
+    val voiceProviderFallbackEnabled by viewModel.voiceProviderFallbackEnabled.collectAsState()
+    val voiceSilenceTimeoutMs by viewModel.voiceSilenceTimeoutMs.collectAsState()
+    val realtimeVoice by viewModel.realtimeVoice.collectAsState()
+    val realtimeTurnTaking by viewModel.realtimeTurnTaking.collectAsState()
     val voiceChatMode by viewModel.voiceChatMode.collectAsState()
     val ttsEnabled by viewModel.ttsEnabled.collectAsState()
     val ttsSpeed by viewModel.ttsSpeed.collectAsState()
@@ -149,160 +165,81 @@ fun SettingsDialog(
     val uiCornerRoundnessScale by viewModel.uiCornerRoundnessScale.collectAsState()
     val uiShadowIntensityScale by viewModel.uiShadowIntensityScale.collectAsState()
     val uiSurfaceOpacity by viewModel.uiSurfaceOpacity.collectAsState()
-    val guestAutoClearOnAccountSignIn by viewModel.guestAutoClearOnAccountSignIn.collectAsState()
     val guestAutoClearOnSignOut by viewModel.guestAutoClearOnSignOut.collectAsState()
     val cloudPersonaLastSyncAt by viewModel.cloudPersonaLastSyncAt.collectAsState()
     val cloudPersonaLastSyncStatus by viewModel.cloudPersonaLastSyncStatus.collectAsState()
+    val cloudChatSyncPreferenceRevision by viewModel.cloudChatSyncPreferenceRevision.collectAsState()
+    val cloudChatSyncRuntimeStatus by viewModel.cloudChatSyncRuntimeStatus.collectAsState()
+    val voiceUiState by voiceViewModel.uiState.collectAsState()
 
     val _uriHandler = LocalUriHandler.current
     val context = LocalContext.current
     val useClearVoiceStyle = ttsVoiceStyle == SettingsViewModel.TTS_STYLE_CLEAR
-    val previewScope = rememberCoroutineScope()
-    val cloudVoiceManager = remember(context) { CloudVoiceManager(context) }
-    val cloudVoiceRequested = ttsProVoiceEnabled && cloudVoiceEnabled
-    val selectedCloudVoiceProvider = remember(cloudVoiceProvider) {
-        CloudVoiceManager.Provider.fromStorage(cloudVoiceProvider)
+    val voicePreviewSamples = remember(language) { voicePreviewSamplesForLanguage(language) }
+    val voicePreviewPlaying = voiceUiState.state == VoiceSessionState.Speaking &&
+        voiceUiState.activeOutputMessageId == "voice-preview"
+    val voicePreviewStatus = when {
+        voicePreviewPlaying -> "Stimmprobe läuft …"
+        voiceUiState.state is VoiceSessionState.Error ->
+            (voiceUiState.state as VoiceSessionState.Error).userMessage
+        else -> "Bereit für einen Testlauf."
     }
-    val cloudVoiceConfig = remember(
-        cloudVoiceRequested,
-        cloudVoiceProvider,
+    val stopVoicePreview: () -> Unit = voiceViewModel::stopSpeaking
+    val playVoicePreview: (VoicePreviewSample) -> Unit = { sample ->
+        voiceViewModel.refreshConfiguration()
+        voiceViewModel.previewVoice(sample.text)
+    }
+    val latestPreviewPlaying by rememberUpdatedState(voicePreviewPlaying)
+    var pendingRealtimeVoiceRestart by remember { mutableStateOf<RealtimeVoice?>(null) }
+    DisposableEffect(voiceViewModel) {
+        onDispose {
+            if (latestPreviewPlaying) voiceViewModel.stopSpeaking()
+        }
+    }
+    pendingRealtimeVoiceRestart?.let { pendingVoice ->
+        AlertDialog(
+            onDismissRequest = { pendingRealtimeVoiceRestart = null },
+            title = { Text("Live-Sitzung neu starten?") },
+            text = {
+                Text("Die Stimme kann nach der ersten Audioausgabe nicht innerhalb derselben Live-Sitzung gewechselt werden.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        voiceViewModel.endLiveSession()
+                        viewModel.setRealtimeVoice(pendingVoice)
+                        pendingRealtimeVoiceRestart = null
+                    }
+                ) { Text("Beenden und wechseln") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRealtimeVoiceRestart = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+    LaunchedEffect(
         elevenLabsApiKey,
         elevenLabsVoiceId,
         elevenLabsModelId,
         piperEndpoint,
-        piperVoiceName
+        piperVoiceName,
+        voiceMode,
+        voiceInputProvider,
+        voiceOutputProvider,
+        voiceInterruptionEnabled,
+        voiceProviderFallbackEnabled,
+        voiceSilenceTimeoutMs,
+        realtimeVoice,
+        realtimeTurnTaking,
+        ttsSpeed,
+        ttsPitch,
+        ttsVoiceStyle
     ) {
-        if (!cloudVoiceRequested) {
-            null
-        } else {
-            CloudVoiceManager.resolveCloudVoiceConfig(
-                providerValue = cloudVoiceProvider,
-                elevenLabsApiKey = elevenLabsApiKey,
-                elevenLabsVoiceId = elevenLabsVoiceId,
-                elevenLabsModelId = elevenLabsModelId,
-                piperEndpoint = piperEndpoint,
-                piperVoiceName = piperVoiceName
-            )
-        }
-    }
-    val ttsLocale = remember(language) { localeForLanguageCode(language) }
-    val voicePreviewSamples = remember(language) { voicePreviewSamplesForLanguage(language) }
-    var voicePreviewStatus by remember { mutableStateOf("") }
-    var voicePreviewPlaying by remember { mutableStateOf(false) }
-    var previewTts by remember { mutableStateOf<TextToSpeech?>(null) }
-    var voicePreviewJob by remember { mutableStateOf<Job?>(null) }
-
-    DisposableEffect(context) {
-        lateinit var ttsInstance: TextToSpeech
-        ttsInstance = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                ttsInstance.language = ttsLocale
-                ttsInstance.setSpeechRate(ttsSpeed)
-                ttsInstance.setPitch(ttsPitch)
-            }
-        }
-        previewTts = ttsInstance
-        onDispose {
-            runCatching { ttsInstance.stop() }
-            runCatching { ttsInstance.shutdown() }
-            runCatching { cloudVoiceManager.release() }
-            previewTts = null
-        }
-    }
-
-    LaunchedEffect(ttsLocale, ttsSpeed, ttsPitch) {
-        previewTts?.language = ttsLocale
-        previewTts?.setSpeechRate(ttsSpeed)
-        previewTts?.setPitch(ttsPitch)
-    }
-
-    val stopVoicePreview: () -> Unit = {
-        voicePreviewJob?.cancel()
-        runCatching { previewTts?.stop() }
-        previewScope.launch { cloudVoiceManager.stop() }
-        voicePreviewPlaying = false
-        voicePreviewStatus = ""
-    }
-
-    val playVoicePreview: (VoicePreviewSample) -> Unit = playSample@{ sample ->
-        val speakText = sanitizeForSpeech(sample.text)
-        if (speakText.isBlank()) return@playSample
-        voicePreviewJob?.cancel()
-        voicePreviewJob = previewScope.launch {
-            voicePreviewPlaying = true
-            voicePreviewStatus = "Spielt: ${sample.label}"
-            var finalStatus = ""
-            try {
-                runCatching { previewTts?.stop() }
-                runCatching { cloudVoiceManager.stop() }
-
-                val maxChunkChars = if (useClearVoiceStyle) 170 else 220
-                val pauseMs = if (useClearVoiceStyle) 80L else 130L
-
-                if (cloudVoiceRequested) {
-                    val config = cloudVoiceConfig
-                    if (config == null) {
-                        finalStatus = "${selectedCloudVoiceProvider.displayName} ist aktiviert, aber die Konfiguration ist unvollständig."
-                        Toast.makeText(context, finalStatus, Toast.LENGTH_LONG).show()
-                        return@launch
-                    }
-                    val cloudOk = runCatching {
-                        cloudVoiceManager.speak(
-                            text = speakText,
-                            config = config,
-                            voiceStyle = if (useClearVoiceStyle) CloudVoiceManager.VoiceStyle.CLEAR else CloudVoiceManager.VoiceStyle.NATURAL
-                        )
-                    }.getOrDefault(false)
-                    if (cloudOk) {
-                        while (cloudVoiceManager.isSpeaking()) {
-                            delay(140)
-                        }
-                        return@launch
-                    }
-
-                    finalStatus = cloudVoiceManager.lastErrorMessage()
-                        ?: "ElevenLabs konnte nicht gestartet werden."
-                    Toast.makeText(context, finalStatus, Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-
-                val engine = previewTts
-                if (engine != null) {
-                    val chunks = splitSpeechChunks(speakText, maxChunkChars = maxChunkChars)
-                    chunks.forEachIndexed { index, chunk ->
-                        val queueMode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                        engine.speak(
-                            chunk,
-                            queueMode,
-                            null,
-                            "settings_voice_preview_${System.currentTimeMillis()}_$index"
-                        )
-                        if (index < chunks.lastIndex) {
-                            engine.playSilentUtterance(
-                                pauseMs,
-                                TextToSpeech.QUEUE_ADD,
-                                "settings_voice_preview_pause_$index"
-                            )
-                        }
-                    }
-                    while (engine.isSpeaking) {
-                        delay(120)
-                    }
-                } else {
-                    finalStatus = "Android-Sprachausgabe ist nicht bereit."
-                }
-            } finally {
-                voicePreviewPlaying = false
-                voicePreviewStatus = finalStatus
-            }
-        }
-    }
-
-    LaunchedEffect(ttsEnabled) {
-        if (!ttsEnabled) stopVoicePreview()
+        voiceViewModel.refreshConfiguration()
     }
 
     var expandedSection by remember { mutableStateOf<String?>(null) }
+    var voiceAdvancedExpanded by remember { mutableStateOf(false) }
     var newWorkspaceName by remember { mutableStateOf("") }
     // P0-2: confirm-dialog state for workspace deletion
     var workspacePendingDelete by remember { mutableStateOf<com.example.bamachat.util.ProjectWorkspace?>(null) }
@@ -350,6 +287,18 @@ fun SettingsDialog(
     }
     val cloudSyncStatusText = remember(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus) {
         viewModel.formatCloudSyncStatus(cloudPersonaLastSyncAt, cloudPersonaLastSyncStatus)
+    }
+    val cloudChatSyncEnabled = remember(cloudChatSyncUid, cloudChatSyncPreferenceRevision) {
+        viewModel.isCloudChatSyncEnabledForUser(cloudChatSyncUid)
+    }
+    val cloudChatSyncAvailable = !cloudChatSyncUid.isNullOrBlank()
+    val cloudChatSyncStatusText = when {
+        !cloudChatSyncAvailable || !cloudChatSyncEnabled -> null
+        cloudChatSyncRuntimeStatus.uid != cloudChatSyncUid -> "Synchronisierung aktiv"
+        cloudChatSyncRuntimeStatus.state == ChatSyncState.Pending -> "Synchronisierung ausstehend"
+        cloudChatSyncRuntimeStatus.state == ChatSyncState.Success -> "Letzte Synchronisierung erfolgreich"
+        cloudChatSyncRuntimeStatus.state == ChatSyncState.Failed -> "Synchronisierung fehlgeschlagen – lokale Chats sind sicher"
+        else -> "Synchronisierung aktiv"
     }
     val activeWorkspaceLabel = remember(projectWorkspaces, activeWorkspaceId) {
         projectWorkspaces.firstOrNull { it.id == activeWorkspaceId }?.name ?: "Kein aktiver Workspace"
@@ -444,6 +393,35 @@ fun SettingsDialog(
                                 }
                             }
                         }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customAccentHex,
+                            onValueChange = { customAccentHex = it.trim() },
+                            label = { Text("Eigene Akzentfarbe", fontSize = 11.sp) },
+                            placeholder = { Text("#4E7DE8", fontSize = 10.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        Button(
+                            onClick = {
+                                parsedCustomAccent?.let { colorInt ->
+                                    viewModel.setPrimaryColor(colorInt)
+                                    customAccentHex = colorToHex(colorInt)
+                                }
+                            },
+                            enabled = parsedCustomAccent != null
+                        ) {
+                            Text("Anwenden", fontSize = 11.sp)
+                        }
+                    }
+                    if (parsedCustomAccent == null && customAccentHex.isNotBlank()) {
+                        Text("Format: #RRGGBB oder #AARRGGBB", fontSize = 10.sp, color = Color(0xFFFFC107))
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Schriftgröße (${fontSize.toInt()} sp)", fontWeight = FontWeight.Medium, fontSize = 13.sp)
@@ -541,168 +519,252 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Sprache & Stimme", expandedSection == "voice", onClick = { expandedSection = if (expandedSection == "voice") null else "voice" }) {
-                    SettingRow("Sprachmodus", "Durchgehend per Sprache chatten") {
-                        Switch(checked = voiceChatMode, onCheckedChange = { viewModel.setVoiceChatMode(it) })
-                    }
-                    SettingRow("Auto-Senden", "Nach Spracheingabe sofort senden") {
-                        Switch(checked = autoSendVoice, onCheckedChange = { viewModel.setAutoSendVoice(it) })
-                    }
-                    SettingRow("Push-to-Talk", "Mikrofon per Halten/Loslassen steuern") {
-                        Switch(checked = voicePushToTalkEnabled, onCheckedChange = { viewModel.setVoicePushToTalkEnabled(it) })
-                    }
-                    SettingRow("Auto-Vorlesen (TTS)", "KI-Antworten automatisch sprechen") {
-                        Switch(checked = ttsEnabled, onCheckedChange = { viewModel.setTtsEnabled(it) })
-                    }
-                    if (ttsEnabled) {
-                        SettingRow("Pro Voice", "Bessere Stimme + natürlichere Sprechweise") {
-                            Switch(
-                                checked = ttsProVoiceEnabled,
-                                onCheckedChange = { viewModel.setTtsProVoiceEnabled(it) }
+                SettingsSection("Sprache & Unterhaltung", expandedSection == "voice", onClick = { expandedSection = if (expandedSection == "voice") null else "voice" }) {
+                    Text("Voice-Modus", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(
+                            items = listOf(
+                                VoiceMode.AUTOMATIC,
+                                VoiceMode.LIVE,
+                                VoiceMode.UNIVERSAL,
+                                VoiceMode.LOCAL
+                            ),
+                            key = { it.storageValue }
+                        ) { mode ->
+                            FilterChip(
+                                selected = voiceMode == mode,
+                                onClick = { viewModel.setVoiceMode(mode) },
+                                enabled = mode != VoiceMode.LIVE || voiceUiState.realtimeAvailable,
+                                label = { Text(mode.displayName, fontSize = 11.sp) }
                             )
                         }
-                        SettingRow("Cloud Voice", "Natürliche Stimme über ElevenLabs oder Piper") {
-                            Switch(
-                                checked = cloudVoiceEnabled,
-                                onCheckedChange = { viewModel.setCloudVoiceEnabled(it) }
-                            )
+                    }
+                    VoiceRecommendationCard(
+                        title = VoiceMode.LIVE.displayName,
+                        recommendation = VoiceProviderCatalog.OPENAI_REALTIME_RECOMMENDATION,
+                        detail = if (voiceUiState.realtimeAvailable) {
+                            "Native WebRTC-Verbindung mit kurzlebiger Berechtigung vom sicheren BamaVoice-Server."
+                        } else {
+                            "Für Live-Unterhaltung muss zuerst der sichere BamaVoice-Server eingerichtet werden."
                         }
-                        if (cloudVoiceEnabled) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    "Provider wählen. Es werden nur die passenden Felder angezeigt.",
-                                    fontSize = 10.sp,
-                                    color = Color.White.copy(alpha = 0.62f)
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    CloudVoiceManager.Provider.entries.forEach { provider ->
-                                        FilterChip(
-                                            selected = selectedCloudVoiceProvider == provider,
-                                            onClick = { viewModel.setCloudVoiceProvider(provider.storageValue) },
-                                            label = { Text(provider.displayName, fontSize = 11.sp) }
+                    )
+
+                    if (voiceMode == VoiceMode.LIVE) {
+                        Text("Live-Stimme", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RealtimeVoice.entries.forEach { voice ->
+                                FilterChip(
+                                    selected = realtimeVoice == voice,
+                                    onClick = {
+                                        if (voiceUiState.liveSessionActive) {
+                                            pendingRealtimeVoiceRestart = voice
+                                        } else {
+                                            viewModel.setRealtimeVoice(voice)
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            if (voice == RealtimeVoice.MARIN) "Marin · empfohlen" else "Cedar · Alternative",
+                                            fontSize = 11.sp
                                         )
                                     }
-                                }
-                            }
-                            when (selectedCloudVoiceProvider) {
-                                CloudVoiceManager.Provider.ELEVENLABS -> {
-                                    OutlinedTextField(
-                                        value = elevenLabsApiKey,
-                                        onValueChange = { viewModel.setElevenLabsApiKey(it) },
-                                        label = { Text("ElevenLabs API-Key", fontSize = 12.sp) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        singleLine = true,
-                                        placeholder = { Text("sk_...", fontSize = 11.sp) },
-                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                                    )
-                                    OutlinedTextField(
-                                        value = elevenLabsVoiceId,
-                                        onValueChange = { viewModel.setElevenLabsVoiceId(it) },
-                                        label = { Text("Voice ID", fontSize = 12.sp) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        singleLine = true,
-                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                                    )
-                                    OutlinedTextField(
-                                        value = elevenLabsModelId,
-                                        onValueChange = { viewModel.setElevenLabsModelId(it) },
-                                        label = { Text("Model ID", fontSize = 12.sp) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        singleLine = true,
-                                        placeholder = { Text("eleven_multilingual_v2", fontSize = 11.sp) },
-                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                                    )
-                                }
-                                CloudVoiceManager.Provider.PIPER -> {
-                                    OutlinedTextField(
-                                        value = piperEndpoint,
-                                        onValueChange = { viewModel.setPiperEndpoint(it) },
-                                        label = { Text("Piper Endpoint", fontSize = 12.sp) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        singleLine = true,
-                                        placeholder = { Text("http://192.168.178.162:5000", fontSize = 11.sp) },
-                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                                    )
-                                    OutlinedTextField(
-                                        value = piperVoiceName,
-                                        onValueChange = { viewModel.setPiperVoiceName(it) },
-                                        label = { Text("Voice Name (optional)", fontSize = 12.sp) },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        singleLine = true,
-                                        placeholder = { Text("de_DE-thorsten-high", fontSize = 11.sp) },
-                                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                                    )
-                                    Text(
-                                        "Piper läuft typischerweise lokal oder im Heimnetz als HTTP-Server und liefert WAV-Dateien zurück.",
-                                        fontSize = 10.sp,
-                                        color = Color.White.copy(alpha = 0.62f)
-                                    )
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                TextButton(onClick = {
-                                    _uriHandler.openUri(selectedCloudVoiceProvider.docsUrl)
-                                }) {
-                                    Text("Voice-Docs öffnen", fontSize = 11.sp)
-                                }
+                                )
                             }
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Stimmstil (A/B-Test)", fontWeight = FontWeight.Medium, fontSize = 12.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                        Text("Sprecherwechsel", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(RealtimeTurnTaking.entries, key = { it.storageValue }) { turnTaking ->
                                 FilterChip(
-                                    selected = !useClearVoiceStyle,
+                                    selected = realtimeTurnTaking == turnTaking,
                                     onClick = {
-                                        viewModel.setTtsVoiceStyle(SettingsViewModel.TTS_STYLE_NATURAL)
-                                        viewModel.applyNaturalTtsPreset()
+                                        if (voiceUiState.liveSessionActive) voiceViewModel.endLiveSession()
+                                        viewModel.setRealtimeTurnTaking(turnTaking)
                                     },
-                                    label = { Text("Natürlich", fontSize = 11.sp) }
-                                )
-                                FilterChip(
-                                    selected = useClearVoiceStyle,
-                                    onClick = {
-                                        viewModel.setTtsVoiceStyle(SettingsViewModel.TTS_STYLE_CLEAR)
-                                        viewModel.applyClearTtsPreset()
-                                    },
-                                    label = { Text("Klar/Präzise", fontSize = 11.sp) }
+                                    label = { Text(turnTaking.displayName, fontSize = 11.sp) }
                                 )
                             }
-                            Text(
-                                if (useClearVoiceStyle)
-                                    "Klar/Präzise: direkter, kompakter und mit kuerzeren Sprachpausen."
-                                else
-                                    "Natürlich: weicher Klang mit leicht langsamem Tempo und natürlicheren Pausen.",
-                                fontSize = 10.sp,
-                                color = Color.White.copy(alpha = 0.62f)
+                        }
+
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("Live-Audio wird zur Verarbeitung an OpenAI übertragen.", fontSize = 11.sp)
+                                Text(
+                                    "Ein dauerhafter OpenAI-Schlüssel wird nicht in der App gespeichert. Finale Transkripte folgen dem bestehenden Chatverlauf.",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f)
+                                )
+                            }
+                        }
+                    }
+
+                    Text("Spracheingabe", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(
+                            items = listOf(VoiceInputProvider.AUTOMATIC, VoiceInputProvider.ANDROID),
+                            key = { it.storageValue }
+                        ) { provider ->
+                            FilterChip(
+                                selected = voiceInputProvider == provider,
+                                onClick = { viewModel.setVoiceInputProvider(provider) },
+                                label = { Text(provider.displayName, fontSize = 11.sp) }
                             )
                         }
+                    }
+                    Text(
+                        "OpenAI Transkription ist vorbereitet: ${VoiceProviderCatalog.OPENAI_TRANSCRIBE_QUALITY}. Ohne sicheren Audio-Endpunkt bleibt Android aktiv.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.64f)
+                    )
+
+                    Text("Sprachausgabe", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(
+                            items = listOf(
+                                VoiceOutputProvider.AUTOMATIC,
+                                VoiceOutputProvider.ELEVENLABS,
+                                VoiceOutputProvider.PIPER,
+                                VoiceOutputProvider.ANDROID
+                            ),
+                            key = { it.storageValue }
+                        ) { provider ->
+                            FilterChip(
+                                selected = voiceOutputProvider == provider,
+                                onClick = { viewModel.setVoiceOutputProvider(provider) },
+                                label = { Text(provider.displayName, fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    SettingRow("Freisprechen", "Nach einer Antwort wieder zuhören") {
+                        Switch(checked = voiceChatMode, onCheckedChange = viewModel::setVoiceChatMode)
+                    }
+                    SettingRow("Automatisch senden", "Nur den finalen Text genau einmal senden") {
+                        Switch(checked = autoSendVoice, onCheckedChange = viewModel::setAutoSendVoice)
+                    }
+                    SettingRow("Antworten automatisch vorlesen", "Satzweise ausgeben, sobald Text verfügbar ist") {
+                        Switch(checked = ttsEnabled, onCheckedChange = viewModel::setTtsEnabled)
+                    }
+                    SettingRow("Assistent unterbrechbar", "Mikrofon stoppt laufende Sprachausgabe sofort") {
+                        Switch(checked = voiceInterruptionEnabled, onCheckedChange = viewModel::setVoiceInterruptionEnabled)
+                    }
+                    SettingRow("Push-to-Talk", "Mikrofon gedrückt halten und zum Abschließen loslassen") {
+                        Switch(checked = voicePushToTalkEnabled, onCheckedChange = viewModel::setVoicePushToTalkEnabled)
+                    }
+                    SettingRow("Provider-Fallback", "Bei Sprachfehlern sicher auf den Geräteanbieter wechseln") {
+                        Switch(checked = voiceProviderFallbackEnabled, onCheckedChange = viewModel::setVoiceProviderFallbackEnabled)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Sprechpause (${String.format(Locale.getDefault(), "%.1f s", voiceSilenceTimeoutMs / 1_000f)})",
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
+                        )
+                        Slider(
+                            value = voiceSilenceTimeoutMs.toFloat(),
+                            onValueChange = { viewModel.setVoiceSilenceTimeoutMs(it.toLong()) },
+                            valueRange = 700f..5_000f,
+                            steps = 42
+                        )
+                    }
+
+                    VoicePrivacyCard(
+                        mode = voiceMode,
+                        inputProvider = voiceInputProvider,
+                        outputProvider = voiceOutputProvider
+                    )
+
+                    if (voiceOutputProvider == VoiceOutputProvider.ELEVENLABS) {
+                        VoiceRecommendationCard(
+                            title = "ElevenLabs Flash v2.5",
+                            recommendation = VoiceProviderCatalog.ELEVENLABS_FLASH_RECOMMENDATION,
+                            detail = "Eleven Multilingual v2 bleibt für hochwertige längere Antworten wählbar."
+                        )
+                        OutlinedTextField(
+                            value = elevenLabsApiKey,
+                            onValueChange = viewModel::setElevenLabsApiKey,
+                            label = { Text("ElevenLabs API-Key", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        OutlinedTextField(
+                            value = elevenLabsVoiceId,
+                            onValueChange = viewModel::setElevenLabsVoiceId,
+                            label = { Text("Voice ID", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = elevenLabsModelId == "eleven_flash_v2_5",
+                                onClick = { viewModel.setElevenLabsModelId("eleven_flash_v2_5") },
+                                label = { Text("Flash v2.5", fontSize = 11.sp) }
+                            )
+                            FilterChip(
+                                selected = elevenLabsModelId == "eleven_multilingual_v2",
+                                onClick = { viewModel.setElevenLabsModelId("eleven_multilingual_v2") },
+                                label = { Text("Multilingual v2", fontSize = 11.sp) }
+                            )
+                        }
+                    } else if (voiceOutputProvider == VoiceOutputProvider.PIPER) {
+                        VoiceRecommendationCard(
+                            title = "Piper",
+                            recommendation = VoiceProviderCatalog.PIPER_RECOMMENDATION,
+                            detail = "Audio bleibt lokal, wenn der konfigurierte Endpoint auf diesem Gerät oder im privaten Netz läuft."
+                        )
+                        OutlinedTextField(
+                            value = piperEndpoint,
+                            onValueChange = viewModel::setPiperEndpoint,
+                            label = { Text("Piper Endpoint", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("http://192.168.178.162:5000", fontSize = 11.sp) },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                        OutlinedTextField(
+                            value = piperVoiceName,
+                            onValueChange = viewModel::setPiperVoiceName,
+                            label = { Text("Voice Name (optional)", fontSize = 12.sp) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                        )
+                    } else if (voiceOutputProvider == VoiceOutputProvider.ANDROID || voiceMode == VoiceMode.LOCAL) {
+                        VoiceRecommendationCard(
+                            title = "Android",
+                            recommendation = VoiceProviderCatalog.ANDROID_RECOMMENDATION,
+                            detail = "Die tatsächlich verfügbare On-Device-Erkennung und Stimme hängt vom Gerät und den installierten Sprachpaketen ab."
+                        )
+                    }
+
+                    if (ttsEnabled) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                            )
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                         ) {
                             Column(
                                 modifier = Modifier.padding(10.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Voice-Testmodus", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                Text(
-                                    "Teste die aktuelle Stimme mit kurzen Beispielen (beruecksichtigt Speed/Pitch und optional Cloud Voice).",
-                                    fontSize = 10.sp,
-                                    color = Color.White.copy(alpha = 0.65f)
-                                )
+                                Text("Stimme testen", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     items(items = voicePreviewSamples, key = { it.id }) { sample ->
                                         OutlinedButton(
                                             onClick = { playVoicePreview(sample) },
-                                            enabled = ttsEnabled,
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                         ) {
                                             Text(sample.label, fontSize = 11.sp)
@@ -715,43 +777,49 @@ fun SettingsDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        if (voicePreviewStatus.isNotBlank()) voicePreviewStatus else "Bereit fuer einen Testlauf.",
+                                        voicePreviewStatus,
                                         fontSize = 10.sp,
-                                        color = Color.White.copy(alpha = 0.6f),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
                                         modifier = Modifier.weight(1f)
                                     )
-                                    TextButton(
-                                        onClick = { stopVoicePreview() },
-                                        enabled = voicePreviewPlaying
-                                    ) {
+                                    TextButton(onClick = stopVoicePreview, enabled = voicePreviewPlaying) {
                                         Text("Stopp", fontSize = 11.sp)
                                     }
                                 }
                             }
                         }
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("TTS-Geschwindigkeit (${String.format(Locale.getDefault(), "%.1fx", ttsSpeed)})", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                            Slider(
-                                value = ttsSpeed,
-                                onValueChange = { viewModel.setTtsSpeed(it) },
-                                valueRange = 0.5f..2.0f,
-                                steps = 6
-                            )
+                    }
+
+                    TextButton(onClick = { voiceAdvancedExpanded = !voiceAdvancedExpanded }) {
+                        Text(if (voiceAdvancedExpanded) "Erweitert ausblenden" else "Erweiterte Spracheinstellungen")
+                    }
+                    if (voiceAdvancedExpanded) {
+                        SettingRow("Pro Voice", "Optimierte Geräte-Stimme, falls verfügbar") {
+                            Switch(checked = ttsProVoiceEnabled, onCheckedChange = viewModel::setTtsProVoiceEnabled)
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("TTS-Stimmhöhe (${String.format(Locale.getDefault(), "%.2f", ttsPitch)})", fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                            Slider(
-                                value = ttsPitch,
-                                onValueChange = { viewModel.setTtsPitch(it) },
-                                valueRange = 0.8f..1.2f,
-                                steps = 7
+                            Text("Geschwindigkeit (${String.format(Locale.getDefault(), "%.1fx", ttsSpeed)})", fontSize = 13.sp)
+                            Slider(value = ttsSpeed, onValueChange = viewModel::setTtsSpeed, valueRange = 0.5f..2.0f, steps = 6)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Stimmhöhe (${String.format(Locale.getDefault(), "%.2f", ttsPitch)})", fontSize = 13.sp)
+                            Slider(value = ttsPitch, onValueChange = viewModel::setTtsPitch, valueRange = 0.8f..1.2f, steps = 7)
+                        }
+                        if (voiceOutputProvider == VoiceOutputProvider.ELEVENLABS) {
+                            OutlinedTextField(
+                                value = elevenLabsModelId,
+                                onValueChange = viewModel::setElevenLabsModelId,
+                                label = { Text("Technische Model ID", fontSize = 12.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
                             )
                         }
                     }
                 }
 
-                SettingsSection("Workspaces & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
-                    Text("Aktiver Projekt-Workspace", fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                SettingsSection("Arbeitsbereiche & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
+                    Text("Aktiver Arbeitsbereich", fontWeight = FontWeight.Medium, fontSize = 15.sp)
                     projectWorkspaces.forEach { workspace ->
                         val isActive = workspace.id == activeWorkspaceId
                         val isRenaming = renamingWorkspaceId == workspace.id
@@ -855,7 +923,7 @@ fun SettingsDialog(
                     OutlinedTextField(
                         value = newWorkspaceName,
                         onValueChange = { newWorkspaceName = it },
-                        label = { Text("Neuer Workspace", fontSize = 14.sp) },
+                        label = { Text("Neuer Arbeitsbereich", fontSize = 14.sp) },
                         placeholder = { Text("z.B. Kundenprojekt Alpha", fontSize = 14.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
@@ -880,10 +948,10 @@ fun SettingsDialog(
                             },
                             modifier = Modifier.heightIn(min = 48.dp)
                         ) {
-                            Text("Workspace erstellen", fontSize = 14.sp)
+                            Text("Arbeitsbereich erstellen", fontSize = 14.sp)
                         }
                     }
-                    SettingRow("Nur aktive Workspace-Chats", "Chatliste auf aktiven Workspace filtern") {
+                    SettingRow("Nur aktive Bereichs-Chats", "Chatliste auf aktiven Bereich filtern") {
                         Switch(
                             checked = workspaceChatFilterEnabled,
                             onCheckedChange = { viewModel.setWorkspaceChatFilterEnabled(it) }
@@ -1183,35 +1251,6 @@ fun SettingsDialog(
                                 Text("GPT", fontSize = 11.sp)
                             }
                         }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = customAccentHex,
-                            onValueChange = { customAccentHex = it.trim() },
-                            label = { Text("Eigene Akzentfarbe", fontSize = 11.sp) },
-                            placeholder = { Text("#4E7DE8", fontSize = 10.sp) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
-                        )
-                        Button(
-                            onClick = {
-                                parsedCustomAccent?.let { colorInt ->
-                                    viewModel.setPrimaryColor(colorInt)
-                                    customAccentHex = colorToHex(colorInt)
-                                }
-                            },
-                            enabled = parsedCustomAccent != null
-                        ) {
-                            Text("Anwenden", fontSize = 11.sp)
-                        }
-                    }
-                    if (parsedCustomAccent == null && customAccentHex.isNotBlank()) {
-                        Text("Format: #RRGGBB oder #AARRGGBB", fontSize = 10.sp, color = Color(0xFFFFC107))
                     }
                     OutlinedTextField(
                         value = openCodeEndpoint,
@@ -1541,13 +1580,35 @@ fun SettingsDialog(
                             )
                         )
                     }
-                    SettingRow("Privacy Strict Mode", "Maskiert sensible Inhalte stärker in Logs/Status") {
+                    CloudChatSyncSettingCard(
+                        enabled = cloudChatSyncEnabled,
+                        available = cloudChatSyncAvailable,
+                        runtimeStatus = cloudChatSyncStatusText,
+                        legacyPreferencePresent = viewModel.hasLegacyGlobalCloudChatSyncPreference(),
+                        onEnabledChange = { viewModel.setCloudChatSyncEnabledForUser(cloudChatSyncUid, it) }
+                    )
+                    SettingRow("Privacy-Modus (streng)", "Schützt private Daten in Logs und Statusmeldungen") {
                         Switch(
                             checked = privacyStrictModeEnabled,
                             onCheckedChange = { viewModel.setPrivacyStrictModeEnabled(it) }
                         )
                     }
-                    SettingRow("Rechtliches", "Öffentliche Texte und Kontaktwege") {
+                    // Friendly summary
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF00BFA5).copy(alpha = 0.06f)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Auf einen Blick", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Deine Chats bleiben lokal, solange kein Cloud-Sync aktiv ist. API-Schlüssel werden geschützt gespeichert. Externe KI-Dienste erhalten nur Daten, wenn du sie aktiv nutzt.",
+                                color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, lineHeight = 16.sp
+                            )
+                        }
+                    }
+                    SettingRow("Datenschutz & Rechtliches", "Infos, Einstellungen und Kontakt") {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -1569,30 +1630,31 @@ fun SettingsDialog(
                             )
                         )
                     }
-                    SettingRow("Gastdaten bei Konto-Login löschen", "Schützt private Testdaten beim Wechsel auf echtes Konto") {
-                        Switch(
-                            checked = guestAutoClearOnAccountSignIn,
-                            onCheckedChange = { viewModel.setGuestAutoClearOnAccountSignIn(it) }
-                        )
-                    }
-                    SettingRow("Gastdaten beim Abmelden löschen", "Löscht lokale Gast-Chats und Persona-Lernstände") {
+                    SettingRow("Gastdaten beim Abmelden löschen", "Löscht lokale Chat-Verläufe und gelernte Anpassungen") {
                         Switch(
                             checked = guestAutoClearOnSignOut,
                             onCheckedChange = { viewModel.setGuestAutoClearOnSignOut(it) }
                         )
                     }
-                    SettingRow("Gast-/Prompt-Daten jetzt löschen", "Löscht nur lokale Session-, Prompt- und Lern-Daten") {
-                        CompactTextActionRow(
-                            actions = listOf(
-                                CompactTextAction(
-                                    label = "Bereinigen",
-                                    onClick = { viewModel.clearGuestPrivateData() },
-                                    color = Color(0xFFE17055)
+                    if (guestCleanupAvailable) {
+                        SettingRow(
+                            "Gastdaten jetzt löschen",
+                            "Löscht Chats, Nachrichten, Wissensdaten sowie daraus abgeleitete Erinnerungs- und " +
+                                "Feedbackdaten der aktuellen Gastsitzung. Konto-, Workspace-, Provider-, " +
+                                "API-Schlüssel- und Einstellungsdaten bleiben erhalten."
+                        ) {
+                            CompactTextActionRow(
+                                actions = listOf(
+                                    CompactTextAction(
+                                        label = "Bereinigen",
+                                        onClick = { viewModel.clearGuestPrivateData() },
+                                        color = Color(0xFFE17055)
+                                    )
                                 )
                             )
-                        )
+                        }
                     }
-                    SettingRow("Lokale Daten löschen", "Einstellungen und Chats auf diesem Gerät zurücksetzen") {
+                    SettingRow("Lokale Daten löschen", "Setzt nur lokale Einstellungen und Chats zurück") {
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
@@ -1637,11 +1699,11 @@ fun SettingsDialog(
     workspacePendingDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { workspacePendingDelete = null },
-            title = { Text("Workspace löschen?") },
+            title = { Text("Arbeitsbereich löschen?") },
             text = {
                 Text(
-                    "Workspace \"${target.name}\" wirklich löschen? Die zugehörigen Chats bleiben erhalten, " +
-                        "werden aber bei aktivem Workspace-Filter ausgeblendet.",
+                    "Arbeitsbereich \"${target.name}\" wirklich löschen? Die zugehörigen Chats bleiben erhalten, " +
+                        "werden aber bei aktivem Bereichs-Filter ausgeblendet.",
                     fontSize = 14.sp
                 )
             },
@@ -1774,6 +1836,86 @@ private fun SettingsSummaryChip(label: String, value: String) {
 }
 
 @Composable
+private fun VoiceRecommendationCard(
+    title: String,
+    recommendation: String,
+    detail: String
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.24f))
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                recommendation,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                detail,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoicePrivacyCard(
+    mode: VoiceMode,
+    inputProvider: VoiceInputProvider,
+    outputProvider: VoiceOutputProvider
+) {
+    val privacyText = when {
+        mode == VoiceMode.LIVE ->
+            "Live-Audio wird direkt über eine sichere WebRTC-Verbindung von OpenAI verarbeitet. Der dauerhafte Provider-Schlüssel bleibt auf dem Server; nur finale Transkripte können im BamaChat-Verlauf gespeichert werden."
+        mode == VoiceMode.LOCAL ->
+            "Nur lokal: BamaVoice startet keine Cloud-Sprachverarbeitung. Erkennung und Ausgabe benötigen verfügbare On-Device-Komponenten oder einen privaten Piper-Endpoint."
+        outputProvider == VoiceOutputProvider.ELEVENLABS ->
+            "Spracheingabe nutzt Android. Beim Vorlesen wird nur der bereinigte Antworttext an ElevenLabs gesendet. Chattexte folgen weiterhin den gewählten Chat- und Löschregeln."
+        outputProvider == VoiceOutputProvider.PIPER ->
+            "Spracheingabe nutzt Android. Für die Ausgabe wird der bereinigte Antworttext an den von dir konfigurierten Piper-Endpoint gesendet."
+        inputProvider == VoiceInputProvider.ANDROID || outputProvider == VoiceOutputProvider.ANDROID ->
+            "Android verarbeitet Sprache über die auf dem Gerät verfügbaren Dienste. Außerhalb des lokalen Modus kann der Systemdienst je nach Geräteinstallation Netzwerkzugriff verwenden."
+        else ->
+            "Automatisch: BamaVoice bevorzugt verfügbare Gerätefunktionen und nutzt konfigurierte Ausgabedienste nur für das Vorlesen. Der finale Text wird erst beim Senden an den gewählten Chat-Provider übertragen."
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF00BFA5).copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, Color(0xFF00BFA5).copy(alpha = 0.24f))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = Icons.Default.PrivacyTip,
+                contentDescription = null,
+                tint = Color(0xFF00BFA5),
+                modifier = Modifier.size(20.dp)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Datenschutz", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    privacyText,
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsSection(title: String, expanded: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1826,6 +1968,97 @@ private fun SettingRow(title: String, subtitle: String? = null, action: @Composa
             }
         }
         action()
+    }
+}
+
+@Composable
+private fun CloudChatSyncSettingCard(
+    enabled: Boolean,
+    available: Boolean,
+    runtimeStatus: String?,
+    legacyPreferencePresent: Boolean,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF00BFA5).copy(alpha = 0.08f),
+        border = BorderStroke(1.dp, Color(0xFF00BFA5).copy(alpha = 0.18f))
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Chat-Synchronisierung",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        "Synchronisiert neue Chatverläufe und Arbeitsbereiche über dein Firebase-Konto, damit du später auf Android und Windows weiterarbeiten kannst.",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+                Switch(
+                    checked = available && enabled,
+                    enabled = available,
+                    onCheckedChange = onEnabledChange
+                )
+            }
+            Text(
+                if (available) {
+                    if (enabled) "Neue Chats werden für Android und Windows synchronisiert" else "Nur lokal auf diesem Gerät"
+                } else {
+                    "Melde dich an, um Chats zwischen Geräten zu synchronisieren."
+                },
+                color = if (available && enabled) Color(0xFF7CFFCB) else Color.White.copy(alpha = 0.72f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            if (available && enabled && runtimeStatus != null) {
+                Text(
+                    runtimeStatus,
+                    color = if (runtimeStatus.startsWith("Synchronisierung fehlgeschlagen")) {
+                        Color(0xFFFFD166)
+                    } else {
+                        Color.White.copy(alpha = 0.72f)
+                    },
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+            Text(
+                "Hochgeladen werden Chattexte, Titel, Zeitstempel, Persona und Arbeitsbereichsname.",
+                color = Color.White.copy(alpha = 0.66f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            Text(
+                "Bereits vorhandene lokale Chats werden in dieser Phase noch nicht hochgeladen.",
+                color = Color.White.copy(alpha = 0.66f),
+                fontSize = 11.sp,
+                lineHeight = 15.sp
+            )
+            if (legacyPreferencePresent) {
+                Text(
+                    "Eine alte globale Sync-Einstellung wurde erkannt und bleibt aus Sicherheitsgründen deaktiviert.",
+                    color = Color(0xFFFFD166),
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+            }
+        }
     }
 }
 

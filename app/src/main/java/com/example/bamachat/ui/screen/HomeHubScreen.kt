@@ -73,13 +73,18 @@ fun HomeHubScreen(
 ) {
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
 
-    val dashboardCards = listOf(
-        DashboardCard("Chat", "Schneller Einstieg in laufende Gespräche mit KI", Icons.AutoMirrored.Filled.Chat, NeonPurple, Color(0xFF7C4DFF), NeonPurple, onClick = onOpenChat),
-        DashboardCard("Agent Hub", "Persona, Regeln und KI-Assistenten verwalten", Icons.Default.Psychology, NeonBlue, Color(0xFF0066CC), NeonCyan, onClick = onOpenAgentHub),
-        DashboardCard("Mini-Apps", "Tools, Browser, Spiele und Notizen", Icons.Default.Extension, NeonGreen, Color(0xFF008844), NeonGreen, onClick = onOpenMiniApps),
-        DashboardCard("AI Extensions", "Plugins installieren und Berechtigungen steuern", Icons.Default.Tune, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenExtensions),
-        DashboardCard("Wissensgraph", "Verbindungen zwischen Themen visualisieren", Icons.Default.AccountTree, Color(0xFF00BFA5), Color(0xFF00796B), Color(0xFF00BFA5), onClick = onOpenKnowledgeGraph),
-        DashboardCard("Real-Time Collab", "Gemeinsam in Echtzeit chatten und arbeiten", Icons.Default.Groups, NeonPink, Color(0xFFAA0055), NeonPink, onClick = onOpenRealtimeCollab)
+    val chatCard = DashboardCard("Chat", "Chat-Verlauf und laufende Gespräche", Icons.AutoMirrored.Filled.Chat, NeonPurple, Color(0xFF7C4DFF), NeonPurple, onClick = onOpenChat)
+
+    val workspaceCards = listOf(
+        DashboardCard("Arbeitsbereiche", "Bereiche, Filter, Automationen", Icons.Default.Folder, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenWorkspaceSettings),
+        DashboardCard("Mini-Apps", "Tools, Browser, Spiele", Icons.Default.Extension, NeonGreen, Color(0xFF008844), NeonGreen, onClick = onOpenMiniApps),
+        DashboardCard("Agent Hub", "Persona, Regeln, Assistenten", Icons.Default.Psychology, NeonBlue, Color(0xFF0066CC), NeonCyan, onClick = onOpenAgentHub),
+        DashboardCard("AI Extensions", "Plugins für erweiterte Funktionen", Icons.Default.Tune, Color(0xFFFF6B35), Color(0xFFCC4400), Color(0xFFFF6B35), onClick = onOpenExtensions)
+    )
+
+    val advancedCards = listOf(
+        DashboardCard("Wissensgraph", "Themen und Verbindungen", Icons.Default.AccountTree, Color(0xFF00BFA5), Color(0xFF00796B), Color(0xFF00BFA5), onClick = onOpenKnowledgeGraph),
+        DashboardCard("Real-Time Collab", "Gemeinsam chatten", Icons.Default.Groups, NeonPink, Color(0xFFAA0055), NeonPink, onClick = onOpenRealtimeCollab)
     )
 
     Box(
@@ -99,9 +104,9 @@ fun HomeHubScreen(
         ) {
             Spacer(Modifier.height(16.dp))
 
-            Text("🤖 BamaHub", style = MaterialTheme.typography.headlineLarge, color = palette.heroTitle, fontWeight = FontWeight.Bold)
+            Text("BamaHub", style = MaterialTheme.typography.headlineLarge, color = palette.heroTitle, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
-            Text("Willkommen zurück, bereit für die Zukunft", color = palette.textSecondary, fontSize = 14.sp)
+            Text("Wähle einen Bereich, um loszulegen", color = palette.textSecondary, fontSize = 14.sp)
 
             Spacer(Modifier.height(24.dp))
 
@@ -123,7 +128,7 @@ fun HomeHubScreen(
                     Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Default.Folder, null, tint = NeonCyan.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
-                        Text(if (activeWorkspaceName.isNotBlank()) activeWorkspaceName else "Standard", color = palette.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Text(if (activeWorkspaceName.isNotBlank()) activeWorkspaceName else "Standard-Bereich", color = palette.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -132,18 +137,27 @@ fun HomeHubScreen(
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 QuickActionChip(Icons.AutoMirrored.Filled.HelpCenter, "Hilfe", onOpenHelp, NeonCyan, modifier = Modifier.weight(1f))
-                QuickActionChip(Icons.Default.Settings, "Settings", onOpenSettings, NeonPurple, modifier = Modifier.weight(1f))
+                QuickActionChip(Icons.Default.Settings, "Einstellungen", onOpenSettings, NeonPurple, modifier = Modifier.weight(1f))
                 QuickActionChip(Icons.Default.Palette, "Design", onOpenDesignSettings, NeonPink, modifier = Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(24.dp))
 
-            dashboardCards.forEach { card ->
-                DashboardCardItem(card = card, palette = palette)
-                Spacer(Modifier.height(12.dp))
-            }
+            DashboardCardItem(card = chatCard, palette = palette)
 
-            Spacer(Modifier.height(80.dp))
+            Spacer(Modifier.height(20.dp))
+
+            SectionHeader(title = "Arbeitsbereich", color = palette.textSecondary)
+            Spacer(Modifier.height(10.dp))
+            DashboardCardGroup(cards = workspaceCards, palette = palette)
+
+            Spacer(Modifier.height(20.dp))
+
+            SectionHeader(title = "Erweitert", color = palette.textSecondary)
+            Spacer(Modifier.height(10.dp))
+            DashboardCardGroup(cards = advancedCards, palette = palette)
+
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -174,9 +188,64 @@ private fun QuickActionChip(
 }
 
 @Composable
+private fun SectionHeader(
+    title: String,
+    color: Color
+) {
+    Text(
+        text = title,
+        color = color,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 1.sp
+    )
+}
+
+@Composable
+private fun DashboardCardGroup(
+    cards: List<DashboardCard>,
+    palette: AppDesignPalette,
+    modifier: Modifier = Modifier
+) {
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val useTwoColumns = maxWidth >= 600.dp
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (useTwoColumns) {
+                cards.chunked(2).forEach { rowCards ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowCards.forEach { card ->
+                            DashboardCardItem(
+                                card = card,
+                                palette = palette,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (rowCards.size == 1) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            } else {
+                cards.forEach { card ->
+                    DashboardCardItem(
+                        card = card,
+                        palette = palette,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DashboardCardItem(
     card: DashboardCard,
-    palette: AppDesignPalette
+    palette: AppDesignPalette,
+    modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -187,8 +256,7 @@ private fun DashboardCardItem(
     )
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .graphicsLayer(scaleX = scale, scaleY = scale)
             .shadow(elevation = 16.dp, shape = RoundedCornerShape(20.dp),
                 spotColor = card.accentColor.copy(alpha = 0.25f),
@@ -207,35 +275,35 @@ private fun DashboardCardItem(
                 .border(BorderStroke(1.dp, card.accentColor.copy(alpha = 0.15f)), RoundedCornerShape(20.dp))
         ) {
             Row(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
-                        .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp), spotColor = card.accentColor.copy(alpha = 0.3f))
-                        .clip(RoundedCornerShape(16.dp))
+                        .size(44.dp)
+                        .shadow(elevation = 8.dp, shape = RoundedCornerShape(14.dp), spotColor = card.accentColor.copy(alpha = 0.3f))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(
                             Brush.verticalGradient(colors = listOf(card.gradientStart.copy(alpha = 0.4f), card.gradientEnd.copy(alpha = 0.2f)))
                         )
-                        .border(BorderStroke(1.dp, card.accentColor.copy(alpha = 0.2f)), RoundedCornerShape(16.dp)),
+                        .border(BorderStroke(1.dp, card.accentColor.copy(alpha = 0.2f)), RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(card.icon, contentDescription = card.title, tint = card.accentColor, modifier = Modifier.size(26.dp))
+                    Icon(card.icon, contentDescription = card.title, tint = card.accentColor, modifier = Modifier.size(22.dp))
                 }
 
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(card.title, color = palette.textPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Spacer(Modifier.height(4.dp))
-                    Text(card.subtitle, color = palette.textSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                    Text(card.title, color = palette.textPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Spacer(Modifier.height(3.dp))
+                    Text(card.subtitle, color = palette.textSecondary, fontSize = 11.sp, lineHeight = 14.sp)
                 }
 
                 Box(
-                    modifier = Modifier.size(32.dp).clip(CircleShape).background(card.accentColor.copy(alpha = 0.15f)),
+                    modifier = Modifier.size(28.dp).clip(CircleShape).background(card.accentColor.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = card.accentColor, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = card.accentColor, modifier = Modifier.size(18.dp))
                 }
             }
         }

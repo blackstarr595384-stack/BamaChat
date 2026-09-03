@@ -7,7 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("com.google.gms.google-services") apply false
-    
+
     id("io.gitlab.arturbosch.detekt") version "1.23.6"
     id("com.google.dagger.hilt.android")
 }
@@ -19,6 +19,18 @@ val googleServicesFiles = listOf(
     "src/release/google-services.json"
 ).map { layout.projectDirectory.file(it).asFile }
 val hasGoogleServicesJson = googleServicesFiles.any { it.exists() }
+
+fun String.asBuildConfigString(): String =
+    "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+val bamaVoiceRealtimeSessionUrl = providers.gradleProperty("bamaVoiceRealtimeSessionUrl")
+    .orElse(providers.environmentVariable("BAMA_VOICE_REALTIME_SESSION_URL"))
+    .orElse("")
+    .get()
+val bamaVoiceRealtimeSessionEndUrl = providers.gradleProperty("bamaVoiceRealtimeSessionEndUrl")
+    .orElse(providers.environmentVariable("BAMA_VOICE_REALTIME_SESSION_END_URL"))
+    .orElse("")
+    .get()
 
 if (hasGoogleServicesJson) {
     apply(plugin = "com.google.gms.google-services")
@@ -42,7 +54,7 @@ android {
         applicationId = "de.bamachat.app"
         minSdk = 33
         targetSdk = 35
-        versionCode = 2
+        versionCode = 3
         versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -86,8 +98,23 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "BAMA_VOICE_REALTIME_SESSION_URL", "\"\"")
+            buildConfigField("String", "BAMA_VOICE_REALTIME_SESSION_END_URL", "\"\"")
+        }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
+            buildConfigField(
+                "String",
+                "BAMA_VOICE_REALTIME_SESSION_URL",
+                bamaVoiceRealtimeSessionUrl.asBuildConfigString()
+            )
+            buildConfigField(
+                "String",
+                "BAMA_VOICE_REALTIME_SESSION_END_URL",
+                bamaVoiceRealtimeSessionEndUrl.asBuildConfigString()
+            )
             if (hasReleaseKeystore) {
                 signingConfig = signingConfigs.getByName("release")
             }
@@ -97,20 +124,22 @@ android {
             )
         }
     }
-    
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    
+
     kotlin {
         jvmToolchain(11)
     }
-    
+
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     ksp {
+        arg("room.schemaLocation", layout.buildDirectory.dir("roomSchemas").get().asFile.absolutePath)
     }
 
     testOptions {
@@ -121,12 +150,21 @@ android {
         }
     }
 
+    sourceSets.getByName("androidTest").assets.srcDirs(
+        "$projectDir/schemas",
+        "$projectDir/schemas-current"
+    )
+
+}
+
+tasks.matching { it.name == "kspReleaseKotlin" }.configureEach {
+    mustRunAfter("kspDebugKotlin")
 }
 
 dependencies {
     // Play In-App Review
     implementation("com.google.android.play:review-ktx:2.0.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     val mlKitTranslateVersion = "17.0.3"
     val mlKitLanguageIdVersion = "17.0.6"
     val mlKitSmartReplyVersion = "17.0.4"
@@ -134,6 +172,7 @@ dependencies {
     val credentialsVersion = "1.2.0-rc01"
 
     implementation(project(":sharedCore"))
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
@@ -188,7 +227,7 @@ dependencies {
     }
 
     // Jsoup for Link Previews
-    implementation("org.jsoup:jsoup:1.18.3")
+    implementation(libs.jsoup)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("org.bouncycastle:bcprov-jdk15to18:$bouncyCastleVersion")
     implementation("org.bouncycastle:bcpkix-jdk15to18:$bouncyCastleVersion")
@@ -216,7 +255,13 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-analytics")
+    implementation(libs.webrtc.android)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    testImplementation("androidx.room:room-testing:$roomVersion")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.10.00"))
     androidTestImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
@@ -226,6 +271,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("androidx.room:room-testing:$roomVersion")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
@@ -235,6 +281,12 @@ tasks.register("stabilityCheck") {
     group = "verification"
     description = "Runs core smoke checks for app stability."
     dependsOn("assembleDebug", "testDebugUnitTest", "lintDebug")
+}
+
+tasks.matching { it.name.startsWith("ksp") }.configureEach {
+    doFirst {
+        delete(layout.buildDirectory.dir("roomSchemas"))
+    }
 }
 
 // Fix Room/KSP kotlinx-serialization compatibility

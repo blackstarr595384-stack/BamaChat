@@ -7,13 +7,21 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "conversations")
+@Entity(
+    tableName = "conversations",
+    indices = [
+        Index(value = ["ownerScope"]),
+        Index(value = ["id", "ownerScope"], unique = true)
+    ]
+)
 data class ConversationEntity(
     @PrimaryKey val id: String,
     val title: String,
     val createdAt: Long,
     val updatedAt: Long,
-    val personaName: String = "ASSISTANT"
+    val personaName: String = "ASSISTANT",
+    @ColumnInfo(defaultValue = "'legacy:unclassified'")
+    val ownerScope: String
 )
 
 @Entity(
@@ -21,12 +29,16 @@ data class ConversationEntity(
     foreignKeys = [
         ForeignKey(
             entity = ConversationEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["conversationId"],
+            parentColumns = ["id", "ownerScope"],
+            childColumns = ["conversationId", "ownerScope"],
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["conversationId"])]
+    indices = [
+        Index(value = ["conversationId"]),
+        Index(value = ["ownerScope"]),
+        Index(value = ["conversationId", "ownerScope"])
+    ]
 )
 data class ChatMessageEntity(
     @PrimaryKey val id: String,
@@ -36,7 +48,9 @@ data class ChatMessageEntity(
     val timestamp: Long,
     val imageUrl: String? = null,
     val sourcesJson: String? = null,
-    val webFetchedAtIso: String? = null
+    val webFetchedAtIso: String? = null,
+    @ColumnInfo(defaultValue = "'legacy:unclassified'")
+    val ownerScope: String
 )
 
 @Entity(
@@ -94,7 +108,11 @@ data class UserMemoryFactEntity(
 
 @Entity(
     tableName = "knowledge_chunks",
-    indices = [Index(value = ["sourceTitle"]), Index(value = ["createdAt"])]
+    indices = [
+        Index(value = ["ownerScope"]),
+        Index(value = ["ownerScope", "sourceTitle"]),
+        Index(value = ["ownerScope", "createdAt"])
+    ]
 )
 data class KnowledgeChunkEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -102,15 +120,18 @@ data class KnowledgeChunkEntity(
     val content: String,
     val keywords: String,
     val sourceType: String = "text",
-    val createdAt: Long
+    val createdAt: Long,
+    @ColumnInfo(defaultValue = "'legacy:unclassified'")
+    val ownerScope: String
 )
 
 @Entity(
     tableName = "knowledge_edges",
     indices = [
-        Index(value = ["fromConcept"]),
-        Index(value = ["toConcept"]),
-        Index(value = ["fromConcept", "relation", "toConcept"], unique = true)
+        Index(value = ["ownerScope"]),
+        Index(value = ["ownerScope", "fromConcept"]),
+        Index(value = ["ownerScope", "toConcept"]),
+        Index(value = ["ownerScope", "fromConcept", "relation", "toConcept"], unique = true)
     ]
 )
 data class KnowledgeEdgeEntity(
@@ -119,7 +140,9 @@ data class KnowledgeEdgeEntity(
     val relation: String,
     val toConcept: String,
     val weight: Float = 1.0f,
-    val updatedAt: Long
+    val updatedAt: Long,
+    @ColumnInfo(defaultValue = "'legacy:unclassified'")
+    val ownerScope: String
 )
 
 @Entity(

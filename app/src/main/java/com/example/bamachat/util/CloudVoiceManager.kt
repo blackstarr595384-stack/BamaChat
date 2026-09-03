@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.util.Log
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,10 +16,22 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 
 class CloudVoiceManager(private val context: Context) {
+    enum class FailureCategory {
+        OFFLINE,
+        AUTHENTICATION_REQUIRED,
+        RATE_LIMITED,
+        UNSUPPORTED,
+        TEMPORARY_SERVICE_ERROR,
+        TIMEOUT
+    }
+
     enum class VoiceStyle {
         NATURAL,
         CLEAR
@@ -64,7 +77,8 @@ class CloudVoiceManager(private val context: Context) {
     companion object {
         private const val TAG = "CloudVoiceManager"
         private const val DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
-        private const val DEFAULT_MODEL_ID = "eleven_multilingual_v2"
+        private const val DEFAULT_MODEL_ID = "eleven_flash_v2_5"
+        private const val MAX_AUDIO_BYTES = 12 * 1024 * 1024
         private val SURROUNDING_QUOTES = charArrayOf('"', '\'', '`', '\u2018', '\u2019', '\u201C', '\u201D')
         private val API_KEY_PREFIX_REGEX = Regex("(?i)^\\s*(bearer|xi-api-key|x-api-key|api-key)\\s*[:=]?\\s*")
         private val VOICE_ID_PREFIX_REGEX = Regex("(?i)^\\s*voice[_ -]?id\\s*[:=]?\\s*")
@@ -191,6 +205,7 @@ class CloudVoiceManager(private val context: Context) {
 
     private var mediaPlayer: MediaPlayer? = null
     private var tempAudioFile: File? = null
+    private var playbackCompletion: CompletableDeferred<Boolean>? = null
 
     @Volatile
     private var activeRequest: Call? = null
@@ -201,20 +216,33 @@ class CloudVoiceManager(private val context: Context) {
     @Volatile
     private var lastError: String? = null
 
+    @Volatile
+    private var lastFailureCategory: FailureCategory? = null
+
+    init {
+        context.cacheDir.listFiles()
+            ?.filter { it.name.startsWith("bamachat_voice_") }
+            ?.forEach { staleFile -> runCatching { staleFile.delete() } }
+    }
+
     fun isSpeaking(): Boolean = isPlayingAudio
 
     fun lastErrorMessage(): String? = lastError
 
+    fun lastErrorCategory(): FailureCategory? = lastFailureCategory
+
     suspend fun speak(
         text: String,
         config: CloudVoiceConfig,
-        voiceStyle: VoiceStyle = VoiceStyle.NATURAL
+        voiceStyle: VoiceStyle = VoiceStyle.NATURAL,
+        onPlaybackStarted: () -> Unit = {}
     ): Boolean {
         lastError = null
+        lastFailureCategory = null
 
         val cleanText = text.trim()
         if (cleanText.isBlank()) {
-            setError("Kein Text für Sprachausgabe vorhanden.")
+            setError("Kein Text für Sprachausgabe vorhanden.", FailureCategory.UNSUPPORTED)
             return false
         }
 
@@ -234,7 +262,7 @@ class CloudVoiceManager(private val context: Context) {
             )
         } ?: return false
 
-        return playAudioBytes(payload.bytes, payload.fileExtension)
+        return playAudioBytes(payload.bytes, payload.fileExtension, onPlaybackStarted)
     }
 
     suspend fun stop() = withContext(Dispatchers.Main) {
@@ -242,6 +270,8 @@ class CloudVoiceManager(private val context: Context) {
             runCatching { player.stop() }
             runCatching { player.release() }
         }
+        playbackCompletion?.takeIf { !it.isCompleted }?.complete(false)
+        playbackCompletion = null
         cancelActiveRequest()
         mediaPlayer = null
         isPlayingAudio = false
@@ -250,6 +280,8 @@ class CloudVoiceManager(private val context: Context) {
 
     fun release() {
         runCatching { mediaPlayer?.release() }
+        playbackCompletion?.takeIf { !it.isCompleted }?.complete(false)
+        playbackCompletion = null
         cancelActiveRequest()
         mediaPlayer = null
         isPlayingAudio = false
@@ -280,7 +312,7 @@ class CloudVoiceManager(private val context: Context) {
         }
 
         val request = Request.Builder()
-            .url("https://api.elevenlabs.io/v1/text-to-speech/$voiceId?output_format=mp3_44100_128")
+            .url("https://api.elevenlabs.io/v1/text-to-speech/$voiceId/stream?output_format=mp3_44100_128")
             .addHeader("xi-api-key", apiKey)
             .addHeader("Accept", "audio/mpeg")
             .addHeader("Content-Type", "application/json")
@@ -294,11 +326,11 @@ class CloudVoiceManager(private val context: Context) {
                 }.getOrDefault("")
 
                 val message = mapElevenLabsHttpError(response.code, errorText)
-                setError(message)
-                Log.w(TAG, "$message Antwort: $errorText")
+                setError(message, categoryForElevenLabsHttp(response.code))
+                Log.w(TAG, "ElevenLabs request failed with HTTP ${response.code}")
                 null
             } else {
-                val bytes = responseBody?.bytes()
+                val bytes = responseBody?.let(::readBoundedAudio)
                 if (bytes == null || bytes.isEmpty()) {
                     setError("ElevenLabs hat keine Audiodaten geliefert.")
                     Log.w(TAG, "ElevenLabs Antwort war erfolgreich, aber leer.")
@@ -336,11 +368,11 @@ class CloudVoiceManager(private val context: Context) {
                 }.getOrDefault("")
 
                 val message = mapPiperHttpError(response.code, errorText)
-                setError(message)
-                Log.w(TAG, "$message Antwort: $errorText")
+                setError(message, categoryForPiperHttp(response.code))
+                Log.w(TAG, "Piper request failed with HTTP ${response.code}")
                 null
             } else {
-                val bytes = responseBody?.bytes()
+                val bytes = responseBody?.let(::readBoundedAudio)
                 if (bytes == null || bytes.isEmpty()) {
                     setError("Piper hat keine Audiodaten geliefert.")
                     Log.w(TAG, "Piper Antwort war erfolgreich, aber leer.")
@@ -370,16 +402,24 @@ class CloudVoiceManager(private val context: Context) {
             }
         }.getOrElse { throwable ->
             if (throwable is CancellationException) throw throwable
-            val message = "Cloud-Voice Netzwerk-/Audiofehler: ${throwable.message ?: throwable.javaClass.simpleName}"
-            setError(message)
-            Log.w(TAG, message, throwable)
+            val category = when (throwable) {
+                is SocketTimeoutException -> FailureCategory.TIMEOUT
+                is IOException -> FailureCategory.OFFLINE
+                else -> FailureCategory.TEMPORARY_SERVICE_ERROR
+            }
+            val message = if (category == FailureCategory.TIMEOUT) {
+                "Cloud-Sprachausgabe hat zu lange gebraucht."
+            } else {
+                "Cloud-Sprachausgabe ist momentan nicht erreichbar."
+            }
+            setError(message, category)
+            Log.w(TAG, "Cloud voice request failed: ${throwable.javaClass.simpleName}")
             null
         }
     }
 
     private fun mapElevenLabsHttpError(code: Int, errorText: String): String {
         val errorCode = extractErrorCode(errorText)
-        val detail = extractErrorDetail(errorText)
         return when {
             errorCode == "invalid_api_key" -> "ElevenLabs API-Key ist ungültig oder falsch formatiert."
             errorCode == "voice_not_found" || code == 404 -> "ElevenLabs Voice-ID wurde nicht gefunden."
@@ -388,34 +428,34 @@ class CloudVoiceManager(private val context: Context) {
             errorCode == "system_busy" -> "ElevenLabs ist gerade ausgelastet. Bitte kurz erneut versuchen."
             errorCode == "quota_exceeded" -> "ElevenLabs Guthaben oder Kontingent ist aufgebraucht."
             code == 429 -> "ElevenLabs meldet gerade ein Limit oder zu viele gleichzeitige Anfragen."
-            code == 400 -> detail?.let {
-                "ElevenLabs Anfrage ungültig: $it"
-            } ?: "ElevenLabs Anfrage ungültig. Prüfe API-Key, Voice-ID und Model-ID."
+            code == 400 -> "ElevenLabs Anfrage ungültig. Prüfe API-Key, Voice-ID und Model-ID."
             code == 401 -> "ElevenLabs API-Key ist ungültig oder fehlt."
             code == 403 -> "ElevenLabs Zugriff verweigert. Prüfe Account, Abo oder Voice-Zugriff."
-            else -> detail?.let {
-                "ElevenLabs Fehler HTTP $code: $it"
-            } ?: "ElevenLabs Fehler HTTP $code."
+            else -> "ElevenLabs ist momentan nicht verfügbar (HTTP $code)."
         }
     }
 
     private fun mapPiperHttpError(code: Int, errorText: String): String {
-        val detail = extractErrorDetail(errorText)
         return when (code) {
-            400 -> detail?.let {
-                "Piper Anfrage ungültig: $it"
-            } ?: "Piper Anfrage ungültig. Prüfe Endpoint und Voice-Name."
+            400 -> "Piper Anfrage ungültig. Prüfe Endpoint und Voice-Name."
             404 -> "Piper Endpoint wurde nicht gefunden. Prüfe URL und Port."
-            422 -> detail?.let {
-                "Piper konnte den Text nicht verarbeiten: $it"
-            } ?: "Piper konnte den Text nicht verarbeiten."
-            500 -> detail?.let {
-                "Piper Serverfehler: $it"
-            } ?: "Piper Serverfehler."
-            else -> detail?.let {
-                "Piper Fehler HTTP $code: $it"
-            } ?: "Piper Fehler HTTP $code."
+            422 -> "Piper konnte den Text nicht verarbeiten."
+            500 -> "Piper meldet einen Serverfehler."
+            else -> "Piper ist momentan nicht verfügbar (HTTP $code)."
         }
+    }
+
+    private fun categoryForElevenLabsHttp(code: Int): FailureCategory = when (code) {
+        401, 403 -> FailureCategory.AUTHENTICATION_REQUIRED
+        429 -> FailureCategory.RATE_LIMITED
+        400, 404, 422 -> FailureCategory.UNSUPPORTED
+        else -> FailureCategory.TEMPORARY_SERVICE_ERROR
+    }
+
+    private fun categoryForPiperHttp(code: Int): FailureCategory = when (code) {
+        400, 404, 422 -> FailureCategory.UNSUPPORTED
+        429 -> FailureCategory.RATE_LIMITED
+        else -> FailureCategory.TEMPORARY_SERVICE_ERROR
     }
 
     private fun extractErrorCode(errorText: String): String? {
@@ -471,27 +511,58 @@ class CloudVoiceManager(private val context: Context) {
         }
     }
 
-    private suspend fun playAudioBytes(bytes: ByteArray, fileExtension: String): Boolean {
+    private fun readBoundedAudio(body: ResponseBody): ByteArray? {
+        val declaredLength = body.contentLength()
+        if (declaredLength > MAX_AUDIO_BYTES) {
+            setError("Die erzeugte Audiodatei ist zu groß.")
+            return null
+        }
+        return body.byteStream().use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > MAX_AUDIO_BYTES) {
+                    setError("Die erzeugte Audiodatei ist zu groß.")
+                    return null
+                }
+                output.write(buffer, 0, read)
+            }
+            output.toByteArray()
+        }
+    }
+
+    private suspend fun playAudioBytes(
+        bytes: ByteArray,
+        fileExtension: String,
+        onPlaybackStarted: () -> Unit
+    ): Boolean {
         val audioFile = withContext(Dispatchers.IO) {
             File.createTempFile("bamachat_voice_", fileExtension, context.cacheDir).apply {
                 writeBytes(bytes)
             }
         }
 
-        return withContext(Dispatchers.Main) {
+        val completion = CompletableDeferred<Boolean>()
+        val prepared = withContext(Dispatchers.Main) {
             runCatching {
                 runCatching { mediaPlayer?.stop() }
                 runCatching { mediaPlayer?.release() }
+                playbackCompletion?.takeIf { !it.isCompleted }?.complete(false)
                 clearTempAudioFile()
 
                 tempAudioFile = audioFile
+                playbackCompletion = completion
 
                 val player = MediaPlayer()
                 mediaPlayer = player
 
                 player.setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
@@ -500,9 +571,11 @@ class CloudVoiceManager(private val context: Context) {
 
                 player.setOnCompletionListener { completed ->
                     isPlayingAudio = false
+                    completion.complete(true)
                     runCatching { completed.release() }
                     if (mediaPlayer === completed) {
                         mediaPlayer = null
+                        playbackCompletion = null
                         clearTempAudioFile()
                     }
                 }
@@ -510,30 +583,48 @@ class CloudVoiceManager(private val context: Context) {
                 player.setOnErrorListener { failedPlayer, what, extra ->
                     isPlayingAudio = false
                     setError("Audio-Playback-Fehler ($what/$extra).")
+                    completion.complete(false)
                     runCatching { failedPlayer.release() }
                     if (mediaPlayer === failedPlayer) {
                         mediaPlayer = null
+                        playbackCompletion = null
                         clearTempAudioFile()
                     }
                     true
                 }
 
-                player.prepare()
-                isPlayingAudio = true
-                player.start()
+                player.setOnPreparedListener { preparedPlayer ->
+                    isPlayingAudio = true
+                    onPlaybackStarted()
+                    preparedPlayer.start()
+                }
+                player.prepareAsync()
                 true
             }.getOrElse { throwable ->
                 isPlayingAudio = false
-                setError("Audio konnte nicht abgespielt werden: ${throwable.message ?: throwable.javaClass.simpleName}")
-                Log.w(TAG, "Audio playback failed", throwable)
+                setError("Audio konnte nicht abgespielt werden.")
+                Log.w(TAG, "Audio playback failed: ${throwable.javaClass.simpleName}")
+                completion.complete(false)
+                playbackCompletion = null
                 clearTempAudioFile()
                 false
             }
         }
+        if (!prepared) return false
+        return try {
+            completion.await()
+        } catch (cancellation: CancellationException) {
+            stop()
+            throw cancellation
+        }
     }
 
-    private fun setError(message: String) {
+    private fun setError(
+        message: String,
+        category: FailureCategory = FailureCategory.TEMPORARY_SERVICE_ERROR
+    ) {
         lastError = message
+        lastFailureCategory = category
     }
 
     private fun clearTempAudioFile() {

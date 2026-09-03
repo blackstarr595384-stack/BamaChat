@@ -14,6 +14,7 @@ import com.android.billingclient.api.ConsumeParams
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import android.provider.Settings
 
 class PlayBillingManager(
     context: Context,
@@ -35,6 +36,9 @@ class PlayBillingManager(
     private val appContext = context.applicationContext
     private var billingClient: BillingClient? = null
     private var productDetailsCache: List<ProductDetails> = emptyList()
+    private val obfuscatedAccountId: String by lazy {
+        Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID) ?: "bamachat_unknown"
+    }
 
     fun connect() {
         if (billingClient?.isReady == true) {
@@ -139,6 +143,7 @@ fun launchSubscriptionPurchase(activity: Activity, planId: String): Boolean {
 
         val params = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(productDetailsParams))
+            .setObfuscatedAccountId(obfuscatedAccountId)
             .build()
 
         val result = client.launchBillingFlow(activity, params)
@@ -159,6 +164,7 @@ fun launchSubscriptionPurchase(activity: Activity, planId: String): Boolean {
 
         val params = BillingFlowParams.newBuilder()
             .setProductDetailsParamsList(listOf(productDetailsParams))
+            .setObfuscatedAccountId(obfuscatedAccountId)
             .build()
 
         val result = client.launchBillingFlow(activity, params)
@@ -234,8 +240,13 @@ fun launchSubscriptionPurchase(activity: Activity, planId: String): Boolean {
     }
 
     private fun resolveTier(purchases: List<Purchase>): MonetizationConfig.PlanTier {
-        val purchasedProducts = purchases
-            .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+        val validPurchases = purchases.filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+        validPurchases.forEach { purchase ->
+            if (purchase.packageName != appContext.packageName) {
+                AppTelemetry.logError("billing_package_mismatch: expected=${appContext.packageName} got=${purchase.packageName}")
+            }
+        }
+        val purchasedProducts = validPurchases
             .flatMap { it.products }
             .toSet()
 
@@ -257,7 +268,11 @@ fun launchSubscriptionPurchase(activity: Activity, planId: String): Boolean {
             .setPurchaseToken(purchase.purchaseToken)
             .build()
 
-        client.acknowledgePurchase(params) { _ -> }
+        client.acknowledgePurchase(params) { billingResult ->
+            if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                AppTelemetry.logError("billing_ack_failed: ${billingResult.debugMessage ?: billingResult.responseCode}")
+            }
+        }
     }
 
     fun disconnect() {

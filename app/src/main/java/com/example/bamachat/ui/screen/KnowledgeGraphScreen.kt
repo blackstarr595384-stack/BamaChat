@@ -66,7 +66,7 @@ private data class GraphNode(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun KnowledgeGraphScreen(onBack: () -> Unit) {
+fun KnowledgeGraphScreen(ownerScope: String, onBack: () -> Unit) {
     val appContext = LocalContext.current.applicationContext
     val repo = remember(appContext) { ChatRepository(ChatDatabase.getDatabase(appContext).chatDao()) }
 
@@ -86,7 +86,7 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
         errorMsg = null
         try {
             val rawEdges: List<KnowledgeEdgeEntity> = withContext(Dispatchers.IO) {
-                repo.getKnowledgeEdges(100)
+                repo.getKnowledgeEdges(ownerScope, 100)
             }
             val nodeSet = LinkedHashSet<String>()
             val edgeList = mutableListOf<Pair<String, String>>()
@@ -332,7 +332,8 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
                         }
                     }
 
-                    if (selectedNode != null) {
+                    val node = selectedNode
+                    if (node != null) {
                         Surface(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -343,7 +344,7 @@ fun KnowledgeGraphScreen(onBack: () -> Unit) {
                         ) {
                             Column(Modifier.padding(14.dp).verticalScroll(rememberScrollState())) {
                                 Text(
-                                    selectedNode!!.label,
+                                    node.label,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp,
                                     color = selectedNodeColor

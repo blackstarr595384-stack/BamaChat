@@ -95,4 +95,73 @@ class WorkspaceExtensionsTest {
         assertFalse(active.any { it.manifest.id == "ext-code-review-pro" })
         assertFalse(active.any { it.manifest.id == "ext-collab-facilitator" })
     }
+
+    @Test
+    fun githubReadCapabilityMapsFromStableKey() {
+        assertEquals(
+            ExtensionCapability.GITHUB_READ,
+            ExtensionCapability.fromKey("github_read")
+        )
+        assertEquals(
+            ExtensionCapability.GITHUB_READ,
+            ExtensionCapability.fromKey(" GITHUB_READ ")
+        )
+    }
+
+    @Test
+    fun existingCapabilityKeysRemainUnchanged() {
+        assertEquals("chat_read", ExtensionCapability.CHAT_READ.key)
+        assertEquals("chat_write", ExtensionCapability.CHAT_WRITE.key)
+        assertEquals("live_web", ExtensionCapability.LIVE_WEB.key)
+        assertEquals("file_import", ExtensionCapability.FILE_IMPORT.key)
+        assertEquals("workspace_edit", ExtensionCapability.WORKSPACE_EDIT.key)
+        assertEquals("collab_control", ExtensionCapability.COLLAB_CONTROL.key)
+        assertEquals("voice_io", ExtensionCapability.VOICE_IO.key)
+        assertEquals("automation_run", ExtensionCapability.AUTOMATION_RUN.key)
+    }
+
+    @Test
+    fun repoAutopilotRequiresOnlyReadCapabilities() {
+        val manifest = requireNotNull(ExtensionCatalog.findById("ext-repo-autopilot"))
+
+        assertEquals("1.1.0", manifest.version)
+        assertEquals(
+            setOf(ExtensionCapability.CHAT_READ, ExtensionCapability.GITHUB_READ),
+            manifest.requiredCapabilities
+        )
+        assertEquals(
+            setOf(ExtensionCapability.FILE_IMPORT, ExtensionCapability.LIVE_WEB),
+            manifest.optionalCapabilities
+        )
+        assertFalse(manifest.allCapabilities.contains(ExtensionCapability.WORKSPACE_EDIT))
+        assertFalse(manifest.allCapabilities.contains(ExtensionCapability.AUTOMATION_RUN))
+    }
+
+    @Test
+    fun installingRepoAutopilotDoesNotGrantCapabilitiesAutomatically() {
+        val installed = InstalledExtensionState(extensionId = "ext-repo-autopilot")
+        val manifest = requireNotNull(ExtensionCatalog.findById("ext-repo-autopilot"))
+
+        assertTrue(installed.grantedCapabilities.isEmpty())
+        assertEquals(manifest.requiredCapabilities, installed.missingRequiredCapabilities(manifest))
+        assertTrue(ExtensionStateStore.resolveActiveExtensions(listOf(installed)).isEmpty())
+    }
+
+    @Test
+    fun unknownPersistedCapabilityKeysRemainSafeAndReadable() {
+        val decoded = ExtensionStateStore.decode(
+            """
+                [{
+                  "extensionId":"ext-repo-autopilot",
+                  "enabled":true,
+                  "installedAt":1234,
+                  "grantedCapabilityKeys":["chat_read","future_capability"]
+                }]
+            """.trimIndent()
+        )
+
+        assertEquals(1, decoded.size)
+        assertEquals(setOf(ExtensionCapability.CHAT_READ), decoded.single().grantedCapabilities)
+        assertTrue(ExtensionStateStore.resolveActiveExtensions(decoded).isEmpty())
+    }
 }

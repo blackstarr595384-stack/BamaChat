@@ -45,6 +45,7 @@ import com.example.bamachat.util.ExtensionCapability
 fun ExtensionManagerScreen(
     extensionManagerViewModel: ExtensionManagerViewModel,
     designPreset: String,
+    onOpenGitHubIntelligence: () -> Unit,
     onBack: () -> Unit
 ) {
     val palette = remember(designPreset) { AppDesignSystem.paletteForStored(designPreset) }
@@ -136,6 +137,11 @@ fun ExtensionManagerScreen(
                                     extensionManagerViewModel.revokeCapability(item.manifest.id, capability)
                                 }
                             },
+                            onOpen = if (item.manifest.id == "ext-repo-autopilot") {
+                                onOpenGitHubIntelligence
+                            } else {
+                                null
+                            },
                             paletteSurface = palette.surface.copy(alpha = 0.94f),
                             paletteBorder = palette.surfaceBorder
                         )
@@ -158,6 +164,7 @@ fun ExtensionManagerScreen(
                             onToggleEnabled = {},
                             onGrantAllRequired = {},
                             onToggleCapability = { _, _ -> },
+                            onOpen = null,
                             paletteSurface = palette.surface.copy(alpha = 0.9f),
                             paletteBorder = palette.surfaceBorder
                         )
@@ -289,6 +296,7 @@ private fun ExtensionCard(
     onToggleEnabled: (Boolean) -> Unit,
     onGrantAllRequired: () -> Unit,
     onToggleCapability: (ExtensionCapability, Boolean) -> Unit,
+    onOpen: (() -> Unit)?,
     paletteSurface: Color,
     paletteBorder: Color
 ) {
@@ -369,6 +377,20 @@ private fun ExtensionCard(
                 )
                 Button(onClick = onGrantAllRequired) {
                     Text("Pflichtrechte freigeben")
+                }
+            }
+
+            if (
+                item.isInstalled &&
+                item.isEnabled &&
+                item.missingRequiredCapabilities.isEmpty() &&
+                onOpen != null
+            ) {
+                Button(
+                    onClick = onOpen,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("GitHub Intelligence öffnen")
                 }
             }
 

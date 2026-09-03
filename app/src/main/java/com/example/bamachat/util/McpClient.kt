@@ -1,6 +1,5 @@
 package com.example.bamachat.util
 
-import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -48,6 +47,7 @@ class McpClient(
     suspend fun start() = withContext(Dispatchers.IO) {
         if (process != null) return@withContext
         try {
+            AppTelemetry.logEvent("mcp_connection_started")
             _connectionStatus.value = McpConnectionStatus.CONNECTING
             if (isRemoteTransport()) {
                 sendInitialize()
@@ -57,15 +57,16 @@ class McpClient(
             val pb = ProcessBuilder(config.command, *config.args.toTypedArray())
                 .redirectErrorStream(false)
             config.env.forEach { (k, v) -> pb.environment()[k] = v }
-            process = pb.start()
-            writer = OutputStreamWriter(process!!.outputStream)
-            reader = BufferedReader(InputStreamReader(process!!.inputStream))
+            val proc = pb.start()
+            process = proc
+            writer = OutputStreamWriter(proc.outputStream)
+            reader = BufferedReader(InputStreamReader(proc.inputStream))
             startReader()
             sendInitialize()
             _connectionStatus.value = McpConnectionStatus.CONNECTED
-            Log.i("McpClient", "MCP Server '$serverId' gestartet")
+            AppTelemetry.logEvent("mcp_connection_succeeded")
         } catch (e: Exception) {
-            Log.e("McpClient", "Fehler beim Start von '$serverId'", e)
+            AppTelemetry.logError("mcp_connection_failed", e)
             _connectionStatus.value = McpConnectionStatus.ERROR
         }
     }
@@ -88,7 +89,7 @@ class McpClient(
             _tools.value = result
             result
         } catch (e: Exception) {
-            Log.e("McpClient", "listTools failed", e)
+            AppTelemetry.logError("mcp_tools_list_failed", e)
             emptyList()
         }
     }

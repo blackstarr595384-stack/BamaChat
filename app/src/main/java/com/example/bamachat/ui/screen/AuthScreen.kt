@@ -1,9 +1,14 @@
 package com.example.bamachat.ui.screen
 
 import android.annotation.SuppressLint
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,6 +73,7 @@ import kotlinx.coroutines.launch
 fun AuthScreen(
     authViewModel: AuthViewModel,
     onAuthenticated: () -> Unit,
+    onContinueAsGuest: () -> Unit,
     onBack: () -> Unit = {},
     onOpenHelp: () -> Unit = {}
 ) {
@@ -78,7 +84,7 @@ fun AuthScreen(
             .onFailure { AppTelemetry.logError("auth_credential_manager_ui_init", it) }
             .getOrNull()
     }
-    val isAuthenticated by authViewModel.isAuthenticated.collectAsStateWithLifecycle()
+    val firebaseUser by authViewModel.firebaseUser.collectAsStateWithLifecycle()
     val isLoading by authViewModel.isLoading.collectAsStateWithLifecycle()
     val errorMessage by authViewModel.errorMessage.collectAsStateWithLifecycle()
     val statusMessage by authViewModel.statusMessage.collectAsStateWithLifecycle()
@@ -88,6 +94,9 @@ fun AuthScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
+    var emailExpanded by remember { mutableStateOf(false) }
+
+    BackHandler(onBack = onBack)
 
     @SuppressLint("DiscouragedApi")
     val defaultWebClientId = remember(context) {
@@ -139,8 +148,8 @@ fun AuthScreen(
         return extractGoogleIdToken(response.credential)
     }
 
-    LaunchedEffect(isAuthenticated) {
-        if (isAuthenticated) onAuthenticated()
+    LaunchedEffect(firebaseUser?.uid) {
+        if (firebaseUser != null) onAuthenticated()
     }
 
     Box(
@@ -168,48 +177,19 @@ fun AuthScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onBack) {
-                    Text("Zurueck", color = Color.White.copy(alpha = 0.92f))
+                    Text("Zurück", color = Color.White.copy(alpha = 0.92f))
                 }
                 TextButton(onClick = onOpenHelp) {
                     Text("Hilfe", color = Color(0xFFD7E4FF))
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
-                color = Color(0xFF203654).copy(alpha = 0.72f),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    AuthPill("Cloud Sync optional")
-                    Text(
-                        text = "Weiter mit Konto oder starte direkt als Gast.",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Mit Konto bekommst du Profil, Cloud-Sync und Realtime-Collab. Gastmodus funktioniert sofort und bleibt lokal.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFFD8E4FF)
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        AuthMiniPill("Sync")
-                        AuthMiniPill("Profil")
-                        AuthMiniPill("Collab")
-                        AuthMiniPill("Spaeter upgradebar")
-                    }
-                }
-            }
+            Text(
+                text = "Konto verbinden",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
+            )
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -221,37 +201,6 @@ fun AuthScreen(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        AuthModeButton(
-                            label = "Anmelden",
-                            active = isLoginMode,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                authViewModel.clearError()
-                                isLoginMode = true
-                            }
-                        )
-                        AuthModeButton(
-                            label = "Registrieren",
-                            active = !isLoginMode,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                authViewModel.clearError()
-                                isLoginMode = false
-                            }
-                        )
-                    }
-
-                    Text(
-                        text = if (isLoginMode) {
-                            "Melde dich an, um Chats, Profil und spaetere Workspace-Daten mit deinem Konto zu verknuepfen."
-                        } else {
-                            "Lege ein Konto an, damit deine BamaChat-Umgebung geraeteuebergreifend weiterlaeuft."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f)
-                    )
-
                     statusMessage?.takeIf { it.isNotBlank() }?.let {
                         AuthMessageCard(
                             text = it,
@@ -268,94 +217,7 @@ fun AuthScreen(
                         )
                     }
 
-                    if (!isLoginMode) {
-                        OutlinedTextField(
-                            value = name,
-                            onValueChange = { name = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            label = { Text("Name") }
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("E-Mail") }
-                    )
-
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Passwort") },
-                        visualTransformation = if (showPassword) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        }
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(onClick = { showPassword = !showPassword }) {
-                            Text(if (showPassword) "Passwort verbergen" else "Passwort anzeigen")
-                        }
-                        if (!isLoginMode) {
-                            Text(
-                                text = "Mind. 6 Zeichen",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
-                            )
-                        }
-                    }
-
                     Button(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp),
-                        enabled = !isLoading,
-                        onClick = {
-                            AppTelemetry.logEvent(
-                                if (isLoginMode) "login_submit_clicked" else "register_submit_clicked"
-                            )
-                            authViewModel.clearError()
-                            if (isLoginMode) {
-                                authViewModel.signIn(email = email, password = password)
-                            } else {
-                                authViewModel.register(
-                                    displayName = name,
-                                    email = email,
-                                    password = password
-                                )
-                            }
-                        },
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF183A68),
-                            contentColor = Color.White
-                        )
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(18.dp),
-                                color = Color.White
-                            )
-                        } else {
-                            Text(if (isLoginMode) "Jetzt anmelden" else "Konto erstellen")
-                        }
-                    }
-
-                    AuthDivider("oder")
-
-                    OutlinedButton(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
@@ -425,25 +287,169 @@ fun AuthScreen(
                             }
                         },
                         shape = RoundedCornerShape(18.dp),
-                        border = BorderStroke(1.dp, Color(0xFFCAD8F5))
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF183A68),
+                            contentColor = Color.White
+                        )
                     ) {
-                        Text("Mit Google anmelden", color = Color(0xFF163A66))
+                        Text("Mit Google fortfahren")
                     }
 
-                    TextButton(
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                        onClick = {
-                            authViewModel.clearError()
-                            isLoginMode = !isLoginMode
-                        }
+                    AuthDivider("oder")
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { emailExpanded = !emailExpanded },
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.White.copy(alpha = 0.06f)
                     ) {
-                        Text(
-                            if (isLoginMode) {
-                                "Noch kein Konto? Registrieren"
-                            } else {
-                                "Bereits ein Konto? Anmelden"
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Mit E-Mail anmelden",
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.sp
+                            )
+                            Text(
+                                if (emailExpanded) "▾" else "▸",
+                                color = Color.White.copy(alpha = 0.5f),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = emailExpanded,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                AuthModeButton(
+                                    label = "Anmelden",
+                                    active = isLoginMode,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        authViewModel.clearError()
+                                        isLoginMode = true
+                                    }
+                                )
+                                AuthModeButton(
+                                    label = "Registrieren",
+                                    active = !isLoginMode,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        authViewModel.clearError()
+                                        isLoginMode = false
+                                    }
+                                )
                             }
-                        )
+
+                            if (!isLoginMode) {
+                                OutlinedTextField(
+                                    value = name,
+                                    onValueChange = { name = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    label = { Text("Name") }
+                                )
+                            }
+
+                            OutlinedTextField(
+                                value = email,
+                                onValueChange = { email = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("E-Mail") }
+                            )
+
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("Passwort") },
+                                visualTransformation = if (showPassword) {
+                                    VisualTransformation.None
+                                } else {
+                                    PasswordVisualTransformation()
+                                }
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(onClick = { showPassword = !showPassword }) {
+                                    Text(if (showPassword) "Passwort verbergen" else "Passwort anzeigen")
+                                }
+                                if (!isLoginMode) {
+                                    Text(
+                                        text = "Mind. 6 Zeichen",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                                    )
+                                }
+                            }
+
+                            Button(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp),
+                                enabled = !isLoading,
+                                onClick = {
+                                    AppTelemetry.logEvent(
+                                        if (isLoginMode) "login_submit_clicked" else "register_submit_clicked"
+                                    )
+                                    authViewModel.clearError()
+                                    if (isLoginMode) {
+                                        authViewModel.signIn(email = email, password = password)
+                                    } else {
+                                        authViewModel.register(
+                                            displayName = name,
+                                            email = email,
+                                            password = password
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(18.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF183A68),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color.White
+                                    )
+                                } else {
+                                    Text(if (isLoginMode) "Anmelden" else "Registrieren")
+                                }
+                            }
+
+                            TextButton(
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
+                                onClick = {
+                                    authViewModel.clearError()
+                                    isLoginMode = !isLoginMode
+                                }
+                            ) {
+                                Text(
+                                    if (isLoginMode) {
+                                        "Noch kein Konto? Registrieren"
+                                    } else {
+                                        "Bereits ein Konto? Anmelden"
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -465,7 +471,7 @@ fun AuthScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Gastmodus ist ideal zum Testen. Du kannst spaeter immer noch ein Konto verbinden, wenn du Sync oder Collaboration brauchst.",
+                        text = "Gastmodus ist lokal. Du kannst später ein Konto verbinden.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFFD7E4FF)
                     )
@@ -476,6 +482,7 @@ fun AuthScreen(
                         onClick = {
                             authViewModel.clearError()
                             authViewModel.continueAsGuest()
+                            onContinueAsGuest()
                         },
                         shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
@@ -515,38 +522,6 @@ private fun AuthBackdrop() {
                         listOf(Color(0xFF4A7FCC).copy(alpha = 0.18f), Color.Transparent)
                     )
                 )
-        )
-    }
-}
-
-@Composable
-private fun AuthPill(text: String) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = Color.White.copy(alpha = 0.08f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-            color = Color(0xFFD8E4FF),
-            style = MaterialTheme.typography.labelMedium,
-            letterSpacing = 0.5.sp
-        )
-    }
-}
-
-@Composable
-private fun AuthMiniPill(label: String) {
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = Color.White.copy(alpha = 0.06f)
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            color = Color(0xFFE4ECFF),
-            style = MaterialTheme.typography.labelMedium
         )
     }
 }
