@@ -54,10 +54,10 @@ class ChatLongHistoryBenchmarkTest {
             launchApp()
 
             clickAnyText("Als Gast starten", "Als Gast fortfahren", "Zum BamaHub")
-            if (!device.hasObject(By.textContains("BamaChat"))) {
+            if (!device.hasObject(By.textContains("BamaFlow"))) {
                 clickAnyText("Chat", "Chats", "Nachrichten")
             }
-            val chatVisible = device.wait(Until.hasObject(By.textContains("BamaChat")), TIMEOUT)
+            val chatVisible = device.wait(Until.hasObject(By.textContains("BamaFlow")), TIMEOUT)
             assertTrue("Chat-Screen wurde nicht geöffnet", chatVisible)
 
             repeat(22) { index ->

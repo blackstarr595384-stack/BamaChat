@@ -270,7 +270,7 @@ class AppScreenshotCaptureTest {
         while (SystemClock.uptimeMillis() < end) {
             allowRuntimeDialogsIfPresent()
             val byPkg = device.hasObject(By.pkg(TestAppIdentity.APPLICATION_ID))
-            val byTitle = device.hasObject(By.textContains("BamaChat")) ||
+            val byTitle = device.hasObject(By.textContains("BamaFlow")) ||
                 device.hasObject(By.textContains("BamaHub")) ||
                 device.hasObject(By.textContains("Willkommen"))
             if (byPkg || byTitle) return true

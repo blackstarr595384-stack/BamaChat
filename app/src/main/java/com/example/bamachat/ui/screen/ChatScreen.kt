@@ -437,7 +437,7 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { showPermanentMicrophoneDenial = false },
             title = { Text("Mikrofonzugriff aktivieren") },
-            text = { Text("Öffne die App-Einstellungen und erlaube BamaChat den Mikrofonzugriff.") },
+            text = { Text("Öffne die App-Einstellungen und erlaube BamaFlow den Mikrofonzugriff.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -755,7 +755,7 @@ private fun triggerBiometric(context: android.content.Context, onResult: (Boolea
             }
         })
     val promptInfo = BiometricPrompt.PromptInfo.Builder()
-        .setTitle("BamaChat Sperre")
+        .setTitle("BamaFlow Sperre")
         .setSubtitle("Authentifiziere dich")
         .setNegativeButtonText("Abbrechen")
         .build()
@@ -894,7 +894,7 @@ private fun BamaVoicePanel(
                 accent = NeonCyan
             )
             VoiceTranscriptCard(
-                title = "BamaChat",
+                title = "BamaFlow",
                 text = uiState.assistantTranscript.ifBlank { "Die Antwort erscheint hier während der Unterhaltung." },
                 accent = NeonPurple
             )
@@ -1404,7 +1404,7 @@ private fun ChatContent(
                                     val inWorkspace = chatWorkspaceName.isNotBlank()
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
-                                            text = if (inWorkspace) chatWorkspaceName else "BamaChat \u00b7 ${selectedPersona.displayName}",
+                                            text = if (inWorkspace) chatWorkspaceName else "BamaFlow \u00b7 ${selectedPersona.displayName}",
                                             style = headerTitleStyle,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White,

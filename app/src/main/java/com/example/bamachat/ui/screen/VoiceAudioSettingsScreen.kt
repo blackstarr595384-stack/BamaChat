@@ -257,7 +257,7 @@ internal fun VoiceAudioSettingsContent(
         ) {
             item(key = "intro") {
                 Text(
-                    text = "Wähle, wie du mit BamaChat sprichst und Antworten hörst.",
+                    text = "Wähle, wie du mit BamaFlow sprichst und Antworten hörst.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -487,7 +487,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.localVoiceItems(
 ) {
     item(key = "local-privacy") {
         SettingsInfoCard(
-            text = "BamaChat sendet im lokalen Modus kein Audio an den BamaVoice-Server. Die Android-Spracherkennung kann abhängig von deinen Geräteeinstellungen einen System-Onlinedienst verwenden.",
+            text = "BamaFlow sendet im lokalen Modus kein Audio an den BamaVoice-Server. Die Android-Spracherkennung kann abhängig von deinen Geräteeinstellungen einen System-Onlinedienst verwenden.",
             accent = Color(0xFF4DB6AC)
         )
     }
@@ -675,13 +675,13 @@ private fun smartOutputProviders(): List<VoiceOutputProvider> = listOf(
 )
 
 private fun inputProviderDescription(provider: VoiceInputProvider): String = when (provider) {
-    VoiceInputProvider.AUTOMATIC -> "BamaChat wählt einen verfügbaren Gerätepfad"
+    VoiceInputProvider.AUTOMATIC -> "BamaFlow wählt einen verfügbaren Gerätepfad"
     VoiceInputProvider.OPENAI_TRANSCRIPTION -> "Bestehende Cloud-Auswahl; Einrichtung bleibt im erweiterten Bereich"
     VoiceInputProvider.ANDROID -> "Verwendet die Android-Spracherkennung"
 }
 
 private fun outputProviderDescription(provider: VoiceOutputProvider): String = when (provider) {
-    VoiceOutputProvider.AUTOMATIC -> "BamaChat wählt eine verfügbare Ausgabe"
+    VoiceOutputProvider.AUTOMATIC -> "BamaFlow wählt eine verfügbare Ausgabe"
     VoiceOutputProvider.ELEVENLABS -> "Cloud-Stimme; Konto wird im erweiterten Bereich verwaltet"
     VoiceOutputProvider.PIPER -> "Eigener Piper-Server oder lokaler Dienst"
     VoiceOutputProvider.ANDROID -> "Installierte Stimme des Geräts"
@@ -701,4 +701,4 @@ private fun turnTakingDescription(turnTaking: RealtimeTurnTaking): String = when
 }
 
 private const val VOICE_PREVIEW_MESSAGE_ID = "voice-preview"
-private const val VOICE_PREVIEW_TEXT = "Dies ist eine BamaChat-Stimmprobe."
+private const val VOICE_PREVIEW_TEXT = "Dies ist eine BamaFlow-Stimmprobe."

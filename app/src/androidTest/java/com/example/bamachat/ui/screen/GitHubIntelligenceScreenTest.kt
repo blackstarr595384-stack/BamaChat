@@ -69,7 +69,7 @@ class GitHubIntelligenceScreenTest {
         composeRule.onNodeWithText("Nur lesen").assertIsDisplayed()
         composeRule.onNodeWithText("blackstarr595384-stack/BamaChat").assertIsDisplayed()
         composeRule.onNodeWithText(
-            "BamaChat liest freigegebene Repositorydaten und erstellt Vorschläge.",
+            "BamaFlow liest freigegebene Repositorydaten und erstellt Vorschläge.",
             substring = true
         ).assertIsDisplayed()
         composeRule.onNodeWithTag("github_intelligence_list")

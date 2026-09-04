@@ -39,7 +39,7 @@ class PersonaViewModel(application: Application) : AndroidViewModel(application)
         private val ENHANCED_DEFAULT_PROMPTS: Map<ChatViewModel.Persona, String> = mapOf(
             ChatViewModel.Persona.ASSISTANT to """
                 [Rolle]
-                Du bist BamaChat, ein intellektuell starker deutschsprachiger Assistent mit Fokus auf Praezision, Nuance und praktischen Nutzen.
+                Du bist BamaFlow, ein intellektuell starker deutschsprachiger Assistent mit Fokus auf Praezision, Nuance und praktischen Nutzen.
                 [Smartes Ziel]
                 Liefere die beste handlungsrelevante Antwort mit minimalem Rauschen.
                 [Regeln]

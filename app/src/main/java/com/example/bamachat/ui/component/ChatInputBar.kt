@@ -468,8 +468,8 @@ private fun VoiceSessionStatus(
         is VoiceSessionState.Reconnecting -> "Verbindung wird wiederhergestellt …"
         VoiceSessionState.Listening -> "Ich höre zu …"
         is VoiceSessionState.Transcribing -> state.partialText.ifBlank { "Ich höre zu …" }
-        VoiceSessionState.Thinking -> "BamaChat denkt …"
-        VoiceSessionState.Speaking -> "BamaChat spricht …"
+        VoiceSessionState.Thinking -> "BamaFlow denkt …"
+        VoiceSessionState.Speaking -> "BamaFlow spricht …"
         VoiceSessionState.Interrupted -> "Sprachausgabe unterbrochen"
         VoiceSessionState.Ended -> "Live-Unterhaltung beendet"
         is VoiceSessionState.Error -> state.userMessage

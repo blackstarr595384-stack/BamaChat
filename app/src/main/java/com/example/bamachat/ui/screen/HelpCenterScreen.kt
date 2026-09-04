@@ -95,7 +95,7 @@ fun HelpCenterScreen(onBack: () -> Unit) {
             ),
             HelpFaqItem(
                 question = "Warum funktioniert Bildgenerierung manchmal nicht?",
-                answer = "Die Chat-Bildgenerierung nutzt einen externen Bilddienst. Wenn dieser Dienst nicht erreichbar ist oder Zahlung/Auth verlangt, zeigt BamaChat eine Fehlermeldung und speichert keine kaputte Bildkarte. Prüfe Einstellungen > KI & Modelle > Bildgenerierung im Chat."
+                answer = "Die Chat-Bildgenerierung nutzt einen externen Bilddienst. Wenn dieser Dienst nicht erreichbar ist oder Zahlung/Auth verlangt, zeigt BamaFlow eine Fehlermeldung und speichert keine kaputte Bildkarte. Prüfe Einstellungen > KI & Modelle > Bildgenerierung im Chat."
             ),
             HelpFaqItem(
                 question = "Brauche ich ein Konto?",
@@ -274,7 +274,7 @@ fun HelpCenterScreen(onBack: () -> Unit) {
                     onClick = {
                         val intent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_SUBJECT, "BamaChat Hilfe")
+                            putExtra(Intent.EXTRA_SUBJECT, "BamaFlow Hilfe")
                             putExtra(Intent.EXTRA_TEXT, helpText)
                         }
                         context.startActivity(Intent.createChooser(intent, "Hilfe teilen"))
@@ -285,7 +285,7 @@ fun HelpCenterScreen(onBack: () -> Unit) {
                     Text(" Teilen")
                 }
                 OutlinedButton(
-                    onClick = { saveHelpLauncher.launch("BamaChat-Hilfe.md") },
+                    onClick = { saveHelpLauncher.launch("BamaFlow-Hilfe.md") },
                     modifier = Modifier.weight(1f),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
                 ) {

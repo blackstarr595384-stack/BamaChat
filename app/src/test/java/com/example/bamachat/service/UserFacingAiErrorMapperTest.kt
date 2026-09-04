@@ -27,7 +27,7 @@ class UserFacingAiErrorMapperTest {
         val message = UserFacingAiErrorMapper.fallbackInProgress(ApiClient.Provider.OPENROUTER)
 
         assertEquals(
-            "OpenRouter antwortet gerade nicht. BamaChat versucht einen anderen Anbieter.",
+            "OpenRouter antwortet gerade nicht. BamaFlow versucht einen anderen Anbieter.",
             message
         )
     }

@@ -49,7 +49,7 @@ data class ChatProviderSelectionUiState(
     val loading: Boolean = true,
     val legacySelected: Boolean = true,
     val choices: List<ChatProviderChoiceUi> = emptyList(),
-    val summary: String = "BamaChat Standard",
+    val summary: String = "BamaFlow Standard",
     val warning: String? = null,
     val invalidCurrentSelection: Boolean = false,
     val canConfirm: Boolean = false,
@@ -82,7 +82,7 @@ class ChatProviderSelectionViewModel @Inject constructor(
     private var selectionByOptionKey: Map<String, ChatProviderSelection> =
         mapOf(LEGACY_OPTION_KEY to ChatProviderSelection.Legacy)
     private var latestChoices: List<ChatProviderChoiceUi> = emptyList()
-    private var latestSummary = "BamaChat Standard"
+    private var latestSummary = "BamaFlow Standard"
 
     init {
         viewModelScope.launch {
@@ -171,7 +171,7 @@ class ChatProviderSelectionViewModel @Inject constructor(
                     null
                 }
                 latestSummary = when (resolution) {
-                    ActiveChatProviderResolution.Legacy -> "BamaChat Standard"
+                    ActiveChatProviderResolution.Legacy -> "BamaFlow Standard"
                     is ActiveChatProviderResolution.ResolvedCustomProvider ->
                         "${resolution.definition.displayName} · ${resolution.model.displayName}"
                     is ActiveChatProviderResolution.Invalid, null -> "Auswahl nicht verfügbar"

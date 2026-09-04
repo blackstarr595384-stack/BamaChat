@@ -1682,7 +1682,7 @@ fun SettingsDialog(
                     }
                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center) {
                         Text(
-                            "BamaChat · Version ${"1.0.1"}",
+                            "BamaFlow · Version ${"1.0.1"}",
                             color = Color.White.copy(alpha = 0.48f),
                             fontSize = 10.sp
                         )
@@ -1874,7 +1874,7 @@ private fun VoicePrivacyCard(
 ) {
     val privacyText = when {
         mode == VoiceMode.LIVE ->
-            "Live-Audio wird direkt über eine sichere WebRTC-Verbindung von OpenAI verarbeitet. Der dauerhafte Provider-Schlüssel bleibt auf dem Server; nur finale Transkripte können im BamaChat-Verlauf gespeichert werden."
+            "Live-Audio wird direkt über eine sichere WebRTC-Verbindung von OpenAI verarbeitet. Der dauerhafte Provider-Schlüssel bleibt auf dem Server; nur finale Transkripte können im BamaFlow-Verlauf gespeichert werden."
         mode == VoiceMode.LOCAL ->
             "Nur lokal: BamaVoice startet keine Cloud-Sprachverarbeitung. Erkennung und Ausgabe benötigen verfügbare On-Device-Komponenten oder einen privaten Piper-Endpoint."
         outputProvider == VoiceOutputProvider.ELEVENLABS ->

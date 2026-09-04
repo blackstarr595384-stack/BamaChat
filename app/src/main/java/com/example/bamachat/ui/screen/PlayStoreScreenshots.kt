@@ -61,7 +61,7 @@ fun PlayStoreScreenshot1() {
             ) {
                 Icon(
                     imageVector = Icons.Default.Star,
-                    contentDescription = "BamaChat",
+                    contentDescription = "BamaFlow",
                     tint = Color.White,
                     modifier = Modifier
                         .padding(16.dp)
@@ -70,7 +70,7 @@ fun PlayStoreScreenshot1() {
             }
 
             Text(
-                text = "BamaChat",
+                text = "BamaFlow",
                 fontSize = 48.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Primary,
