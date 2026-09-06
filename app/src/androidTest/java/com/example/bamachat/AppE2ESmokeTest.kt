@@ -51,7 +51,7 @@ class AppE2ESmokeTest {
         waitForTextPrefix(3_500, "Design: ")
 
         // In Chat wechseln (falls nicht bereits im Chat)
-        var chatTitle = device.findObject(By.textContains("BamaChat"))
+        var chatTitle = device.findObject(By.textContains("BamaFlow"))
         if (chatTitle == null) {
             val chatEntry = waitForAnyText(TIMEOUT, "Chat", "Chats", "Nachrichten")
             assertNotNull("Chat-Kachel nicht gefunden", chatEntry)
@@ -59,7 +59,7 @@ class AppE2ESmokeTest {
         }
 
         // Chat geladen
-        chatTitle = device.wait(Until.findObject(By.textContains("BamaChat")), TIMEOUT)
+        chatTitle = device.wait(Until.findObject(By.textContains("BamaFlow")), TIMEOUT)
         assertNotNull("Chat nicht geöffnet", chatTitle)
 
         // Bottom-Nav Smoke: best effort Navigation (nicht hart erzwingen, da Gerätezustand variieren kann)
@@ -73,7 +73,7 @@ class AppE2ESmokeTest {
             }
             clickAnyText(3_000L, "Chat", "Chats", "Nachrichten") ||
                 clickAnyDescContains(3_000L, "Chat", "Chats", "Nachrichten")
-            device.wait(Until.findObject(By.textContains("BamaChat")), TIMEOUT)
+            device.wait(Until.findObject(By.textContains("BamaFlow")), TIMEOUT)
         }
 
         // In Profil wechseln (Bottom-Tab)
@@ -90,7 +90,7 @@ class AppE2ESmokeTest {
             if (profileTitle != null) {
                 device.pressBack()
                 clickAnyText(4_000L, "Chat", "Chats", "Nachrichten")
-                device.wait(Until.findObject(By.textContains("BamaChat")), TIMEOUT)
+                device.wait(Until.findObject(By.textContains("BamaFlow")), TIMEOUT)
             }
         }
 
@@ -98,7 +98,7 @@ class AppE2ESmokeTest {
         val anyInputAction =
             waitForAnyDescContains(6_000L, "Senden", "Send", "Hochladen", "Upload", "Mikro", "Voice", "Diktieren")
                 ?: waitForAnyText(6_000L, "Bild-KI", "Bild KI", "Schreib was")
-        val chatStillVisible = device.hasObject(By.textContains("BamaChat"))
+        val chatStillVisible = device.hasObject(By.textContains("BamaFlow"))
         assertTrue("Chat nicht stabil sichtbar", anyInputAction != null || chatStillVisible)
 
         // Accessibility-Labels der Eingabeleiste vorhanden
@@ -225,7 +225,7 @@ class AppE2ESmokeTest {
         while (SystemClock.uptimeMillis() < end) {
             allowRuntimeDialogsIfPresent()
             val byPkg = device.hasObject(By.pkg(TestAppIdentity.APPLICATION_ID))
-            val byTitle = device.hasObject(By.textContains("BamaChat")) ||
+            val byTitle = device.hasObject(By.textContains("BamaFlow")) ||
                 device.hasObject(By.textContains("BamaHub")) ||
                 device.hasObject(By.textContains("Willkommen"))
             if (byPkg || byTitle) return true

@@ -323,7 +323,7 @@ private fun ReadOnlyNotice(state: GitHubIntelligenceUiState) {
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = "BamaChat liest freigegebene Repositorydaten und erstellt Vorschläge. " +
+                text = "BamaFlow liest freigegebene Repositorydaten und erstellt Vorschläge. " +
                     "Es verändert keinen Code und schreibt nichts auf GitHub.",
                 modifier = Modifier.testTag("github_intelligence_safety_description"),
                 color = Color.White.copy(alpha = 0.86f),
@@ -585,7 +585,7 @@ private fun AgentDraftPrPlanCard(
                 color = Color(0xFF2E4A61)
             ) {
                 Text(
-                    text = "BamaChat führt keine Änderungen lokal aus. Ein freigegebener Auftrag " +
+                    text = "BamaFlow führt keine Änderungen lokal aus. Ein freigegebener Auftrag " +
                         "verwendet ausschließlich einen isolierten Agenten-Branch. Es wird " +
                         "ausschließlich ein Draft Pull Request erstellt. Kein Merge und kein " +
                         "direkter Push auf main.",

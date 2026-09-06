@@ -115,23 +115,23 @@ class DesktopGoogleOAuthGateway(
                     callbackFuture.completeExceptionally(
                         IllegalStateException("Google OAuth abgebrochen: $error")
                     )
-                    400 to "<html><body><h2>BamaChat Login fehlgeschlagen.</h2><p>Du kannst dieses Fenster schließen.</p></body></html>"
+                    400 to "<html><body><h2>BamaFlow Login fehlgeschlagen.</h2><p>Du kannst dieses Fenster schließen.</p></body></html>"
                 }
                 state != expectedState -> {
                     callbackFuture.completeExceptionally(
                         IllegalStateException("Google OAuth state mismatch.")
                     )
-                    400 to "<html><body><h2>BamaChat Login fehlgeschlagen.</h2><p>Ungueltige Antwort.</p></body></html>"
+                    400 to "<html><body><h2>BamaFlow Login fehlgeschlagen.</h2><p>Ungueltige Antwort.</p></body></html>"
                 }
                 code.isNullOrBlank() -> {
                     callbackFuture.completeExceptionally(
                         IllegalStateException("Google OAuth lieferte keinen Code.")
                     )
-                    400 to "<html><body><h2>BamaChat Login fehlgeschlagen.</h2><p>Kein Code erhalten.</p></body></html>"
+                    400 to "<html><body><h2>BamaFlow Login fehlgeschlagen.</h2><p>Kein Code erhalten.</p></body></html>"
                 }
                 else -> {
                     callbackFuture.complete(code)
-                    200 to "<html><body><h2>Login erfolgreich.</h2><p>Du kannst dieses Fenster schließen und zu BamaChat zurückkehren.</p></body></html>"
+                    200 to "<html><body><h2>Login erfolgreich.</h2><p>Du kannst dieses Fenster schließen und zu BamaFlow zurückkehren.</p></body></html>"
                 }
             }
 

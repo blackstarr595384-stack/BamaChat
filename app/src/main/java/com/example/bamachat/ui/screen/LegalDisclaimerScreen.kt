@@ -79,7 +79,7 @@ fun LegalDisclaimerScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    "Bevor du BamaChat nutzt, bestätigst du unsere Datenschutz- und Nutzungsbedingungen.",
+                    "Bevor du BamaFlow nutzt, bestätigst du unsere Datenschutz- und Nutzungsbedingungen.",
                     fontSize = 13.sp,
                     color = Color.White.copy(alpha = 0.9f),
                     lineHeight = 18.sp
@@ -225,10 +225,10 @@ fun LegalDisclaimerScreen(
 }
 
 private const val privacyPolicyText = """
-Datenschutzerklärung für BamaChat
+Datenschutzerklärung für BamaFlow
 
 1. Datenerfassung
-   - BamaChat speichert deine Chat-Nachrichten lokal auf deinem Gerät
+   - BamaFlow speichert deine Chat-Nachrichten lokal auf deinem Gerät
    - API-Keys werden verschlüsselt in SharedPreferences gespeichert
    - Firebase wird für Crashlytics und Analytics verwendet, aber erst nach Zustimmung
    - Wir sammeln KEINE persönlichen Informationen ohne deine Freigabe
@@ -254,25 +254,25 @@ Datenschutzerklärung für BamaChat
 """
 
 private const val termsOfServiceText = """
-Nutzungsbedingungen für BamaChat
+Nutzungsbedingungen für BamaFlow
 
 1. Lizenzgewährung
-   - BamaChat ist für persönliche, nicht-kommerzielle Nutzung gedacht
-   - Du darfst BamaChat nicht reverse-engineern oder modifizieren
+   - BamaFlow ist für persönliche, nicht-kommerzielle Nutzung gedacht
+   - Du darfst BamaFlow nicht reverse-engineern oder modifizieren
    - Du darfst die App nicht weiterverkaufen oder vermieten
 
 2. API-Nutzung
    - Du bist verantwortlich für deine API-Key-Verwaltung
    - Alle API-Kosten gehen zu Lasten deines Accounts
-   - BamaChat ist nicht verantwortlich für API-Fehler oder -Ausfälle
+   - BamaFlow ist nicht verantwortlich für API-Fehler oder -Ausfälle
 
 3. Inhalte
    - Du bist verantwortlich für alle Inhalte, die du erstellst
-   - Nutze BamaChat NICHT für illegale oder schädliche Inhalte
+   - Nutze BamaFlow NICHT für illegale oder schädliche Inhalte
    - Missbrauch führt zur Account-Sperrung
 
 4. Haftungsausschluss
-   - BamaChat wird "wie besehen" angeboten
+   - BamaFlow wird "wie besehen" angeboten
    - Keine Garantien für Verfügbarkeit oder Genauigkeit
    - Wir haften nicht für Datenverluste
 

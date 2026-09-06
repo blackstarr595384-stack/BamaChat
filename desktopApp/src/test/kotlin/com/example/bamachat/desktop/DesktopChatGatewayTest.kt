@@ -10,6 +10,7 @@ import com.example.bamachat.shared.core.ai.AiStreamDelta
 import com.example.bamachat.shared.core.ai.AiStreamError
 import com.example.bamachat.shared.core.ai.AiStreamFinished
 import com.example.bamachat.shared.core.ai.AiStreamStarted
+import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
@@ -23,9 +24,12 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.InterruptedIOException
 import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Flow
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.Test
@@ -66,6 +70,8 @@ class DesktopChatGatewayTest {
         val completed = events.filterIsInstance<AiStreamCompleted>().single()
         assertEquals("Hallo Welt", completed.response.message.text)
         assertEquals(1, transport.requests.size)
+        assertBamaFlowSystemMessage(transport.requests.single())
+        assertOpenRouterHeaders(transport.requests.single())
         assertTrue(adapter.supportsStreaming())
     }
 
@@ -117,6 +123,7 @@ class DesktopChatGatewayTest {
             events.filterIsInstance<AiStreamCompleted>().single().response.message.text
         )
         assertEquals(1, transport.requests.size)
+        assertBamaFlowSystemMessage(transport.requests.single())
     }
 
     @Test
@@ -288,6 +295,33 @@ class DesktopChatGatewayTest {
         assertEquals("OpenRouter komplett", openRouter.message.text)
         assertEquals("Ollama komplett", ollama.message.text)
         assertEquals(2, transport.requests.size)
+        transport.requests.forEach { assertBamaFlowSystemMessage(it) }
+        assertOpenRouterHeaders(transport.requests.first())
+    }
+
+    private fun assertBamaFlowSystemMessage(request: HttpRequest) {
+        val bodySubscriber = HttpResponse.BodySubscribers.ofString(StandardCharsets.UTF_8)
+        request.bodyPublisher().orElseThrow().subscribe(object : Flow.Subscriber<ByteBuffer> {
+            override fun onSubscribe(subscription: Flow.Subscription) = bodySubscriber.onSubscribe(subscription)
+
+            override fun onNext(buffer: ByteBuffer) = bodySubscriber.onNext(listOf(buffer))
+
+            override fun onError(error: Throwable) = bodySubscriber.onError(error)
+
+            override fun onComplete() = bodySubscriber.onComplete()
+        })
+        val body = bodySubscriber.body.toCompletableFuture().get(1, TimeUnit.SECONDS)
+        val messages = JsonParser.parseString(body).asJsonObject.getAsJsonArray("messages")
+        val systemMessage = messages.first().asJsonObject
+        assertEquals("system", systemMessage.get("role").asString)
+        val content = systemMessage.get("content").asString
+        assertEquals("Du bist BamaFlow Desktop.", content.lineSequence().first())
+        assertFalse(content.contains("Du bist BamaChat Desktop."))
+    }
+
+    private fun assertOpenRouterHeaders(request: HttpRequest) {
+        assertEquals(listOf("BamaChat Desktop"), request.headers().allValues("X-Title"))
+        assertEquals(listOf("https://bamachat.app"), request.headers().allValues("HTTP-Referer"))
     }
 
     private fun openRouterAdapter(transport: DesktopChatHttpTransport): DesktopAiProviderAdapter {

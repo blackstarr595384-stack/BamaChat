@@ -158,16 +158,16 @@ internal fun ChatProviderSelectionContent(
                                 .heightIn(min = 48.dp)
                                 .testTag("chat_provider_switch_to_legacy")
                         ) {
-                            Text("Zu BamaChat Standard wechseln")
+                            Text("Zu BamaFlow Standard wechseln")
                         }
                     }
                 }
             }
-            item { SettingsSectionTitle("BAMACHAT STANDARD") }
+            item { SettingsSectionTitle("BAMAFLOW STANDARD") }
             item {
                 ChatProviderSelectionRow(
-                    title = "BamaChat Standard",
-                    subtitle = "Verwendet die normale BamaChat-Anbieterkonfiguration.",
+                    title = "BamaFlow Standard",
+                    subtitle = "Verwendet die normale BamaFlow-Anbieterkonfiguration.",
                     badge = "Standard",
                     selected = state.legacySelected,
                     enabled = !state.confirming,

@@ -38,7 +38,7 @@ object UserFacingAiErrorMapper {
     }
 
     fun fallbackInProgress(provider: ApiClient.Provider): String =
-        "${provider.displayName()} antwortet gerade nicht. BamaChat versucht einen anderen Anbieter."
+        "${provider.displayName()} antwortet gerade nicht. BamaFlow versucht einen anderen Anbieter."
 
     fun category(rawError: String?): AiFailureCategory {
         val normalized = rawError.orEmpty().trim().lowercase()

@@ -93,7 +93,7 @@ data class ToolCallProgress(
 )
 
 data class ChatProviderRuntimeStatus(
-    val providerName: String = "BamaChat Standard",
+    val providerName: String = "BamaFlow Standard",
     val modelName: String? = null,
     val badge: String = "Standard",
     val customSelection: Boolean = false,
@@ -492,7 +492,7 @@ class ChatViewModel @Inject constructor(
     }
 
     enum class Persona(val displayName: String, val emoji: String, val systemPrompt: String) {
-        ASSISTANT(ConversationPersonaMetadata.DEFAULT_PERSONA_DISPLAY_NAME, "🤖", "Du bist BamaChat, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
+        ASSISTANT(ConversationPersonaMetadata.DEFAULT_PERSONA_DISPLAY_NAME, "🤖", "Du bist BamaFlow, ein hilfreicher deutschsprachiger KI-Assistent. Antworte kurz und präzise."),
         DEVELOPER("Entwickler", "💻", "Du bist ein erfahrener Software-Entwickler. Hilf mit Code-Beispielen und technischen Erklärungen. Nutze Markdown-Codeblöcke. Antworte auf Deutsch."),
         TEACHER("Lehrer", "🎓", "Du bist ein geduldiger Lehrer. Erkläre Dinge einfach und verständlich, mit Beispielen. Antworte auf Deutsch."),
         TRANSLATOR("Übersetzer", "🌍", "Du bist ein professioneller Übersetzer. Übersetze den Text des Benutzers. Wenn er Deutsch ist, übersetze ins Englische. Wenn nicht, ins Deutsche. Erkläre kurz Schwierigkeiten."),
@@ -901,7 +901,7 @@ class ChatViewModel @Inject constructor(
                         text = result.content, isUser = false, timestamp = System.currentTimeMillis())
                     saveMessageLocally(convId, assistantMessage)
                     scheduleMessageSync(convId, assistantMessage)
-                    notificationService.show("BamaChat (Bildanalyse)", result.content, prefs.getBoolean("notifications_enabled", true))
+                    notificationService.show("BamaFlow (Bildanalyse)", result.content, prefs.getBoolean("notifications_enabled", true))
                 } else {
                     _errorMessage.value = result.error
                 }
@@ -959,7 +959,7 @@ class ChatViewModel @Inject constructor(
                     imageUrl = imageUrl)
                 saveMessageLocally(convId, assistantMessage)
                 scheduleMessageSync(convId, assistantMessage)
-                notificationService.show("BamaChat Bild", "Bild generiert: $prompt", prefs.getBoolean("notifications_enabled", true))
+                notificationService.show("BamaFlow Bild", "Bild generiert: $prompt", prefs.getBoolean("notifications_enabled", true))
             } catch (e: Exception) { handleError(e) }
             finally { _isLoading.value = false }
         }
@@ -1206,7 +1206,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             saveMessageLocally(convId, finalAssistantMessage, touchConversation = true)
             scheduleMessageSync(convId, finalAssistantMessage)
             clearRetryContext()
-            notificationService.show("BamaChat", trimmedContent, prefs.getBoolean("notifications_enabled", true))
+            notificationService.show("BamaFlow", trimmedContent, prefs.getBoolean("notifications_enabled", true))
         } catch (e: Exception) {
             handleError(e)
             repo.deleteMessage(assistantMsg.id, conversationService.writableOwnerScope())
@@ -1292,7 +1292,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 clearRetryContext = { clearRetryContext() },
                 showNotification = { finalText ->
                     notificationService.show(
-                        "BamaChat",
+                        "BamaFlow",
                         finalText,
                         prefs.getBoolean("notifications_enabled", true)
                     )
@@ -1431,7 +1431,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
                 clearRetryContext = { clearRetryContext() },
                 showNotification = { finalText ->
                     notificationService.show(
-                        "BamaChat",
+                        "BamaFlow",
                         finalText,
                         prefs.getBoolean("notifications_enabled", true)
                     )
@@ -1530,7 +1530,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
         saveMessageLocally(convId, assistantMsg, touchConversation = true)
         scheduleMessageSync(convId, assistantMsg)
         clearRetryContext()
-        notificationService.show("BamaChat", content, prefs.getBoolean("notifications_enabled", true))
+        notificationService.show("BamaFlow", content, prefs.getBoolean("notifications_enabled", true))
     }
 
     fun getConversationsForWorkspace(activeWorkspaceName: String, onlyActiveWorkspace: Boolean): List<com.example.bamachat.data.local.ConversationEntity> {
@@ -1646,7 +1646,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
             saveMessageLocally(convId, finalMessage, touchConversation = true)
             scheduleMessageSync(convId, finalMessage)
             clearRetryContext()
-            notificationService.show("BamaChat", finalText, prefs.getBoolean("notifications_enabled", true))
+            notificationService.show("BamaFlow", finalText, prefs.getBoolean("notifications_enabled", true))
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             if (assistantCreated) repo.deleteMessage(assistantId, conversationService.writableOwnerScope())
             throw cancelled
@@ -1686,7 +1686,7 @@ Werkzeuge: ${toolDefs.joinToString(", ") { it["function"]?.let { f -> (f as Map<
     fun setSelectedPersona(persona: Persona) { personaViewModel.setSelectedPersona(persona) }
 
     fun getChatExportText(): String = _messages.value.joinToString("\n") {
-        "${if (it.isUser) "Du" else "BamaChat"}: ${it.text}"
+        "${if (it.isUser) "Du" else "BamaFlow"}: ${it.text}"
     }
 
     fun setExtensionQuickAction(action: ExtensionQuickAction) {

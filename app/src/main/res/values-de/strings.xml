@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">BamaChat</string>
+    <string name="app_name">BamaFlow</string>
     <string name="app_description">Dein KI-Arbeitsbereich für intelligente Gespräche und kreative Zusammenarbeit</string>
 
     <!-- Real-Time Collab: Sync Status -->
