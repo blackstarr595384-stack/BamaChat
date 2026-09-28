@@ -1,7 +1,23 @@
 package com.example.bamachat
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.util.Log
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,7 +30,11 @@ import com.google.firebase.FirebaseOptions
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
@@ -26,6 +46,15 @@ class AppScreenshotCaptureTest {
     }
 
     private lateinit var device: UiDevice
+
+    private val composeRule = createEmptyComposeRule()
+
+    @get:Rule
+    val testRules: RuleChain = RuleChain.outerRule(composeRule).around(object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            captureFailureDiagnostics(failure)
+        }
+    })
 
     @Before
     fun setup() {
@@ -39,6 +68,7 @@ class AppScreenshotCaptureTest {
             "Screenshot-Verzeichnis konnte nicht vorbereitet werden: $directoryOutput",
             directoryOutput.lineSequence().any { it.trim() == SCREENSHOT_DEVICE_DIR }
         )
+        verifyHierarchyWriter()
     }
 
     private fun ensureFirebaseInitialized(context: Context) {
@@ -67,6 +97,7 @@ class AppScreenshotCaptureTest {
         assertNotNull("Hub-Navigation nicht gefunden", hubTab)
         assertTrue("Hub-Navigation ist deaktiviert", hubTab?.isEnabled == true)
         hubTab?.click()
+        composeRule.waitForIdle()
 
         assertNotNull("BamaHub nicht erkannt", waitForExactText(TIMEOUT, "BamaHub"))
         assertNotNull(
@@ -77,10 +108,13 @@ class AppScreenshotCaptureTest {
         settle()
         captureScreenshot("01_home_hub")
 
-        val chatTab = waitForExactDescription(TIMEOUT, "Chat")
-        assertNotNull("Chat-Navigation nicht gefunden", chatTab)
-        assertTrue("Chat-Navigation ist deaktiviert", chatTab?.isEnabled == true)
-        chatTab?.click()
+        composeRule.onAllNodesWithTag("bottom_nav_chat", useUnmergedTree = true)
+            .assertCountEquals(1)
+        val chatTab = composeRule.onNodeWithTag("bottom_nav_chat", useUnmergedTree = true)
+        chatTab.assertIsDisplayed().assertHasClickAction().assertIsEnabled().performClick()
+        chatTab.assertIsSelected()
+        composeRule.onNodeWithTag("chat_screen", useUnmergedTree = true)
+            .assertExists().assertIsDisplayed()
 
         assertNotNull(
             "Leerer Chat nicht erkannt",
@@ -96,15 +130,22 @@ class AppScreenshotCaptureTest {
     private fun completeInitialFlow() {
         val startState = waitForStartState(TIMEOUT)
         assertNotNull("Kein bekannter Startzustand erkannt", startState)
+        recordOnboardingDiagnostics("initial")
 
         if (startState == StartState.ONBOARDING) {
             val skipButton = waitForExactText(TIMEOUT, "Überspringen")
             assertNotNull("Onboarding-Button Überspringen nicht gefunden", skipButton)
             assertTrue("Onboarding-Button Überspringen ist deaktiviert", skipButton?.isEnabled == true)
+            recordOnboardingDiagnostics("before_skip", skipButton)
             skipButton?.click()
+            recordOnboardingDiagnostics("after_skip_before_compose_idle")
+            composeRule.waitForIdle()
+            recordOnboardingDiagnostics("after_skip_after_compose_idle")
+            val onboardingGone = device.wait(Until.gone(By.text("AI Workspace OS")), TIMEOUT)
+            recordOnboardingDiagnostics("after_onboarding_wait")
             assertTrue(
                 "Onboarding wurde nicht verlassen",
-                device.wait(Until.gone(By.text("AI Workspace OS")), TIMEOUT)
+                onboardingGone
             )
             assertNotNull(
                 "Rechtsbildschirm nach Onboarding nicht erkannt",
@@ -120,6 +161,7 @@ class AppScreenshotCaptureTest {
         assertNotNull("Button Als Gast starten nicht gefunden", guestButton)
         assertTrue("Button Als Gast starten ist deaktiviert", guestButton?.isEnabled == true)
         guestButton?.click()
+        composeRule.waitForIdle()
 
         assertNotNull(
             "Leerer Chat nach Gaststart nicht erkannt",
@@ -138,6 +180,7 @@ class AppScreenshotCaptureTest {
                 .take(2)
                 .firstOrNull { !it.isChecked }
             unchecked?.click()
+            composeRule.waitForIdle()
             device.waitForIdle()
         }
 
@@ -146,6 +189,7 @@ class AppScreenshotCaptureTest {
         assertNotNull("Button Akzeptieren & Fortfahren nicht gefunden", acceptButton)
         assertTrue("Button Akzeptieren & Fortfahren ist deaktiviert", acceptButton?.isEnabled == true)
         acceptButton?.click()
+        composeRule.waitForIdle()
         assertNotNull(
             "Welcome-Screen nach Rechtsbestätigung nicht erkannt",
             waitForExactText(TIMEOUT, "Als Gast starten")
@@ -177,6 +221,124 @@ class AppScreenshotCaptureTest {
             "Screenshot fehlgeschlagen: $outputPath; stat=$sizeOutput",
             screenshotSize != null && screenshotSize > 0L
         )
+    }
+
+    private fun verifyHierarchyWriter() {
+        val probePath = "$SCREENSHOT_DEVICE_DIR/writer_probe.txt"
+        val probe = "BamaFlow-Diagnose: äöü ✓\n".toByteArray(Charsets.UTF_8)
+        try {
+            writeShellFile(probePath, probe)
+            check(readShellFile(probePath).contentEquals(probe)) {
+                "Diagnose-Writer hat den UTF-8-Roundtrip nicht erhalten"
+            }
+        } finally {
+            device.executeShellCommand("rm -f $probePath")
+        }
+    }
+
+    private fun writeShellFile(outputPath: String, content: ByteArray) {
+        val descriptors = InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommandRw("tee $outputPath")
+        check(descriptors.size == 2) { "Unerwartete Descriptor-Anzahl für Diagnose-Writer" }
+        val echoed = ParcelFileDescriptor.AutoCloseInputStream(descriptors[0]).use { stdout ->
+            ParcelFileDescriptor.AutoCloseOutputStream(descriptors[1]).use { stdin ->
+                stdin.write(content)
+                stdin.flush()
+            }
+            stdout.readBytes()
+        }
+        check(echoed.contentEquals(content)) { "Diagnose-Writer hat unvollständige Daten bestätigt" }
+
+        val sizeOutput = device.executeShellCommand("stat -c %s $outputPath")
+        check(sizeOutput.trim().toLongOrNull() == content.size.toLong()) {
+            "Diagnose-Datei wurde nicht vollständig gespeichert"
+        }
+    }
+
+    private fun readShellFile(inputPath: String): ByteArray {
+        val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation
+            .executeShellCommand("cat $inputPath")
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+    }
+
+    private fun recordOnboardingDiagnostics(stage: String, skipNode: UiObject2? = null) {
+        runCatching {
+            val prefs = InstrumentationRegistry.getInstrumentation().targetContext
+                .getSharedPreferences("settings", Context.MODE_PRIVATE)
+            Log.i(
+                "BamaScreenshotDiag",
+                "stage=$stage elapsed=${SystemClock.uptimeMillis()} " +
+                    "clock=${composeRule.mainClock.currentTime} autoAdvance=${composeRule.mainClock.autoAdvance} " +
+                    "onboardingCompleted=${prefs.getBoolean("onboarding_completed", false)} " +
+                    "onboardingVisible=${device.hasObject(By.text("AI Workspace OS"))} " +
+                    "legalVisible=${device.hasObject(By.text("Recht & Datenschutz"))} " +
+                    "welcomeVisible=${device.hasObject(By.text("Als Gast starten"))}"
+            )
+            if (skipNode != null) {
+                Log.i("BamaScreenshotDiag", "stage=$stage skipMatches=${device.findObjects(By.text("Überspringen")).size}")
+                var node: UiObject2? = skipNode
+                repeat(3) { depth ->
+                    node?.let { current ->
+                        Log.i(
+                            "BamaScreenshotDiag",
+                            "stage=$stage depth=$depth class=${current.className} " +
+                                "bounds=${current.visibleBounds} center=${current.visibleCenter} " +
+                                "enabled=${current.isEnabled} clickable=${current.isClickable} " +
+                                "matchesSkip=${current.text == "Überspringen"}"
+                        )
+                        node = current.parent
+                    }
+                }
+            }
+        }.onFailure { diagnosticFailure ->
+            Log.i("BamaScreenshotDiag", "stage=$stage exceptionClass=${diagnosticFailure.javaClass.name}")
+        }
+    }
+
+    private fun captureFailureDiagnostics(failure: Throwable) {
+        if (!::device.isInitialized) return
+
+        recordOnboardingDiagnostics("failure_before_semantics")
+        runCatching {
+            captureScreenshot("failure")
+        }.onFailure { diagnosticFailure ->
+            failure.addSuppressed(IllegalStateException(
+                "stage=failure_screenshot exceptionClass=${diagnosticFailure.javaClass.name}"
+            ))
+        }
+        var diagnosticStage = "semantics_fetch"
+        runCatching {
+            val roots = composeRule.onAllNodes(isRoot(), useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+            diagnosticStage = "semantics_serialize"
+            val hierarchy = buildString {
+                appendLine("Unmerged Compose hierarchy; text and content descriptions omitted")
+                appendLine("rootCount=${roots.size}")
+                roots.forEach { node -> appendDiagnosticNode(node, 0) }
+            }
+            val outputPath = "$SCREENSHOT_DEVICE_DIR/failure_semantics.txt"
+            diagnosticStage = "semantics_write"
+            writeShellFile(outputPath, hierarchy.toByteArray(Charsets.UTF_8))
+        }.onFailure { diagnosticFailure ->
+            val summary = "stage=$diagnosticStage exceptionClass=${diagnosticFailure.javaClass.name}"
+            Log.i("BamaScreenshotDiag", summary)
+            failure.addSuppressed(IllegalStateException(summary))
+        }
+        recordOnboardingDiagnostics("failure_after_semantics")
+    }
+
+    private fun StringBuilder.appendDiagnosticNode(node: SemanticsNode, depth: Int) {
+        val tag = node.config.getOrNull(SemanticsProperties.TestTag)
+            ?.takeIf { it in setOf("bottom_nav_chat", "bottom_nav_hub", "chat_screen") }
+            ?: "other"
+        append("  ".repeat(depth))
+        appendLine(
+            "node=${node.id} tag=$tag bounds=${node.boundsInRoot} " +
+                "selected=${node.config.getOrNull(SemanticsProperties.Selected)} " +
+                "enabled=${!node.config.contains(SemanticsProperties.Disabled)} " +
+                "hasClick=${node.config.contains(SemanticsActions.OnClick)}"
+        )
+        node.children.forEach { child -> appendDiagnosticNode(child, depth + 1) }
     }
 
     private fun assertRequiredScreenshotsDiffer() {
