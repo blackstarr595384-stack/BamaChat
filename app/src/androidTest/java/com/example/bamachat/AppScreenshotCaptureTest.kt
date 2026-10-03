@@ -13,6 +13,8 @@ import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -108,11 +110,21 @@ class AppScreenshotCaptureTest {
         settle()
         captureScreenshot("01_home_hub")
 
-        composeRule.onAllNodesWithTag("bottom_nav_chat", useUnmergedTree = true)
+        composeRule.onNodeWithTag("bottom_nav_hub", useUnmergedTree = true)
+            .assertIsSelected()
+        val chatCardMatcher = hasText("Chat") and
+            hasText("Chat-Verlauf und laufende Gespräche") and
+            hasClickAction()
+        composeRule.onAllNodes(chatCardMatcher)
             .assertCountEquals(1)
-        val chatTab = composeRule.onNodeWithTag("bottom_nav_chat", useUnmergedTree = true)
-        chatTab.assertIsDisplayed().assertHasClickAction().assertIsEnabled().performClick()
-        chatTab.assertIsSelected()
+        composeRule.onNode(chatCardMatcher)
+            .assertIsDisplayed()
+            .assertHasClickAction()
+            .assertIsEnabled()
+            .performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("bottom_nav_chat", useUnmergedTree = true)
+            .assertIsSelected()
         composeRule.onNodeWithTag("chat_screen", useUnmergedTree = true)
             .assertExists().assertIsDisplayed()
 
