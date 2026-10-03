@@ -24,7 +24,7 @@ fun PremiumPaywallDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("BamaChat Premium", fontWeight = FontWeight.Bold) },
+        title = { Text("BamaFlow Premium", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(

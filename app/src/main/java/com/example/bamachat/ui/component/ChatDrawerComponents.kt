@@ -90,7 +90,7 @@ fun ChatDrawer(
                     .statusBarsPadding()
             ) {
                 Column {
-                    Text("BamaChat", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("BamaFlow", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                     Text("Deine Chats", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                 }
             }
@@ -133,7 +133,7 @@ fun ChatDrawer(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "BamaChat · Version ${"1.0.1"}",
+                    "BamaFlow · Version ${"1.0.1"}",
                     color = Color.White.copy(alpha = 0.42f),
                     fontSize = 10.sp
                 )

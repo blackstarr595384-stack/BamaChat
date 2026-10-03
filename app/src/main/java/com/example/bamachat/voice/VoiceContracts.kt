@@ -184,7 +184,7 @@ data class VoiceSessionConfiguration(
     val selectedVoiceLabel: String = "Android Standard",
     val realtimeVoice: RealtimeVoice = RealtimeVoice.MARIN,
     val realtimeTurnTaking: RealtimeTurnTaking = RealtimeTurnTaking.SEMANTIC,
-    val realtimePersonaName: String = "BamaChat",
+    val realtimePersonaName: String = "BamaFlow",
     val realtimeNoiseReduction: String = "near_field"
 )
 
@@ -231,7 +231,7 @@ data class RealtimeVoiceSessionRequest(
     val model: String,
     val voice: String,
     val languageTag: String,
-    val personaName: String = "BamaChat",
+    val personaName: String = "BamaFlow",
     val turnTaking: RealtimeTurnTaking = RealtimeTurnTaking.SEMANTIC,
     val noiseReduction: String = "near_field",
     val interruptResponse: Boolean = true

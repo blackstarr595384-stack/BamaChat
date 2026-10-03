@@ -63,7 +63,7 @@ private val pages = listOf(
     OnboardingPage(
         icon = Icons.Filled.AutoAwesome,
         title = "AI Workspace OS",
-        description = "BamaChat ist ein autonomer KI-Arbeitsraum, kein Chat-Fenster. Plattform\u00fcbergreifend, erweiterbar und bereit f\u00fcr deine Produktivit\u00e4t."
+        description = "BamaFlow ist ein autonomer KI-Arbeitsraum, kein Chat-Fenster. Plattform\u00fcbergreifend, erweiterbar und bereit f\u00fcr deine Produktivit\u00e4t."
     ),
     OnboardingPage(
         icon = Icons.Filled.Handyman,

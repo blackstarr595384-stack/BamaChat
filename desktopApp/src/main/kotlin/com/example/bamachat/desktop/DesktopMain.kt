@@ -112,7 +112,7 @@ private fun desktopFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "BamaChat für Windows"
+        title = "BamaFlow für Windows"
     ) {
         MaterialTheme {
             DesktopRoot()
@@ -339,7 +339,7 @@ private fun LeftSidebar(
                 }
                 Column {
                     Text(
-                        text = "BamaChat",
+                        text = "BamaFlow",
                         style = MaterialTheme.typography.h6,
                         color = Color.White,
                         fontWeight = FontWeight.Bold
@@ -544,7 +544,7 @@ private fun DesktopChatWorkspace(
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Text(
-                                "Willkommen bei BamaChat",
+                                "Willkommen bei BamaFlow",
                                 color = Color.White.copy(alpha = 0.85f),
                                 style = MaterialTheme.typography.subtitle2,
                                 fontWeight = FontWeight.Medium

@@ -149,7 +149,7 @@ fun WelcomeScreen(
 
             // Title
             Text(
-                "BamaChat",
+                "BamaFlow",
                 fontSize = 42.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,

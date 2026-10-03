@@ -400,7 +400,7 @@ class DesktopChatGateway internal constructor(
         quickAction: QuickActionSuggestion,
         runtimeDecision: ExtensionRuntimeDecision?
     ): String = AiPromptEngine.buildSystemPrompt(
-        appName = "BamaChat Desktop",
+        appName = "BamaFlow Desktop",
         quickAction = quickAction,
         runtimeDecision = runtimeDecision
     )

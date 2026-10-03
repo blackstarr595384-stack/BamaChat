@@ -1,20 +1,20 @@
-# BamaChat - App Store Metadata
+# BamaFlow - App Store Metadata
 
 ## Store Listing Text
 
 ### Titel (max. 50 Zeichen)
-BamaChat - KI-Workspace mit Agenten
+BamaFlow - KI-Workspace mit Agenten
 
 ### Kurzbeschreibung (max. 80 Zeichen)
 Chat, Agenten, MCP-Tools und Teamarbeit mit deinen KI-Modellen in einer App.
 
 ### Vollbeschreibung (max. 4000 Zeichen)
 
-**BamaChat** ist kein einzelner Chatbot, sondern ein KI-Workspace für Android.
+**BamaFlow** ist kein einzelner Chatbot, sondern ein KI-Workspace für Android.
 
 Verbinde deine bevorzugten Modelle, arbeite mit spezialisierten Agenten und bündele Chat, Recherche, Dateien und Zusammenarbeit in einer Oberfläche.
 
-**Warum BamaChat?**
+**Warum BamaFlow?**
 
 - **Mehrere KI-Modelle in einer App**
   OpenRouter, OpenCode, Groq, Cerebras, Together, Gemini und Ollama lassen sich in einem Chat-Workflow nutzen.

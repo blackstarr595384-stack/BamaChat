@@ -178,7 +178,7 @@ fun ChatBubble(
                                     if (text.isNotBlank()) {
                                         try {
                                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("BamaChat Nachricht", text))
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("BamaFlow Nachricht", text))
                                             copied = true
                                             AppTelemetry.logEvent("chat_copy_succeeded")
                                             android.widget.Toast.makeText(context, "Nachricht kopiert.", android.widget.Toast.LENGTH_SHORT).show()

@@ -1,6 +1,6 @@
-# BamaChat Anleitung
+# BamaFlow Anleitung
 
-BamaChat ist dein KI-Arbeitsbereich für Chat, Projektkontext, Dateien, Sprache, Bildfunktionen und Zusammenarbeit. Diese Anleitung ist bewusst in der App verfügbar, damit du keine Webseite brauchst.
+BamaFlow ist dein KI-Arbeitsbereich für Chat, Projektkontext, Dateien, Sprache, Bildfunktionen und Zusammenarbeit. Diese Anleitung ist bewusst in der App verfügbar, damit du keine Webseite brauchst.
 
 ## 1. Start in 30 Sekunden
 
@@ -15,7 +15,7 @@ Beispiel:
 
 ## 2. Chat, Personas und Schnellaktionen
 
-Im Chat ist BamaChat dein direkter Arbeitsbereich.
+Im Chat ist BamaFlow dein direkter Arbeitsbereich.
 
 - **Personas** bestimmen Stil und Perspektive der Antwort.
 - **Nachricht** ist dein normaler Prompt.
@@ -39,11 +39,11 @@ Bessere Ergebnisse bekommst du, wenn du nennst:
 
 ## 3. Bildfunktionen im Chat
 
-BamaChat unterscheidet zwei Bildfunktionen:
+BamaFlow unterscheidet zwei Bildfunktionen:
 
 ### Bild hochladen / analysieren
 
-Über das Plus-Menü kannst du ein Bild hochladen oder ein Foto aufnehmen. BamaChat analysiert dann den Inhalt, kann OCR-Text auslesen und deine Frage dazu beantworten.
+Über das Plus-Menü kannst du ein Bild hochladen oder ein Foto aufnehmen. BamaFlow analysiert dann den Inhalt, kann OCR-Text auslesen und deine Frage dazu beantworten.
 
 Beispiele:
 
@@ -53,7 +53,7 @@ Beispiele:
 
 ### Bild generieren
 
-Über **Plus-Menü > Bild generieren** kann BamaChat aus deinem Prompt ein neues Bild erzeugen.
+Über **Plus-Menü > Bild generieren** kann BamaFlow aus deinem Prompt ein neues Bild erzeugen.
 
 So funktioniert es:
 
@@ -71,7 +71,7 @@ Gute Prompts enthalten:
 Wichtig:
 
 - Bildgenerierung braucht einen erreichbaren Bilddienst.
-- Wenn der externe Dienst Zahlung/Auth verlangt oder nicht erreichbar ist, zeigt BamaChat eine Fehlermeldung statt einer kaputten Bildkarte.
+- Wenn der externe Dienst Zahlung/Auth verlangt oder nicht erreichbar ist, zeigt BamaFlow eine Fehlermeldung statt einer kaputten Bildkarte.
 - Wenn du noch keinen eigenen Dienst hast, kannst du die Funktion in **Einstellungen > KI & Modelle** deaktivieren und später wieder aktivieren.
 
 ## 4. Workspaces erstellen und nutzen
@@ -179,7 +179,7 @@ Du kannst dort:
 - Zwischenstände dokumentieren
 - Prompt-Kontext für das KI-Team vorbereiten
 
-Wenn zwei Personen gleichzeitig ändern, zeigt BamaChat Konflikt-Hinweise an.
+Wenn zwei Personen gleichzeitig ändern, zeigt BamaFlow Konflikt-Hinweise an.
 Dann stehen je nach Situation Aktionen wie diese bereit:
 
 - **Remote laden**
@@ -206,7 +206,7 @@ Praxis-Tipps:
 
 ## 11. Sprache und Voice
 
-Für Spracheingabe braucht BamaChat Mikrofonzugriff.
+Für Spracheingabe braucht BamaFlow Mikrofonzugriff.
 
 Wenn Sprache nicht reagiert:
 
@@ -265,7 +265,7 @@ Empfehlung bis öffentliche Seiten vorhanden sind:
 
 - Prüfe, ob du zuerst einen Bildprompt eingegeben hast.
 - Prüfe **Einstellungen > KI & Modelle > Bildgenerierung im Chat**.
-- Wenn der externe Bilddienst Zahlung/Auth verlangt, kann BamaChat kein Bild erzeugen.
+- Wenn der externe Bilddienst Zahlung/Auth verlangt, kann BamaFlow kein Bild erzeugen.
 - In diesem Fall zeigt die App eine Fehlermeldung und speichert keine kaputte Bildkarte.
 - Später kann ein eigener Bildproxy oder ein anderer Bildanbieter ergänzt werden.
 

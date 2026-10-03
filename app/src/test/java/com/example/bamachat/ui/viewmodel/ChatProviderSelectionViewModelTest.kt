@@ -63,7 +63,7 @@ class ChatProviderSelectionViewModelTest {
         val state = viewModel.uiState.value
         assertTrue(state.legacySelected)
         assertTrue(state.choices.isEmpty())
-        assertEquals("BamaChat Standard", state.summary)
+        assertEquals("BamaFlow Standard", state.summary)
         assertFalse(state.toString().contains("custom:"))
         assertFalse(state.toString().contains("http"))
     }

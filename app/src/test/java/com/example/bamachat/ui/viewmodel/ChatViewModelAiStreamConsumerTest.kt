@@ -190,7 +190,7 @@ class ChatViewModelAiStreamConsumerTest {
     fun legacyIntermediateOnErrorDoesNotEmitTerminalError() = runBlocking {
         val intermediateErrors = mutableListOf<String>()
         val safeFallbackStatus =
-            "OpenRouter antwortet gerade nicht. BamaChat versucht einen anderen Anbieter."
+            "OpenRouter antwortet gerade nicht. BamaFlow versucht einen anderen Anbieter."
         val events = legacyEvents(
             onIntermediateError = { intermediateErrors.add(it) }
         ) { onChunk, onError ->
