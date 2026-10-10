@@ -3,12 +3,14 @@ package com.example.bamachat.ui.screen
 import android.content.Context
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -73,6 +75,28 @@ class ChatProviderSwitcherTest {
 
         composeRule.onNodeWithTag("chat_provider_status").assertIsDisplayed().performClick()
         assertEquals(1, clicks)
+    }
+
+    @Test
+    fun legacyChatProviderStatusNamesStandardExactlyOnce() {
+        composeRule.setContent {
+            BamaChatTheme {
+                ChatProviderStatusChip(
+                    status = ChatProviderRuntimeStatus(),
+                    cornerRadius = 16.dp,
+                    chipAlpha = 0.2f,
+                    onClick = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("BamaFlow", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onAllNodesWithText("Standard", useUnmergedTree = true)
+            .assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription(
+            "Chat-Anbieter: BamaFlow. Standard. Anbieter und Modell auswählen",
+            useUnmergedTree = true
+        ).assertCountEquals(1)
     }
 
     @Test

@@ -37,7 +37,8 @@ data class BottomNavItem(
     val label: String,
     val icon: ImageVector,
     val route: String,
-    val badgeCount: Int = 0
+    val badgeCount: Int = 0,
+    val accessibilityLabel: String = label
 )
 
 internal object BamaChatBottomNavLayout {
@@ -73,7 +74,12 @@ fun BamaChatBottomNav(
         BottomNavItem("Chat", Icons.AutoMirrored.Filled.Chat, "chat"),
         BottomNavItem("Tools", Icons.Default.Apps, "mini_apps"),
         BottomNavItem("Profil", Icons.Default.AccountCircle, "profile"),
-        BottomNavItem("Einst.", Icons.Default.Settings, "settings")
+        BottomNavItem(
+            label = "Einst.",
+            icon = Icons.Default.Settings,
+            route = "settings",
+            accessibilityLabel = "Einstellungen"
+        )
     )
 
     val shape = RoundedCornerShape(28.dp)
@@ -123,7 +129,7 @@ fun BamaChatBottomNav(
                 NavigationBarItem(
                     modifier = Modifier
                         .testTag(bottomNavigationTestTag(item.route))
-                        .semantics { contentDescription = item.label },
+                        .semantics { contentDescription = item.accessibilityLabel },
                     selected = isSelected,
                     onClick = { onNavigate(item.route) },
                     colors = NavigationBarItemDefaults.colors(
@@ -169,7 +175,7 @@ fun BamaChatBottomNav(
                         ) {
                             Icon(
                                 imageVector = item.icon,
-                                contentDescription = item.label,
+                                contentDescription = null,
                                 modifier = Modifier.size(22.dp),
                                 tint = if (isSelected) palette.accent else palette.navUnselected
                             )

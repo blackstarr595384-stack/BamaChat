@@ -93,7 +93,7 @@ data class ToolCallProgress(
 )
 
 data class ChatProviderRuntimeStatus(
-    val providerName: String = "BamaFlow Standard",
+    val providerName: String = "BamaFlow",
     val modelName: String? = null,
     val badge: String = "Standard",
     val customSelection: Boolean = false,
