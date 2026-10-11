@@ -461,12 +461,17 @@ Hinweis: Für echte Ausführung ist ein verbundenes Gerät/Emulator + `adb` nöt
 ## UI-Screenshot-Workflow (GitHub Actions)
 - Workflow:
   - `.github/workflows/ui-screenshots.yml`
-- Screenshot-Test:
-  - `app/src/androidTest/java/com/example/bamachat/AppScreenshotCaptureTest.kt`
+- Vier ausgewählte UI-Tests:
+  - `AppScreenshotCaptureTest#captureCoreScreens`: Home-Hub, Chat-Kachel und Screenshots.
+  - `ChatProviderSwitcherTest#legacyChatProviderStatusNamesStandardExactlyOnce`: eindeutige Provider-Beschriftung.
+  - `BamaChatBottomNavTest#settingsDestinationUsesFullAccessibleNameAndRemainsSelectable`: zugängliche Einstellungsnavigation.
+  - `SettingsNavigationDeviceTest#chatAndSettingsNavigationRemainsStableAcrossAllEntrypoints`: Chat-/Einstellungswechsel über Bottom-Navigation und Chat-Menü, Voice-/Audio-Unterseite, Zurück-Navigation und ruhender Sprachmodus.
 - Start:
+  - Automatisch bei Pull Requests mit Änderungen unter `app/src/**` oder am Workflow.
   - GitHub → `Actions` → `UI Screenshots` → `Run workflow`
 - Ergebnis:
-  - Artifact `ui-screenshots` mit PNGs für Home/Chat/Profil/Einstellungen
+  - Artifact `ui-screenshots` mit PNGs für Home-Hub und Chat.
+  - Artifact `ui-screenshots-debug` mit Testberichten und Logs; der Gerätebericht muss alle vier Tests enthalten.
 
 ## Dokumentation für Entwickler
 Die komplette technische Entwickleranleitung ist hier:
