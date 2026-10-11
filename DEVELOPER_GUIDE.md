@@ -198,6 +198,15 @@ Desktop Streaming (Stage 8):
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
+Der CI-Workflow `.github/workflows/ui-screenshots.yml` führt gezielt vier UI-Tests aus:
+
+- `AppScreenshotCaptureTest#captureCoreScreens`
+- `ChatProviderSwitcherTest#legacyChatProviderStatusNamesStandardExactlyOnce`
+- `BamaChatBottomNavTest#settingsDestinationUsesFullAccessibleNameAndRemainsSelectable`
+- `SettingsNavigationDeviceTest#chatAndSettingsNavigationRemainsStableAcrossAllEntrypoints`
+
+Der Navigationstest prüft Chat-/Einstellungswechsel über Bottom-Navigation und Chat-Menü, die Voice-/Audio-Unterseite, System-Zurück und wiederholte Wechsel bei ruhendem Sprachmodus. Die vier Ergebnisse sind im Gerätebericht unter `ui-screenshots-debug` zu prüfen; ein erfolgreicher APK-Build allein belegt keine Testausführung. `ui-screenshots` enthält die Home-Hub- und Chat-Aufnahmen.
+
 ## 6.1 Live-Web-Proxy (Firebase Functions)
 Function-Code liegt unter `functions/` (`index.js`, `package.json`).
 

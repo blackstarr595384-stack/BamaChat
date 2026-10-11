@@ -24,6 +24,7 @@
 - Lokaler Secure-Proxy (`/api/chat`): `npm install && npm run dev` (Root, Token via `.env`)
 - Lint-Berichtspfad: `app/build/reports/lint-results-debug.html`
 - Android UI Smoke-Test APK: `.\gradlew.bat :app:assembleDebugAndroidTest`; Geräteausführung: `:app:connectedDebugAndroidTest`
+- Der CI-Workflow `ui-screenshots.yml` selektiert vier UI-Tests: Home-Hub-/Chat-Screenshots, Provider-Beschriftung, zugängliche Einstellungsnavigation und `SettingsNavigationDeviceTest#chatAndSettingsNavigationRemainsStableAcrossAllEntrypoints`. Beim Validieren alle vier Ergebnisse im Gerätebericht prüfen; Navigationswechsel dürfen keine Voice-Sitzung starten.
 - Firebase IaC-Wrapper: `.\scripts\iac-firebase.ps1 -Environment dev -Action check|rules|indexes|all`
 - Functions Deploy (Live-Web-Proxy): `npx firebase-tools deploy --only functions`
 - Optional Secure-Proxy Deploy (Vercel): Serverless Handler unter `api/chat.js` + `api/health.js`
