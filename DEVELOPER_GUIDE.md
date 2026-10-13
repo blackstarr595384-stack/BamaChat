@@ -115,7 +115,11 @@ Production (Vercel):
 
 ## 5. Firebase Setup
 ## 5.1 `google-services.json`
-- Datei nach `app/google-services.json` legen.
+- Datei für die Application-ID `de.bamachat.app` nach `app/google-services.json` legen.
+- Der normale App-Start benötigt eine gültige Firebase-Konfiguration. Ohne sie kann `assembleDebug` trotzdem erfolgreich sein; insbesondere `PersonaViewModel` greift beim Start auf Firebase Auth zu.
+- `ci.yml` führt Build, Lint und Unit-Tests aus, veröffentlicht aber grundsätzlich keine APK. Der Workflow-Zusammenfassungsbericht erklärt diese Einschränkung; alte `debug-apk`-Artefakte sind keine freigegebenen Updates.
+- Die instrumentierten UI-Tests initialisieren eine eigene Firebase-Testkonfiguration. Ihr Erfolg belegt keinen eigenständigen APK-Start.
+- Geräteupdates lokal mit der passenden Konfiguration und dem bisherigen Signierschlüssel bauen. Eine künftige APK-Veröffentlichung braucht zusätzlich einen eigenständigen Starttest ohne Instrumentierungs-Testkonfiguration und eine verlässliche Signierung.
 
 ## 5.2 Regeln publishen
 - Firestore-Regeln aus `firestore.rules`

@@ -16,6 +16,7 @@
 - Telemetrie läuft über `util/AppTelemetry.kt`; Crashlytics ist in debugfähigen Builds deaktiviert (`BamaChatApplication.kt`).
 
 ## Kritische Workflows
+- `ci.yml` ist ausschließlich ein Prüfworkflow und darf keine APK veröffentlichen: Ohne Firebase-Konfiguration kann der Build erfolgreich sein, der normale Start aber abstürzen. Die Firebase-Testinitialisierung der UI-Tests ist kein eigenständiger APK-Starttest. Geräteupdates benötigen passende Firebase-Konfiguration und denselben Signierschlüssel wie die bestehende Installation.
 - Debug-Build: `.\gradlew.bat :app:assembleDebug`
 - Vollständiges Smoke-Gate: `.\gradlew.bat :app:stabilityCheck` (assemble + Unit-Tests + Lint)
 - Desktop-Build: `.\gradlew.bat :desktopApp:build`

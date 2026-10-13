@@ -36,11 +36,21 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v7
-        with:
-          name: debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+      # This workflow verifies compilation without a Firebase client configuration.
+      # Its APK must not be distributed: normal startup requires Firebase.
+      - name: Explain build-only APK
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Build verification only
+          No installable APK is published by this workflow. The build can succeed
+          without google-services.json, but normal app startup requires Firebase
+          configuration. Instrumented UI tests initialize their own test configuration
+          and do not verify standalone startup of this APK.
+
+          For a device update, build locally with the correct Firebase configuration
+          and the same signing key as the installed app. See README.md, Firebase setup.
+          EOF
 
       - name: Upload Test Results
         if: always()
