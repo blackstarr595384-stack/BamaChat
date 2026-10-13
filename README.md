@@ -264,11 +264,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\remove-legacy-machine-install
 
 ## Firebase einrichten
 1. Firebase-Projekt anlegen/verwenden.
-2. Android-App `com.example.bamachat` registrieren.
+2. Android-App `de.bamachat.app` registrieren (Application-ID; der Kotlin-Namespace ist `com.example.bamachat`).
 3. `google-services.json` nach `app/google-services.json` legen.
 4. Firestore- und Storage-Rules veröffentlichen:
    - `firestore.rules`
    - `storage.rules`
+
+Der Workflow `CI - Build, Lint & Test` prüft den Build, veröffentlicht aber keine installierbare APK. Ohne Firebase-Konfiguration kann der Build erfolgreich sein, während der normale App-Start abstürzt. Die instrumentierten UI-Tests verwenden eine eigene Testkonfiguration und belegen keinen eigenständigen Start dieser APK.
+
+Für ein Geräteupdate lokal mit der passenden `google-services.json` über `:app:assembleDebug` bauen und denselben Signierschlüssel wie bei der installierten App verwenden. Vorhandene CI-Artefakte namens `debug-apk` aus älteren Läufen sind keine freigegebenen Geräteupdates.
 
 Details: [FIREBASE_SECURITY_SETUP.md](./FIREBASE_SECURITY_SETUP.md)
 
