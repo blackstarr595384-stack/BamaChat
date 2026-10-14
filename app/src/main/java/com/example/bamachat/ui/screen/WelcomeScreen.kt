@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.bamachat.BuildConfig
 import com.example.bamachat.ui.theme.NeonPurple
 import com.example.bamachat.ui.theme.NeonCyan
 import com.example.bamachat.ui.theme.NeonPink
@@ -279,11 +280,22 @@ fun WelcomeScreen(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                "Version 1.0.1",
+                "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                 style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.2f)
+                color = Color.White.copy(alpha = 0.6f)
             )
-            
+            val sourceLabel = when (BuildConfig.SOURCE_STATE) {
+                "clean" -> BuildConfig.SOURCE_COMMIT.take(12)
+                "modified" -> "${BuildConfig.SOURCE_COMMIT.take(12)} · lokal geändert"
+                else -> "Commit unbekannt"
+            }
+            Text(
+                text = "Build ${BuildConfig.BUILD_TYPE} · $sourceLabel",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+
             Spacer(Modifier.height(24.dp))
         }
     }

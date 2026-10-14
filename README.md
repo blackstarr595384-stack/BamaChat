@@ -568,3 +568,9 @@ Vor Store-Upload:
 ## Phase 7.6b Agent Draft PR
 
 GitHub Intelligence kann aus validierten Vorschlägen mit stabiler `proposal-<64 hex>`-Parser-ID einen lokalen, deklarativen Umsetzungsplan vorbereiten. Die Plan-ID bindet den vollständigen fachlichen Inhalt kollisionsfrei über versionierte UTF-8-Längenfelder, die Testliste wird exakt aus den betroffenen Modulpfaden abgeleitet, direkte Git-/Gradle-/Maven-/Shell-/Netzwerk-/Interpreter-Befehle bleiben blockiert und ein Abbruch ist nur vor `SERVER_ACCEPTED` zulässig. Die finale Übermittlung bleibt deaktiviert, solange kein sicherer BamaWorker mit serverseitiger GitHub App vorhanden ist; der Android-Client besitzt keine GitHub-Schreibrechte oder Tokens. Details: `docs/phase-7.6b-agent-draft-pr.md`.
+
+## Android-Build-Kennung
+
+Der Startbildschirm zeigt Versionsname, Versionscode, Build-Typ und die ersten zwölf Zeichen des beim Build ermittelten Git-Commits. `BuildConfig.SOURCE_COMMIT` enthält den vollständigen Commit. Nicht ignorierte lokale Änderungen (einschließlich ungetrackter Dateien) werden als „lokal geändert“ markiert. Ohne verfügbare Git-Metadaten erscheint „Commit unbekannt“; es wird keine Version geraten.
+
+Die Kennung beschreibt den Quellstand beim Build, nicht die APK-Signatur oder einen APK-Hash. Ignorierte lokale Konfiguration wie `google-services.json` und Signierschlüssel gehört nicht zum Git-Status. Für Geräteberichte die angezeigte Kennung übernehmen; eine geänderte oder unbekannte Quelle nicht als exakte Commit-Zuordnung ausgeben. Nach einem Commit erneut bauen, damit die Kennung den neuen Stand enthält.
