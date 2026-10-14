@@ -23,6 +23,26 @@ val hasGoogleServicesJson = googleServicesFiles.any { it.exists() }
 fun String.asBuildConfigString(): String =
     "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
+// Provider-backed Git queries are re-evaluated when Gradle configuration inputs change.
+// Source archives and machines without Git must remain buildable without a false identity.
+fun gitMetadata(vararg arguments: String): String? = runCatching {
+    val output = providers.exec {
+        workingDir(rootProject.projectDir)
+        commandLine("git", *arguments)
+        isIgnoreExitValue = true
+    }
+    if (output.result.get().exitValue == 0) output.standardOutput.asText.get().trim() else null
+}.getOrNull()
+
+val sourceCommit = gitMetadata("rev-parse", "--verify", "HEAD")
+    ?.takeIf { it.matches(Regex("[0-9a-f]{40,64}")) }
+val sourceStatus = gitMetadata("status", "--porcelain", "--untracked-files=normal")
+val sourceState = when {
+    sourceCommit == null || sourceStatus == null -> "unknown"
+    sourceStatus.isNotEmpty() -> "modified"
+    else -> "clean"
+}
+
 val bamaVoiceRealtimeSessionUrl = providers.gradleProperty("bamaVoiceRealtimeSessionUrl")
     .orElse(providers.environmentVariable("BAMA_VOICE_REALTIME_SESSION_URL"))
     .orElse("")
@@ -56,6 +76,8 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "1.0.1"
+        buildConfigField("String", "SOURCE_COMMIT", (sourceCommit ?: "unknown").asBuildConfigString())
+        buildConfigField("String", "SOURCE_STATE", sourceState.asBuildConfigString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

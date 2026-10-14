@@ -71,3 +71,9 @@
 - Wenn neue Firestore/Storage-Pfade hinzugefügt werden, aktualisiere beide Regeldateien und validiere mit `iac-firebase.ps1`.
 - Wenn Auth/Profil-Flow geändert wird, verifiziere `AuthViewModel`, `AuthScreen` und `ProfileScreen` zusammen.
 - Wenn Quota/Credits-Verhalten berührt wird, verifiziere `MonetizationConfig`, `ChatViewModel.consumeQuota` und Billing-Callbacks in `SettingsViewModel`.
+
+## Android-Build-Kennung
+
+Der Startbildschirm zeigt Versionsname, Versionscode, Build-Typ und die ersten zwölf Zeichen des beim Build ermittelten Git-Commits. `BuildConfig.SOURCE_COMMIT` enthält den vollständigen Commit. Nicht ignorierte lokale Änderungen (einschließlich ungetrackter Dateien) werden als „lokal geändert“ markiert. Ohne verfügbare Git-Metadaten erscheint „Commit unbekannt“; es wird keine Version geraten.
+
+Die Kennung beschreibt den Quellstand beim Build, nicht die APK-Signatur oder einen APK-Hash. Ignorierte lokale Konfiguration wie `google-services.json` und Signierschlüssel gehört nicht zum Git-Status. Für Geräteberichte die angezeigte Kennung übernehmen; eine geänderte oder unbekannte Quelle nicht als exakte Commit-Zuordnung ausgeben. Nach einem Commit erneut bauen, damit die Kennung den neuen Stand enthält.
