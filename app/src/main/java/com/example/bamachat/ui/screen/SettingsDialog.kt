@@ -311,11 +311,8 @@ fun SettingsDialog(
         viewModel.refreshCloudSyncStatus()
     }
 
-    val closeSettings = {
-        stopVoicePreview()
-        onDismiss()
-    }
-    BackHandler(onBack = closeSettings)
+    // Disposal stops an active preview only; navigation must not interrupt idle/chat audio.
+    BackHandler(onBack = onDismiss)
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("settings_detail_screen").imePadding(),
@@ -326,7 +323,7 @@ fun SettingsDialog(
                 title = { Text("Einstellungen") },
                 navigationIcon = {
                     IconButton(
-                        onClick = closeSettings,
+                        onClick = onDismiss,
                         modifier = Modifier.testTag("settings_detail_back")
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
