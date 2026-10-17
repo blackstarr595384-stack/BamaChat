@@ -121,6 +121,7 @@ fun SettingsOverviewScreen(
             mcpServerManager = mcpServerManager,
             mcpWorkflowManager = mcpWorkflowManager
         )
+        return
     }
 
     SettingsOverviewContent(
