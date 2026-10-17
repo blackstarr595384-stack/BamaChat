@@ -1,5 +1,7 @@
 package com.example.bamachat.ui.screen
 
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText as hasTextMatcher
@@ -91,6 +93,19 @@ class SettingsNavigationDeviceTest {
         waitForTag("settings_detail_screen")
         composeRule.waitForIdle()
         assertOnlySettingsSection("data", "Datenschutz & Daten")
+        val legalActions = composeRule.onNodeWithTag("privacy_legal_actions")
+            .performScrollTo()
+        val legalBounds = legalActions.getUnclippedBoundsInRoot()
+        assertTrue(
+            "Rechtsaktionen dürfen keine überhohe Leerfläche erzeugen",
+            legalBounds.bottom - legalBounds.top <= 240.dp
+        )
+        composeRule.onNodeWithText("Datenschutz & Rechtliches").assertIsDisplayed()
+        listOf("Datenschutz", "AGB", "Löschung", "Support").forEach { label ->
+            composeRule.onNodeWithText(label).assertIsDisplayed()
+        }
+        composeRule.waitForIdle()
+        device.executeShellCommand("screencap -p /sdcard/Download/bamachat-screenshots/04_privacy_actions.png")
         pressBack()
         waitForTag("settings_overview_screen")
         listOf(
