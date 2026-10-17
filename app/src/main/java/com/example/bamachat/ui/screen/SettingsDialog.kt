@@ -1609,7 +1609,16 @@ fun SettingsDialog(
                             )
                         }
                     }
-                    SettingRow("Datenschutz & Rechtliches", "Infos, Einstellungen und Kontakt") {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().testTag("privacy_legal_actions"),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("Datenschutz & Rechtliches", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                        Text(
+                            "Infos, Einstellungen und Kontakt",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.66f)
+                        )
                         CompactTextActionRow(
                             actions = listOf(
                                 CompactTextAction(
