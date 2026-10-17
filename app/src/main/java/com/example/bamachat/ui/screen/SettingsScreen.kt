@@ -137,7 +137,10 @@ fun SettingsOverviewScreen(
         onOpenAiModels = onOpenAiModels,
         onOpenVoiceAudio = onOpenVoiceAudio,
         onOpenPrivacyData = { legacySection = "data" },
-        onOpenAdvanced = { legacySection = "ai" }
+        onOpenAdvanced = { legacySection = "ai" },
+        onOpenAppearance = { legacySection = "chat" },
+        onOpenAgents = { legacySection = "agents" },
+        onOpenAutomation = { legacySection = "workspaces" }
     )
 }
 
@@ -155,14 +158,24 @@ internal fun SettingsOverviewContent(
     onOpenAiModels: () -> Unit,
     onOpenVoiceAudio: () -> Unit,
     onOpenPrivacyData: () -> Unit,
-    onOpenAdvanced: () -> Unit
+    onOpenAdvanced: () -> Unit,
+    onOpenAppearance: () -> Unit,
+    onOpenAgents: () -> Unit,
+    onOpenAutomation: () -> Unit
 ) {
     val categories = listOf(
         SettingsOverviewCategory(
             id = "general",
             title = "Allgemein",
-            description = "Erscheinungsbild, Sprache und App-Verhalten",
+            description = "App-Sprache, Benachrichtigungen und Bedienung",
             icon = Icons.Default.Settings,
+            accent = MaterialTheme.colorScheme.primary
+        ),
+        SettingsOverviewCategory(
+            id = "appearance",
+            title = "Darstellung",
+            description = "Farben, Schrift und Design",
+            icon = Icons.Default.Tune,
             accent = MaterialTheme.colorScheme.primary
         ),
         SettingsOverviewCategory(
@@ -188,6 +201,20 @@ internal fun SettingsOverviewContent(
             icon = Icons.Default.Security,
             accent = Color(0xFFFF6B7A),
             value = syncStatus
+        ),
+        SettingsOverviewCategory(
+            id = "agents",
+            title = "Agenten",
+            description = "Rollen, Ziele und Arbeitsweise",
+            icon = Icons.Default.Settings,
+            accent = MaterialTheme.colorScheme.primary
+        ),
+        SettingsOverviewCategory(
+            id = "automation",
+            title = "Arbeitsbereiche & Automationen",
+            description = "Bereichsoptionen, Vorlagen und Automationen",
+            icon = Icons.Default.Settings,
+            accent = MaterialTheme.colorScheme.primary
         ),
         SettingsOverviewCategory(
             id = "advanced",
@@ -255,6 +282,9 @@ internal fun SettingsOverviewContent(
                     value = category.value,
                     onClick = when (category.id) {
                         "general" -> onOpenGeneral
+                        "appearance" -> onOpenAppearance
+                        "agents" -> onOpenAgents
+                        "automation" -> onOpenAutomation
                         "ai" -> onOpenAiModels
                         "voice" -> onOpenVoiceAudio
                         "privacy" -> onOpenPrivacyData

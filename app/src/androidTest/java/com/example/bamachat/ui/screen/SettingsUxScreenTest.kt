@@ -131,7 +131,10 @@ class SettingsUxScreenTest {
                     onOpenAiModels = { otherActionCount.incrementAndGet() },
                     onOpenVoiceAudio = { voiceNavigationCount.incrementAndGet() },
                     onOpenPrivacyData = { otherActionCount.incrementAndGet() },
-                    onOpenAdvanced = { otherActionCount.incrementAndGet() }
+                    onOpenAdvanced = { otherActionCount.incrementAndGet() },
+                    onOpenAppearance = { otherActionCount.incrementAndGet() },
+                    onOpenAgents = { otherActionCount.incrementAndGet() },
+                    onOpenAutomation = { otherActionCount.incrementAndGet() }
                 )
             }
         }
@@ -157,7 +160,10 @@ class SettingsUxScreenTest {
                     voiceModeSummary = "Smart Voice",
                     onBack = {}, onOpenAccount = {}, onOpenWorkspaces = {}, onOpenGeneral = {},
                     onOpenAiModels = { aiNavigationCount.incrementAndGet() },
-                    onOpenVoiceAudio = {}, onOpenPrivacyData = {}, onOpenAdvanced = {}
+                    onOpenVoiceAudio = {}, onOpenPrivacyData = {}, onOpenAdvanced = {},
+                    onOpenAppearance = {},
+                    onOpenAgents = {},
+                    onOpenAutomation = {}
                 )
             }
         }

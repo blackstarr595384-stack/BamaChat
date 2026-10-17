@@ -75,6 +75,7 @@ class SettingsNavigationDeviceTest {
         composeRule.onNodeWithTag("settings_category_general", useUnmergedTree = true).performClick()
         waitForTag("settings_detail_screen")
         composeRule.onNodeWithTag("settings_overview_screen").assertDoesNotExist()
+        assertOnlySettingsSection("general", "Allgemein")
         composeRule.onNodeWithText("Fingerabdruck-Sperre").assertIsDisplayed()
         composeRule.onNodeWithText("Schnellüberblick").assertDoesNotExist()
         composeRule.waitForIdle()
@@ -89,10 +90,34 @@ class SettingsNavigationDeviceTest {
         composeRule.onNodeWithTag("settings_category_privacy", useUnmergedTree = true).performClick()
         waitForTag("settings_detail_screen")
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Datenschutz & Daten").assertIsDisplayed()
+        assertOnlySettingsSection("data", "Datenschutz & Daten")
         pressBack()
         waitForTag("settings_overview_screen")
+        listOf(
+            Triple("appearance", "chat", "Darstellung"),
+            Triple("agents", "agents", "Agenten"),
+            Triple("automation", "workspaces", "Arbeitsbereiche & Automationen"),
+            Triple("advanced", "ai", "Erweitert")
+        ).forEach { (category, section, title) ->
+            composeRule.onNodeWithTag("settings_overview_list", useUnmergedTree = true)
+                .performScrollToNode(hasTestTag("settings_category_$category"))
+            composeRule.onNodeWithTag("settings_category_$category", useUnmergedTree = true).performClick()
+            waitForTag("settings_detail_screen")
+            assertOnlySettingsSection(section, title)
+            composeRule.onNodeWithTag("settings_detail_back").performClick()
+            waitForTag("settings_overview_screen")
+        }
         assertVoiceIdle()
+    }
+
+    private fun assertOnlySettingsSection(section: String, title: String) {
+        composeRule.onNodeWithText(title).assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_section_$section").assertExists()
+        listOf("general", "chat", "voice", "workspaces", "ai", "agents", "data")
+            .filter { it != section }
+            .forEach { other ->
+                composeRule.onNodeWithTag("settings_section_$other").assertDoesNotExist()
+            }
     }
 
     private fun checkVoiceSettingsDetails() {
@@ -105,7 +130,7 @@ class SettingsNavigationDeviceTest {
         waitForTag("settings_detail_screen")
         composeRule.onNodeWithTag("voice_audio_settings_screen").assertDoesNotExist()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Sprache & Unterhaltung").assertIsDisplayed()
+        assertOnlySettingsSection("voice", "Sprache & Unterhaltung")
         pressBack()
         waitForTag("voice_audio_settings_screen")
         assertVoiceIdle()

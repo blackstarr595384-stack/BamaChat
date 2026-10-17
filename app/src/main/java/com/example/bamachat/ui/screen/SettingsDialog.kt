@@ -6,8 +6,6 @@ import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -244,7 +242,16 @@ fun SettingsDialog(
         voiceViewModel.refreshConfiguration()
     }
 
-    var expandedSection by remember { mutableStateOf<String?>(null) }
+    val detailTitles = mapOf(
+        "general" to "Allgemein",
+        "chat" to "Darstellung",
+        "voice" to "Sprache & Unterhaltung",
+        "workspaces" to "Arbeitsbereiche & Automationen",
+        "ai" to "Erweitert",
+        "agents" to "Agenten",
+        "data" to "Datenschutz & Daten"
+    )
+    val detailSection = initialSection?.takeIf { it in detailTitles } ?: "general"
     var voiceAdvancedExpanded by remember { mutableStateOf(false) }
     var newWorkspaceName by remember { mutableStateOf("") }
     // P0-2: confirm-dialog state for workspace deletion
@@ -253,11 +260,6 @@ fun SettingsDialog(
     var renamingWorkspaceId by remember { mutableStateOf<String?>(null) }
     var renamingDraft by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
-    LaunchedEffect(initialSection) {
-        if (!initialSection.isNullOrBlank()) {
-            expandedSection = initialSection
-        }
-    }
 
     val colors = listOf(
         0xFF6A11CB, 0xFF2575FC, 0xFF00B894,
@@ -320,7 +322,7 @@ fun SettingsDialog(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Einstellungen") },
+                title = { Text(detailTitles.getValue(detailSection)) },
                 navigationIcon = {
                     IconButton(
                         onClick = onDismiss,
@@ -341,7 +343,7 @@ fun SettingsDialog(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .testTag("settings_detail_list")
         ) {
-                SettingsSection("Allgemein", expandedSection == "general", onClick = { expandedSection = if (expandedSection == "general") null else "general" }) {
+                if (detailSection == "general") SettingsDetailContent("general") {
                     SettingRow("Fingerabdruck-Sperre", "App beim Start sichern") {
                         Switch(checked = isBiometricEnabled, onCheckedChange = { viewModel.setBiometricEnabled(it) })
                     }
@@ -369,7 +371,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Darstellung", expandedSection == "chat", onClick = { expandedSection = if (expandedSection == "chat") null else "chat" }) {
+                if (detailSection == "chat") SettingsDetailContent("chat") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -518,7 +520,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Sprache & Unterhaltung", expandedSection == "voice", onClick = { expandedSection = if (expandedSection == "voice") null else "voice" }) {
+                if (detailSection == "voice") SettingsDetailContent("voice") {
                     Text("Voice-Modus", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(
@@ -817,7 +819,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Arbeitsbereiche & Automationen", expandedSection == "workspaces", onClick = { expandedSection = if (expandedSection == "workspaces") null else "workspaces" }) {
+                if (detailSection == "workspaces") SettingsDetailContent("workspaces") {
                     Text("Aktiver Arbeitsbereich", fontWeight = FontWeight.Medium, fontSize = 15.sp)
                     projectWorkspaces.forEach { workspace ->
                         val isActive = workspace.id == activeWorkspaceId
@@ -972,7 +974,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("KI & Modelle", expandedSection == "ai", onClick = { expandedSection = if (expandedSection == "ai") null else "ai" }) {
+                if (detailSection == "ai") SettingsDetailContent("ai") {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
@@ -1487,7 +1489,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Agenten", expandedSection == "agents", onClick = { expandedSection = if (expandedSection == "agents") null else "agents" }) {
+                if (detailSection == "agents") SettingsDetailContent("agents") {
                     SettingRow(
                         "Agent-Studio aktiv",
                         "Erweitert den System-Prompt mit Agent-Profil"
@@ -1568,7 +1570,7 @@ fun SettingsDialog(
                     }
                 }
 
-                SettingsSection("Datenschutz & Daten", expandedSection == "data", onClick = { expandedSection = if (expandedSection == "data") null else "data" }) {
+                if (detailSection == "data") SettingsDetailContent("data") {
                     SettingRow("Persona-Cloud-Sync", cloudSyncStatusText) {
                         CompactTextActionRow(
                             actions = listOf(
@@ -1795,42 +1797,19 @@ private fun VoicePrivacyCard(
     }
 }
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SettingsSection(title: String, expanded: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
-    val headingRequester = remember { BringIntoViewRequester() }
-    LaunchedEffect(expanded) {
-        if (expanded) headingRequester.bringIntoView()
-    }
+private fun SettingsDetailContent(section: String, content: @Composable () -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("settings_section_$section"),
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (expanded) 0.36f else 0.24f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.36f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
     ) {
-        Column(modifier = Modifier.padding(14.dp).animateContentSize()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .bringIntoViewRequester(headingRequester)
-                    .clickable { onClick() }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            if (expanded) {
-                Spacer(Modifier.height(10.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    content()
-                }
-            }
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            content()
         }
     }
 }
