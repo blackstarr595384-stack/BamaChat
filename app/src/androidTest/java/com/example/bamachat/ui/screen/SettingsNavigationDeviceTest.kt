@@ -1,6 +1,8 @@
 package com.example.bamachat.ui.screen
 
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasText as hasTextMatcher
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -14,6 +16,8 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
 import com.example.bamachat.MainActivity
 import com.example.bamachat.ui.viewmodel.BamaVoiceViewModel
 import com.example.bamachat.voice.VoiceSessionState
@@ -40,6 +44,7 @@ class SettingsNavigationDeviceTest {
         assertBottomDestinationSelected("bottom_nav_chat")
 
         openSettingsFromChatMenu()
+        checkSettingsDetails()
         openBottomDestination("bottom_nav_chat", "chat_screen")
         assertBottomDestinationSelected("bottom_nav_chat")
 
@@ -48,6 +53,7 @@ class SettingsNavigationDeviceTest {
         assertBottomDestinationSelected("bottom_nav_chat")
 
         openVoiceAudioSettings()
+        checkVoiceSettingsDetails()
         pressBack()
         waitForTag("settings_overview_screen")
         pressBack()
@@ -60,6 +66,48 @@ class SettingsNavigationDeviceTest {
             assertBottomDestinationSelected("bottom_nav_chat")
         }
 
+        assertVoiceIdle()
+    }
+
+    private fun checkSettingsDetails() {
+        composeRule.onNodeWithTag("settings_overview_list", useUnmergedTree = true)
+            .performScrollToNode(hasTestTag("settings_category_general"))
+        composeRule.onNodeWithTag("settings_category_general", useUnmergedTree = true).performClick()
+        waitForTag("settings_detail_screen")
+        composeRule.onNodeWithTag("settings_overview_screen").assertDoesNotExist()
+        composeRule.onNodeWithText("Fingerabdruck-Sperre").assertIsDisplayed()
+        composeRule.onNodeWithText("Schnellüberblick").assertDoesNotExist()
+        composeRule.waitForIdle()
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        device.executeShellCommand("mkdir -p /sdcard/Download/bamachat-screenshots")
+        device.executeShellCommand("screencap -p /sdcard/Download/bamachat-screenshots/03_settings_details.png")
+        composeRule.onNodeWithTag("settings_detail_back").performClick()
+        waitForTag("settings_overview_screen")
+
+        composeRule.onNodeWithTag("settings_overview_list", useUnmergedTree = true)
+            .performScrollToNode(hasTestTag("settings_category_privacy"))
+        composeRule.onNodeWithTag("settings_category_privacy", useUnmergedTree = true).performClick()
+        waitForTag("settings_detail_screen")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Datenschutz & Daten").assertIsDisplayed()
+        pressBack()
+        waitForTag("settings_overview_screen")
+        assertVoiceIdle()
+    }
+
+    private fun checkVoiceSettingsDetails() {
+        composeRule.onNodeWithTag("voice_audio_settings_list", useUnmergedTree = true)
+            .performScrollToNode(hasTextMatcher("Erweiterte Einstellungen"))
+        composeRule.onNodeWithText("Erweiterte Einstellungen").performClick()
+        composeRule.onNodeWithTag("voice_audio_settings_list", useUnmergedTree = true)
+            .performScrollToNode(hasTextMatcher("Providerkonten und technische Stimmen"))
+        composeRule.onNodeWithText("Providerkonten und technische Stimmen").performClick()
+        waitForTag("settings_detail_screen")
+        composeRule.onNodeWithTag("voice_audio_settings_screen").assertDoesNotExist()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Sprache & Unterhaltung").assertIsDisplayed()
+        pressBack()
+        waitForTag("voice_audio_settings_screen")
         assertVoiceIdle()
     }
 

@@ -173,6 +173,7 @@ fun VoiceAudioSettingsScreen(
             mcpServerManager = mcpServerManager,
             mcpWorkflowManager = mcpWorkflowManager
         )
+        return
     }
 
     VoiceAudioSettingsContent(

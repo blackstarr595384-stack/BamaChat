@@ -1,10 +1,13 @@
 package com.example.bamachat.ui.screen
 
+import androidx.activity.compose.BackHandler
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.testTag
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
@@ -62,6 +67,7 @@ import com.example.bamachat.voice.RealtimeTurnTaking
 import com.example.bamachat.voice.RealtimeVoice
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Suppress("UNUSED_VARIABLE", "UNUSED_PARAMETER")
 @Composable
 fun SettingsDialog(
@@ -300,48 +306,41 @@ fun SettingsDialog(
         cloudChatSyncRuntimeStatus.state == ChatSyncState.Failed -> "Synchronisierung fehlgeschlagen – lokale Chats sind sicher"
         else -> "Synchronisierung aktiv"
     }
-    val activeWorkspaceLabel = remember(projectWorkspaces, activeWorkspaceId) {
-        projectWorkspaces.firstOrNull { it.id == activeWorkspaceId }?.name ?: "Kein aktiver Workspace"
-    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshCloudSyncStatus()
     }
 
-    AlertDialog(
-        onDismissRequest = {
-            stopVoicePreview()
-            onDismiss()
-        },
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Einstellungen", fontWeight = FontWeight.Bold)
-                Text(
-                    "Design, Modelle, Privatsphäre und Workspaces auf einen Blick",
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.66f)
-                )
-            }
-        },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 500.dp)
-                    .imePadding()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                SettingsOverviewCard(
-                    planLabel = MonetizationConfig.PlanTier.fromKey(subscriptionTier).label,
-                    creditsBalance = creditsBalance,
-                    providerLabel = aiProvider,
-                    workspaceLabel = activeWorkspaceLabel,
-                    syncStatus = cloudSyncStatusText,
-                    premiumActive = isPremiumActive,
-                    billingReady = billingReady
-                )
+    // Disposal stops an active preview only; navigation must not interrupt idle/chat audio.
+    BackHandler(onBack = onDismiss)
 
+    Scaffold(
+        modifier = Modifier.fillMaxSize().testTag("settings_detail_screen").imePadding(),
+        contentWindowInsets = WindowInsets.safeDrawing,
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text("Einstellungen") },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("settings_detail_back")
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Zurück")
+                    }
+                }
+            )
+        }
+    ) { contentPadding ->
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag("settings_detail_list")
+        ) {
                 SettingsSection("Allgemein", expandedSection == "general", onClick = { expandedSection = if (expandedSection == "general") null else "general" }) {
                     SettingRow("Fingerabdruck-Sperre", "App beim Start sichern") {
                         Switch(checked = isBiometricEnabled, onCheckedChange = { viewModel.setBiometricEnabled(it) })
@@ -1688,12 +1687,8 @@ fun SettingsDialog(
                         )
                     }
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Fertig") }
         }
-    )
+    }
 
     // P0-2: confirmation dialog for workspace deletion
     workspacePendingDelete?.let { target ->
@@ -1717,121 +1712,6 @@ fun SettingsDialog(
                 TextButton(onClick = { workspacePendingDelete = null }) { Text("Abbrechen") }
             }
         )
-    }
-}
-
-@Composable
-private fun SettingsOverviewCard(
-    planLabel: String,
-    creditsBalance: Int,
-    providerLabel: String,
-    workspaceLabel: String,
-    syncStatus: String,
-    premiumActive: Boolean,
-    billingReady: Boolean
-) {
-    val statusLabel = when {
-        premiumActive -> "Premium aktiv"
-        billingReady -> "Billing bereit"
-        else -> "Free-Plan"
-    }
-    val statusColor = when {
-        premiumActive -> Color(0xFF67E2AE)
-        billingReady -> Color(0xFFFFD166)
-        else -> Color.White.copy(alpha = 0.7f)
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.62f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Schnellüberblick", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    Text(
-                        "Kontostatus, Provider und Sync auf einen Blick.",
-                        fontSize = 11.sp,
-                        color = Color.White.copy(alpha = 0.66f)
-                    )
-                }
-                Surface(
-                    shape = RoundedCornerShape(999.dp),
-                    color = statusColor.copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, statusColor.copy(alpha = 0.22f))
-                ) {
-                    Text(
-                        statusLabel,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        color = statusColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item {
-                    SettingsSummaryChip("Plan", planLabel)
-                }
-                item {
-                    SettingsSummaryChip("Credits", creditsBalance.toString())
-                }
-                item {
-                    SettingsSummaryChip("Provider", providerLabel)
-                }
-                item {
-                    SettingsSummaryChip("Workspace", workspaceLabel)
-                }
-            }
-
-            Text(
-                syncStatus,
-                fontSize = 10.sp,
-                color = Color.White.copy(alpha = 0.62f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingsSummaryChip(label: String, value: String) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color.White.copy(alpha = 0.05f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(min = 92.dp, max = 150.dp)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = label,
-                fontSize = 10.sp,
-                color = Color.White.copy(alpha = 0.6f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = value,
-                fontSize = 12.sp,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
     }
 }
 
@@ -1915,8 +1795,13 @@ private fun VoicePrivacyCard(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun SettingsSection(title: String, expanded: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val headingRequester = remember { BringIntoViewRequester() }
+    LaunchedEffect(expanded) {
+        if (expanded) headingRequester.bringIntoView()
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1927,6 +1812,7 @@ private fun SettingsSection(title: String, expanded: Boolean, onClick: () -> Uni
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .bringIntoViewRequester(headingRequester)
                     .clickable { onClick() }
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
