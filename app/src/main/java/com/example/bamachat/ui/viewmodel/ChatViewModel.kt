@@ -21,6 +21,7 @@ import com.example.bamachat.service.KnowledgeService
 import com.example.bamachat.service.MediaService
 import com.example.bamachat.service.NotificationService
 import com.example.bamachat.service.UserFacingAiErrorMapper
+import com.example.bamachat.data.provider.chat.LegacyOllamaGuard
 import com.example.bamachat.data.provider.chat.ActiveChatProviderResolution
 import com.example.bamachat.data.provider.chat.ActiveChatProviderResolver
 import com.example.bamachat.data.provider.chat.ActiveChatProviderSelection
@@ -751,8 +752,17 @@ class ChatViewModel @Inject constructor(
         _isLoading.value = false
     }
 
+    private fun blockIncompleteOllamaSelection(): Boolean {
+        if (!LegacyOllamaGuard.blocksSelection(
+                prefs.getString("ai_provider", null), chatProviderSelectionStore.selection.value
+            )) return false
+        publishError(LegacyOllamaGuard.MESSAGE, retryable = false, actionLabel = null)
+        return true
+    }
+
     // ===== Message Sending =====
     fun sendMessage(text: String, quickAction: ExtensionQuickAction = _selectedExtensionQuickAction.value): Boolean {
+        if (blockIncompleteOllamaSelection()) return false
         val trimmedText = text.trim()
         if (trimmedText.isBlank()) return false
         if (_isLoading.value || _isStreaming.value) return false
@@ -854,6 +864,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendMessageWithImage(text: String, imageUri: Uri): Boolean {
+        if (blockIncompleteOllamaSelection()) return false
         if (_isLoading.value || _isStreaming.value) return false
         if (chatProviderSelectionStore.selection.value is ActiveChatProviderSelection.Custom) {
             publishError(
@@ -912,6 +923,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun generateImage(prompt: String, skipUserMessage: Boolean = false) {
+        if (blockIncompleteOllamaSelection()) return
         if (prompt.isBlank()) {
             _errorMessage.value = "Beschreibe zuerst, welches Bild du erstellen möchtest."
             return
@@ -966,6 +978,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun importAdvancedMultimodalAsset(uri: Uri) {
+        if (blockIncompleteOllamaSelection()) return
         viewModelScope.launch {
             try {
                 val groqKey = SecureSettingsStore.getString(appContext, prefs, "groq_api_key")
@@ -992,6 +1005,7 @@ class ChatViewModel @Inject constructor(
         runtimeContext: String? = null,
         extensionRuntime: ChatEngine.ExtensionRuntime? = null
     ) {
+        if (blockIncompleteOllamaSelection()) return
         if (!hasActiveInternetConnection()) {
             val networkError = com.example.bamachat.util.ErrorRecoveryManager
                 .mapErrorToUserMessage(java.io.IOException("No network"))

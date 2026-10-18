@@ -24,6 +24,7 @@ import com.example.bamachat.ui.component.settings.SettingsNavigationRow
 import com.example.bamachat.ui.component.settings.SettingsSectionTitle
 import com.example.bamachat.ui.component.settings.SettingsTopBar
 import com.example.bamachat.ui.component.settings.settingsScreenContentPadding
+import com.example.bamachat.data.provider.chat.LegacyOllamaGuard
 import com.example.bamachat.ui.viewmodel.SettingsViewModel
 import com.example.bamachat.ui.viewmodel.ChatProviderSelectionViewModel
 
@@ -37,13 +38,15 @@ fun AiModelSettingsScreen(
     chatProviderViewModel: ChatProviderSelectionViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val provider by settingsViewModel.aiProvider.collectAsStateWithLifecycle()
+    val multiProvider by settingsViewModel.multiProviderEnabled.collectAsStateWithLifecycle()
     val openRouterModel by settingsViewModel.selectedOpenRouterModel.collectAsStateWithLifecycle()
     val openCodeModel by settingsViewModel.openCodeModel.collectAsStateWithLifecycle()
     val chatProviderState by chatProviderViewModel.uiState.collectAsStateWithLifecycle()
     val model = when (provider) {
         "OpenRouter" -> openRouterModel
         "OpenCode" -> openCodeModel
-        else -> "Anbieterspezifische Auswahl"
+        "Ollama" -> "Noch nicht eingerichtet"
+        else -> "Vom Anbieter vorgegeben"
     }
 
     Scaffold(
@@ -72,12 +75,22 @@ fun AiModelSettingsScreen(
             }
             item {
                 SettingsInfoCard(
-                    text = "Aktiver Anbieter: $provider\nAktuelles Modell: $model"
+                    text = if (chatProviderState.legacySelected && provider == "Ollama") {
+                        LegacyOllamaGuard.MESSAGE
+                    } else if (chatProviderState.legacySelected) {
+                        if (multiProvider) {
+                            "BamaFlow Standard: automatischer Anbieterwechsel aktiv. Anbieter und Modell richten sich nach den eingerichteten Zugängen. Verbindung nicht geprüft."
+                        } else {
+                            "Standard-Konfiguration: $provider\nHinterlegtes Modell: $model\nVerbindung nicht geprüft."
+                        }
+                    } else {
+                        "Chat-Auswahl: ${chatProviderState.summary}\nVerbindung nicht geprüft."
+                    }
                 )
             }
             item {
                 SettingsInfoCard(
-                    text = "Eigene Anbieter können für neue Textanfragen ausgewählt werden. Legacy-Anbieter und ihre Fallbacks bleiben unverändert.",
+                    text = "BamaFlow Standard verwendet die bisherigen Einstellungen. Eigene Anbieter verwenden die ausdrücklich ausgewählte Verbindung und das gewählte Modell.",
                     accent = MaterialTheme.colorScheme.tertiary
                 )
             }
@@ -93,8 +106,8 @@ fun AiModelSettingsScreen(
             }
             item {
                 SettingsNavigationRow(
-                    title = "Bisherige KI-Einstellungen",
-                    description = "Produktiven Anbieter, Modell und bestehende Zugangsdaten verwalten",
+                    title = "Erweiterte Standard-Einstellungen",
+                    description = "Standard-Anbieter, automatischen Wechsel und weitere technische Optionen verwalten",
                     icon = Icons.Default.Settings,
                     onClick = onOpenLegacySettings
                 )
