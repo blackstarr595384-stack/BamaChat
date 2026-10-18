@@ -7,6 +7,7 @@ import android.util.Base64
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bamachat.data.provider.chat.LegacyOllamaGuard
 import com.example.bamachat.data.ApiClient
 import com.example.bamachat.data.OpenCodeZenMessage
 import com.example.bamachat.data.OpenCodeZenRequest
@@ -128,6 +129,7 @@ class ApiManager(
         onChunkReceived: (String) -> Unit,
         onError: (String) -> Unit
     ): ApiResponse {
+        if (legacyOllamaBlocked()) return ApiResponse(false, error = LegacyOllamaGuard.MESSAGE, retryable = false)
         val providers = buildProviderFallbackList()
         var lastError = ""
 
@@ -172,6 +174,7 @@ class ApiManager(
         systemPrompt: String,
         userPrompt: String
     ): ApiResponse {
+        if (legacyOllamaBlocked()) return ApiResponse(false, error = LegacyOllamaGuard.MESSAGE, retryable = false)
         val providers = buildProviderFallbackList()
         var lastError = ""
 
@@ -201,6 +204,7 @@ class ApiManager(
         request: OpenRouterChatRequest,
         systemPrompt: String
     ): OpenRouterChatResponse? {
+        if (legacyOllamaBlocked()) return null
         val providers = buildProviderFallbackList()
         var lastError: String? = null
         for (config in providers) {
@@ -278,6 +282,7 @@ class ApiManager(
         userText: String,
         imageDataUrl: String
     ): ApiResponse {
+        if (legacyOllamaBlocked()) return ApiResponse(false, error = LegacyOllamaGuard.MESSAGE, retryable = false)
         val openRouterKey = getApiKeyForProvider(ApiClient.Provider.OPENROUTER)
         val geminiKey = secureString("gemini_api_key").takeIf { it.isNotBlank() }
 
@@ -305,6 +310,7 @@ class ApiManager(
     }
 
     fun shouldUseLiveWebResearch(userText: String): Boolean {
+        if (legacyOllamaBlocked()) return false
         if (!prefs.getBoolean(KEY_LIVE_WEB_ENABLED, false)) return false
         val lower = userText.lowercase(Locale.getDefault())
         if (lower.contains("web:")) return true
@@ -318,6 +324,7 @@ class ApiManager(
     }
 
     suspend fun runLiveWebResearch(query: String): WebResearchResult {
+        if (legacyOllamaBlocked()) return WebResearchResult(false, query, error = LegacyOllamaGuard.MESSAGE, retryable = false)
         val cleanedQuery = query.replace(Regex("\\s+"), " ").trim()
         if (cleanedQuery.isBlank()) {
             return WebResearchResult(
@@ -1036,7 +1043,11 @@ class ApiManager(
 
     // ===== Hilfsfunktionen =====
 
-    private fun buildProviderFallbackList(): List<ProviderConfig> {
+    private fun legacyOllamaBlocked(): Boolean =
+        LegacyOllamaGuard.blocksStandardChat(prefs.getString("ai_provider", null))
+
+    internal fun buildProviderFallbackList(): List<ProviderConfig> {
+        if (legacyOllamaBlocked()) return emptyList()
         val multiEnabled = prefs.getBoolean("multi_provider", true)
 
         val cerebrasKey = getApiKeyForProvider(ApiClient.Provider.CEREBRAS)

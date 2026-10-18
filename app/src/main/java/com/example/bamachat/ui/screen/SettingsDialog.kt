@@ -1088,7 +1088,7 @@ fun SettingsDialog(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Icon(Icons.Default.CloudOff, null, tint = if (aiProvider == "Ollama") Color(0xFF43C6AC) else Color.White.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
-                                    Text("Ollama Offline-Modus", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color.White)
+                                    Text("Ollama-Konfiguration", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color.White)
                                 }
                                 Switch(
                                     checked = aiProvider == "Ollama",
@@ -1101,13 +1101,13 @@ fun SettingsDialog(
                             }
                             if (aiProvider == "Ollama") {
                                 Text(
-                                    "Aktiv - alle Anfragen laufen lokal über Ollama",
+                                    "Einrichtung unvollständig: Ollama und Modell unter Anbieter verwalten einrichten. Standard-Chat ist gesperrt.",
                                     fontSize = 11.sp,
                                     color = Color(0xFF43C6AC)
                                 )
                             } else {
                                 Text(
-                                    "Inaktiv - Cloud-Provider werden genutzt",
+                                    "Ollama ist hier nicht ausgewählt. Die Chat-Auswahl erfolgt unter KI und Modelle.",
                                     fontSize = 11.sp,
                                     color = Color.White.copy(alpha = 0.5f)
                                 )
@@ -1191,9 +1191,9 @@ fun SettingsDialog(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Auto-Fallback", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                Text("Bei Fehler automatisch nächsten Anbieter probieren", style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+                                Text(if (aiProvider == "Ollama") "Bei dieser Ollama-Auswahl gesperrt; kein Cloud-Wechsel." else "Bei Fehler automatisch nächsten Anbieter probieren", style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
                             }
-                            Switch(checked = multiProvider, onCheckedChange = { viewModel.setMultiProviderEnabled(it) }, modifier = Modifier.scale(0.85f))
+                            Switch(checked = multiProvider, enabled = aiProvider != "Ollama", onCheckedChange = { viewModel.setMultiProviderEnabled(it) }, modifier = Modifier.scale(0.85f))
                         }
                     }
 
